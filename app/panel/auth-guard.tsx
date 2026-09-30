@@ -1,0 +1,56 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { createSupabaseBrowserClient } from "@/lib/supabase";
+
+export function AuthGuard({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  const [isReady, setIsReady] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    const supabase = createSupabaseBrowserClient();
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!isMounted) {
+        return;
+      }
+
+      if (!data.session) {
+        router.replace("/login");
+        return;
+      }
+
+      setIsReady(true);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session) {
+        router.replace("/login");
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, [router]);
+
+  if (!isReady) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-[#0d1117] px-5 text-center text-white">
+        <div>
+          <p className="text-sm font-black uppercase tracking-[0.24em] text-[#ff8a3d]">
+            Sprawdzam dostep
+          </p>
+          <p className="mt-3 text-2xl font-black">Laduje panel...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return children;
+}
