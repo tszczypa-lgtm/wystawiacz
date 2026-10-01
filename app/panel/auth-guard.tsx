@@ -7,22 +7,29 @@ import { createSupabaseBrowserClient } from "@/lib/supabase";
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [isReady, setIsReady] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     let isMounted = true;
     const supabase = createSupabaseBrowserClient();
 
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(({ data, error }) => {
       if (!isMounted) {
         return;
       }
 
+      if (error) {
+        setError(error.message);
+        return;
+      }
       if (!data.session) {
         router.replace("/login");
         return;
       }
 
       setIsReady(true);
+    }).catch((error) => {
+      if (isMounted) setError(error instanceof Error ? error.message : "Nie udało się sprawdzić logowania.");
     });
 
     const {
@@ -46,7 +53,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
           <p className="text-sm font-black uppercase tracking-[0.24em] text-[#ff8a3d]">
             Sprawdzam dostep
           </p>
-          <p className="mt-3 text-2xl font-black">Laduje panel...</p>
+          <p className="mt-3 text-2xl font-black">{error || "Ładuję panel..."}</p>
         </div>
       </div>
     );

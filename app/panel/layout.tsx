@@ -41,7 +41,7 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
 
             <div className="mt-8 rounded-2xl border border-emerald-300/20 bg-emerald-300/10 p-4">
               <Store className="mb-3 h-5 w-5 text-emerald-300" />
-              <p className="text-sm font-black text-emerald-100">Plan Pro aktywny</p>
+              <p className="text-sm font-black text-emerald-100">Wersja robocza</p>
               <p className="mt-1 text-xs leading-5 text-emerald-100/65">
                 Na razie panel sprawdza logowanie. Abonament podlaczymy po Stripe.
               </p>
