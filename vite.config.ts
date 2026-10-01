@@ -68,7 +68,14 @@ export default defineConfig(async ({ command }) => {
         viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
         inspectorPort: false,
         config: {
-          ...localBindingConfig,
+          ...(command === "serve"
+            ? localBindingConfig
+            : {
+                main: "./build/sites-worker.ts",
+                compatibility_flags: ["nodejs_compat"],
+              }),
+          name: "wystawiacz",
+          workers_dev: true,
           ...(command === "serve"
             ? {
                 services: [
