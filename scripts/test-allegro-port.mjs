@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import ts from "typescript";
+import vm from "node:vm";
 
 const source = await readFile(new URL("../lib/allegro-api.ts", import.meta.url), "utf8");
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -110,6 +111,35 @@ try {
 
 const html = await readFile(new URL("../public/wystawiacz/index.html", import.meta.url), "utf8");
 const app = await readFile(new URL("../public/wystawiacz/app.js", import.meta.url), "utf8");
+const ast = ts.createSourceFile("app.js", app, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+const automaticFunctions = ast.statements.filter(ts.isFunctionDeclaration).map(fn => fn.getText(ast)).join("\n");
+const offline = vm.createContext({
+  state: { appendedPartNumber: "", vehicles: [{ id: "golf", full: "Volkswagen Golf VII" }], selectedVehicleId: "golf", descriptionManuallyEdited: false, requiredParameters: [], parameterValues: {} },
+  partNumber: { value: "5G0907044G" }, titleInput: { value: "" }, partNumberHint: { textContent: "" },
+  suggestionPanel: { classList: { remove() {} } }, summaryCard: { classList: { remove() {} } },
+});
+vm.runInContext(automaticFunctions, offline);
+vm.runInContext("updateSummary = () => {}; scheduleAllegroCategoryLookup = () => {};", offline);
+vm.runInContext("appendPartNumberToTitle(); updatePartNumberHint();", offline);
+assert.equal(offline.titleInput.value, "", "A part number alone must not invent a title");
+assert.ok(offline.partNumberHint.textContent.includes("Teraz wpisz nazwę części"));
+offline.titleInput.value = "Panel klimatyzacji VW Golf";
+vm.runInContext("appendPartNumberToTitle(); appendPartNumberToTitle(); updateAutomaticDescriptionText();", offline);
+assert.equal(offline.titleInput.value, "Panel klimatyzacji VW Golf 5G0907044G");
+assert.ok(offline.state.descriptionText.includes("Pasuje do: Volkswagen Golf VII"));
+offline.state.descriptionManuallyEdited = true;
+offline.state.descriptionText = "Własny opis";
+vm.runInContext("updateAutomaticDescriptionText();", offline);
+assert.equal(offline.state.descriptionText, "Własny opis");
+offline.state.requiredParameters = [{ id: "condition", name: "Stan", type: "dictionary", dictionary: [{ id: "used", value: "Używany" }] }];
+vm.runInContext('applyAutomaticParameterValues("Volkswagen");', offline);
+assert.equal(offline.state.parameterValues.condition, "used");
+const dashboard = await readFile(new URL("../app/panel/page.tsx", import.meta.url), "utf8");
+const offers = await readFile(new URL("../app/panel/offers/page.tsx", import.meta.url), "utf8");
+assert.ok(dashboard.includes('href="/panel/offers"'));
+assert.ok(!dashboard.includes("<OriginalWystawiacz"));
+assert.ok(offers.includes("<OriginalWystawiacz"));
+console.log("Offline automatics: number/title, description, manual edits and condition passed; account and offers routes separated.");
 for (const match of app.matchAll(/document\.querySelector\("#([^\"]+)"\)/g)) assert.ok(html.includes(`id="${match[1]}"`), match[1]);
 assert.ok(app.includes('confirm(`Wystawić tę jedną aukcję'));
 assert.ok(!html.includes("clientSecretInput"));

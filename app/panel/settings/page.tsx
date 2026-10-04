@@ -1,21 +1,23 @@
 import { Building2, MapPin, Users } from "lucide-react";
 import { getSupabasePublicConfig } from "@/lib/supabase";
+import { AccountShell } from "../account-shell";
+import { AccountDetails } from "../account-details";
 
 export default function SettingsPage() {
   const supabase = getSupabasePublicConfig();
 
   return (
-    <div className="grid gap-5">
+    <AccountShell active="/panel/settings"><div className="grid gap-5">
       <header className="rounded-[1.7rem] border border-white/10 bg-white/[.055] p-6">
         <p className="text-sm font-black uppercase tracking-[.18em] text-[#ff8a3d]">
           Ustawienia firmy
         </p>
         <h1 className="mt-2 text-3xl font-black tracking-tight md:text-4xl">
-          Dane wspólne dla całego konta.
+          Ustawienia konta
         </h1>
+        <AccountDetails />
         <p className="mt-2 max-w-3xl text-white/60">
-          Tu trafią ustawienia lokalizacji, użytkowników, domyślnych opisów,
-          modeli aut i zasad wystawiania.
+          Lokalizację ofert i auta ustawisz w Wystawiaczu. Zarządzanie firmą i pracownikami poniżej to planowane funkcje, jeszcze nieaktywne.
         </p>
       </header>
 
@@ -55,6 +57,6 @@ export default function SettingsPage() {
           </p>
         </div>
       </section>
-    </div>
+    </div></AccountShell>
   );
 }

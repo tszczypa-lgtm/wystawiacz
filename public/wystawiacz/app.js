@@ -52,6 +52,7 @@ const addVehicleButton = document.querySelector("#addVehicleButton");
 const vehicleList = document.querySelector("#vehicleList");
 const vehicleButtons = document.querySelector("#vehicleButtons");
 const partNumber = document.querySelector("#partNumber");
+const partNumberHint = document.querySelector("#partNumberHint");
 const suggestionPanel = document.querySelector("#suggestionPanel");
 const titleInput = document.querySelector("#titleInput");
 const summaryCard = document.querySelector("#summaryCard");
@@ -268,6 +269,7 @@ previousProductButton.addEventListener("click", () => navigateProduct(-1));
 nextProductButton.addEventListener("click", () => navigateProduct(1));
 
 titleInput.addEventListener("input", () => {
+  updatePartNumberHint();
   updateSummary();
   summaryCard.classList.toggle("hidden", !titleInput.value.trim());
   suggestionPanel.classList.toggle("hidden", !titleInput.value.trim());
@@ -277,7 +279,14 @@ titleInput.addEventListener("blur", appendPartNumberToTitle);
 partNumber.addEventListener("input", () => {
   appendPartNumberToTitle();
   detectProductDetails();
+  updatePartNumberHint();
 });
+
+function updatePartNumberHint() {
+  partNumberHint.textContent = partNumber.value.trim() && !titleInput.value.trim()
+    ? "Numer wpisany. Teraz wpisz nazwę części w tytule (np. Przełącznik szyb). Numer dopiszemy automatycznie; sam numer nie rozpoznaje produktu."
+    : "Numer dopiszemy do tytułu. Sam numer nie rozpoznaje nazwy części ani zdjęć.";
+}
 
 categorySearchButton.addEventListener("click", () => {
   categoryLocked = false;
@@ -943,7 +952,7 @@ async function checkConnectionStatus() {
   try {
     const result = await apiRequest("/api/health");
     if (!compatibleServerBuilds.includes(result.build)) {
-      connectionDescription.textContent = "Uruchom ponownie program przez start.cmd. Działa starsza wersja lokalnego pomocnika.";
+      connectionDescription.textContent = "Wersja serwera nie pasuje do Wystawiacza. Odśwież stronę lub zgłoś problem administratorowi.";
       return;
     }
     if (!result.connected) return;

@@ -27,7 +27,7 @@
           <p class="eyebrow">PROSTE WYSTAWIANIE</p>
           <h1>Dodaj produkt</h1>
           <p class="hero-copy">
-            Wybierz zdjęcia i wpisz numer części. Resztę przygotujemy w tle.
+            Wybierz zdjęcia, wpisz nazwę części i jej numer. Opis przygotujemy lokalnie; kategorie i parametry pobierzemy po połączeniu Allegro.
           </p>
         </div>
         <div class="step-indicator" aria-label="Krok 1 z 3">
@@ -44,7 +44,7 @@
           <p class="card-kicker">POŁĄCZENIE Z ALLEGRO</p>
           <h2 id="connectionTitle">Konto nie jest jeszcze połączone</h2>
           <p id="connectionDescription">
-            Połącz konto, aby pobrać prawdziwe kategorie i cenniki dostawy. Program działa tylko w trybie odczytu.
+            Bez połączenia możesz przygotować zdjęcia, tytuł, opis i listę produktów. Kategorie, parametry, wysyłka i publikacja wymagają konta Allegro.
           </p>
         </div>
         <div class="connection-actions">
@@ -199,7 +199,8 @@
 
           <label class="field">
             <span>Numer części</span>
-            <input id="partNumber" type="text" placeholder="np. 5Q0959857" />
+            <input id="partNumber" type="text" placeholder="np. 5Q0959857" aria-describedby="partNumberHint" />
+            <small id="partNumberHint" role="status">Numer dopiszemy do tytułu. Sam numer nie rozpoznaje nazwy części ani zdjęć.</small>
           </label>
 
           <label class="field">
