@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Wystawiacz Allegro</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">A</span>
+        <div>
+          <strong>Wystawiacz</strong>
+          <small>Asystent ofert Allegro</small>
+        </div>
+      </div>
+      <button class="account-button" type="button">
+        <span class="status-dot"></span>
+        Tryb tylko do odczytu
+      </button>
+    </header>
+
+    <main class="page-shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">PROSTE WYSTAWIANIE</p>
+          <h1>Dodaj produkt</h1>
+          <p class="hero-copy">
+            Wybierz zdjęcia i wpisz numer części. Resztę przygotujemy w tle.
+          </p>
+        </div>
+        <div class="step-indicator" aria-label="Krok 1 z 3">
+          <span class="step active">1</span>
+          <span class="step-line"></span>
+          <span class="step">2</span>
+          <span class="step-line"></span>
+          <span class="step">3</span>
+        </div>
+      </section>
+
+      <section class="connection-card">
+        <div>
+          <p class="card-kicker">POŁĄCZENIE Z ALLEGRO</p>
+          <h2 id="connectionTitle">Konto nie jest jeszcze połączone</h2>
+          <p id="connectionDescription">
+            Połącz konto, aby pobrać prawdziwe kategorie i cenniki dostawy. Program działa tylko w trybie odczytu.
+          </p>
+        </div>
+        <div class="connection-actions">
+          <button class="primary-button compact-button" id="connectButton" type="button">
+            Połącz z Allegro
+          </button>
+          <button class="secondary-button compact-button hidden" id="disconnectButton" type="button">
+            Przełącz konto
+          </button>
+        </div>
+      </section>
+
+      <section class="session-card">
+        <div>
+          <p class="card-kicker">PLIK ROBOCZY</p>
+          <h2>Sesja produktów</h2>
+          <p>Zapisz listę do pliku i przekaż ją drugiej osobie. Zdjęcia połączą się ponownie po nazwach plików.</p>
+        </div>
+        <div class="session-actions">
+          <input id="sessionNameInput" class="session-name" type="text" placeholder="np. październik 2026" />
+          <button class="secondary-button" id="saveSessionButton" type="button">Zapisz sesję</button>
+          <label class="secondary-button file-button" for="loadSessionInput">
+            Otwórz sesję
+            <input id="loadSessionInput" type="file" accept=".json,application/json" />
+          </label>
+          <label class="secondary-button file-button" for="relinkFolderInput">
+            Wskaż folder zdjęć
+            <input id="relinkFolderInput" type="file" accept="image/*" webkitdirectory directory multiple />
+          </label>
+          <button class="secondary-button" id="locationSettingsButton" type="button">Ustaw lokalizację</button>
+        </div>
+        <small id="sessionStatus">Folder zdjęć dla sesji nie jest jeszcze wskazany.</small>
+      </section>
+
+      <section class="vehicles-card">
+        <div>
+          <p class="card-kicker">AUTA Z TEJ SESJI</p>
+          <h2>Pomocnicza lista modeli</h2>
+          <p>Dodaj auta przed pracą. Krótka nazwa trafi do tytułu, a pełna informacja do opisu aukcji.</p>
+        </div>
+        <div class="vehicle-form">
+          <input id="vehicleManufacturerInput" type="text" list="vehicleManufacturerOptions" placeholder="Producent OE, np. Volkswagen" />
+          <datalist id="vehicleManufacturerOptions">
+            <option value="Volkswagen"></option>
+            <option value="Audi"></option>
+            <option value="Skoda"></option>
+            <option value="Seat"></option>
+            <option value="BMW"></option>
+            <option value="Mercedes-Benz"></option>
+            <option value="Opel"></option>
+            <option value="Ford"></option>
+            <option value="Renault"></option>
+            <option value="Peugeot"></option>
+            <option value="Citroen"></option>
+            <option value="Fiat"></option>
+            <option value="Toyota"></option>
+            <option value="Volvo"></option>
+            <option value="Nissan"></option>
+            <option value="Hyundai"></option>
+            <option value="Kia"></option>
+            <option value="Honda"></option>
+            <option value="Mazda"></option>
+            <option value="Alfa Romeo"></option>
+            <option value="Aston Martin"></option>
+            <option value="Bentley"></option>
+            <option value="Chevrolet"></option>
+            <option value="Chrysler"></option>
+            <option value="Cupra"></option>
+            <option value="Dacia"></option>
+            <option value="Daewoo"></option>
+            <option value="Daihatsu"></option>
+            <option value="Dodge"></option>
+            <option value="DS"></option>
+            <option value="Ferrari"></option>
+            <option value="Infiniti"></option>
+            <option value="Isuzu"></option>
+            <option value="Iveco"></option>
+            <option value="Jaguar"></option>
+            <option value="Jeep"></option>
+            <option value="Lancia"></option>
+            <option value="Land Rover"></option>
+            <option value="Lexus"></option>
+            <option value="Maserati"></option>
+            <option value="Mini"></option>
+            <option value="Mitsubishi"></option>
+            <option value="Porsche"></option>
+            <option value="Saab"></option>
+            <option value="Smart"></option>
+            <option value="SsangYong"></option>
+            <option value="Subaru"></option>
+            <option value="Suzuki"></option>
+            <option value="Tesla"></option>
+            <option value="Vauxhall"></option>
+          </datalist>
+          <input id="vehicleShortInput" type="text" placeholder="Skrót, np. VW Golf VII 5G0" />
+          <input id="vehicleFullInput" type="text" placeholder="Pełny opis, np. Volkswagen Golf Variant VII 5G0 1.6 TDI 2019 rok" />
+          <button id="addVehicleButton" class="secondary-button" type="button">Dodaj auto</button>
+        </div>
+        <div class="vehicle-list" id="vehicleList"></div>
+      </section>
+
+      <section class="workspace-grid">
+        <article class="card photos-card">
+          <div class="card-heading">
+            <div>
+              <p class="card-kicker">KROK 1</p>
+              <h2>Zdjęcia produktu</h2>
+            </div>
+            <span class="counter" id="photoCounter">0 zdjęć</span>
+          </div>
+          <div class="photo-browser-empty" id="photoBrowserEmpty">
+            <strong>Najpierw wskaż folder zdjęć dla sesji</strong>
+            <span>Potem wygodnie zaznaczysz zdjęcia kolejnych aukcji.</span>
+            <label class="secondary-button file-button" for="relinkFolderInput">Wskaż folder zdjęć</label>
+          </div>
+          <div class="photo-browser hidden" id="photoBrowser">
+            <div class="photo-preview">
+              <img id="photoPreview" alt="Powiększony podgląd zdjęcia" />
+              <div class="photo-preview-caption">
+                <span id="photoPreviewName"></span>
+                <strong id="mainPhotoStatus"></strong>
+              </div>
+            </div>
+            <div class="photo-controls">
+              <button id="previousPhotoButton" class="secondary-button" type="button">Poprzednie zdjęcie</button>
+              <button id="togglePhotoButton" class="primary-button compact-button" type="button">Zaznacz zdjęcie</button>
+              <button id="mainPhotoButton" class="secondary-button" type="button">Ustaw jako główne</button>
+              <button id="nextPhotoButton" class="secondary-button" type="button">Następne zdjęcie</button>
+            </div>
+            <p class="gallery-hint">
+              Klikaj miniatury, aby dodać lub usunąć zdjęcia bieżącej aukcji. Pierwsze zaznaczone zdjęcie będzie główne.
+            </p>
+            <div class="photo-grid" id="photoGrid"></div>
+          </div>
+          <div class="folder-summary hidden" id="folderSummary">
+            <div>
+              <strong>Wybrane zdjęcia produktu</strong>
+              <span id="folderDetails"></span>
+            </div>
+            <button class="text-button" id="clearSelectionButton" type="button">Usuń wybór</button>
+          </div>
+        </article>
+
+        <article class="card details-card">
+          <div class="card-heading">
+            <div>
+              <p class="card-kicker">KROK 2</p>
+              <h2>Podstawowe dane</h2>
+            </div>
+            <span class="auto-badge">AUTO</span>
+          </div>
+
+          <label class="field">
+            <span>Numer części</span>
+            <input id="partNumber" type="text" placeholder="np. 5Q0959857" />
+          </label>
+
+          <label class="field">
+            <span>Tytuł aukcji</span>
+            <textarea id="titleInput" rows="3" placeholder="np. Przełącznik szyb Volkswagen Golf VII"></textarea>
+          </label>
+          <div class="vehicle-buttons-wrap">
+            <span>Dodaj model auta do tytułu:</span>
+            <div class="vehicle-buttons" id="vehicleButtons">
+              <small>Najpierw dodaj auta do listy sesji.</small>
+            </div>
+          </div>
+
+          <div class="suggestion-panel hidden" id="suggestionPanel">
+            <div class="suggestion-heading">
+              <span>Analiza tytułu</span>
+              <span class="magic-label">uzupełniona automatycznie</span>
+            </div>
+            <p class="helper-text">
+              Producent, numer katalogowy części i stan uzupełnią się automatycznie w parametrach Allegro.
+            </p>
+          </div>
+        </article>
+      </section>
+
+      <section class="card hidden" id="summaryCard">
+        <div class="card-heading">
+          <div>
+            <p class="card-kicker">KROK 3</p>
+            <h2>Sprawdź i dodaj</h2>
+          </div>
+          <span class="ready-badge">GOTOWE</span>
+        </div>
+        <div class="summary-grid">
+          <div class="summary-item">
+            <span>Tytuł oferty</span>
+            <strong id="summaryTitle"></strong>
+          </div>
+          <div class="summary-item">
+            <span>Kategoria Allegro</span>
+            <select id="categoryInput" class="summary-input">
+              <option value="">Wykryjemy z tytułu</option>
+            </select>
+            <div class="category-search">
+              <input id="categorySearchInput" class="summary-input" type="text" placeholder="Wyszukaj inną kategorię" />
+              <button id="categorySearchButton" class="text-button" type="button">Szukaj</button>
+            </div>
+            <button id="browseCategoriesButton" class="browse-button" type="button">Przeglądaj wszystkie kategorie</button>
+            <div id="categoryBrowser" class="category-browser hidden">
+              <button id="categoryBackButton" class="text-button hidden" type="button">← Wróć poziom wyżej</button>
+              <div id="categoryBrowserList" class="category-browser-list"></div>
+            </div>
+            <small class="category-status" id="categoryStatus">Lokalna podpowiedź</small>
+          </div>
+        </div>
+        <div class="parameters-panel hidden" id="parametersPanel">
+          <div class="parameters-heading">
+            <span>Parametry obowiązkowe Allegro</span>
+            <small id="parametersStatus"></small>
+          </div>
+          <div class="parameters-grid" id="parametersGrid"></div>
+        </div>
+        <div class="description-panel">
+          <div class="parameters-heading">
+            <span>Podgląd opisu aukcji</span>
+            <small>Opis utworzy się automatycznie ze zdjęcia głównego i tytułu.</small>
+          </div>
+          <div class="description-preview">
+            <div class="description-image-wrap">
+              <img id="descriptionPreviewImage" alt="Zdjęcie główne w opisie aukcji" />
+              <span id="descriptionMissingImage">Zaznacz zdjęcie główne</span>
+            </div>
+            <div class="description-copy">
+              <p id="descriptionPreviewTitle">Tytuł aukcji pojawi się tutaj</p>
+              <div id="descriptionPreviewText"></div>
+            </div>
+          </div>
+          <label class="field description-editor">
+            <span>Edytuj tekst opisu</span>
+            <textarea id="descriptionTextInput" rows="5"></textarea>
+          </label>
+        </div>
+        <div class="price-row">
+          <label class="field">
+            <span>Liczba sztuk</span>
+            <input id="stockInput" type="number" min="1" step="1" value="1" />
+          </label>
+          <label class="field shipping-field">
+            <span>Profil wysyłki Allegro</span>
+            <select id="shippingRateInput">
+              <option value="">Połącz konto, aby pobrać profile</option>
+            </select>
+          </label>
+        </div>
+        <div class="after-sales-row">
+          <label class="field">
+            <span>Warunki zwrotu Allegro</span>
+            <select id="returnPolicyInput">
+              <option value="">Połącz konto, aby pobrać szablony</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Warunki reklamacji Allegro</span>
+            <select id="impliedWarrantyInput">
+              <option value="">Połącz konto, aby pobrać szablony</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Gwarancja Allegro</span>
+            <select id="warrantyInput">
+              <option value="">Brak gwarancji</option>
+            </select>
+          </label>
+        </div>
+        <div class="search-actions">
+          <span>Sprawdź ceny i podobne oferty:</span>
+          <button id="searchAllegroPartButton" class="secondary-button" type="button">Allegro: numer części</button>
+          <button id="searchAllegroTitleButton" class="secondary-button" type="button">Allegro: tytuł bez numeru</button>
+          <button id="searchGooglePartButton" class="secondary-button" type="button">Google: numer części</button>
+        </div>
+        <div class="pricing-final-row">
+          <label class="field">
+            <span>Cena</span>
+            <div class="suffix-input">
+              <input id="priceInput" type="number" min="0" step="0.01" placeholder="uzupełni osoba wyceniająca" />
+              <b>PLN</b>
+            </div>
+          </label>
+        </div>
+        <div class="summary-actions">
+          <p>
+            Techniczne dane Allegro uzupełnimy automatycznie w tle.
+          </p>
+          <button class="primary-button" id="addButton" type="button">
+            Dodaj do listy
+          </button>
+        </div>
+      </section>
+
+      <section class="list-section">
+        <div class="list-header">
+          <div>
+            <p class="eyebrow">TWOJA LISTA</p>
+            <h2>Produkty do wystawienia</h2>
+          </div>
+          <div class="list-controls">
+            <button id="previousProductButton" class="secondary-button" type="button">Poprzednia aukcja</button>
+            <span id="activeProductLabel">Nowa aukcja</span>
+            <button id="nextProductButton" class="secondary-button" type="button">Następna aukcja</button>
+          </div>
+        </div>
+        <div class="empty-state" id="emptyState">
+          <strong>Lista jest jeszcze pusta</strong>
+          <span>Dodane produkty pojawią się tutaj.</span>
+        </div>
+        <div class="product-list" id="productList"></div>
+      </section>
+    </main>
+
+    <div class="toast" id="toast"></div>
+    <div class="modal hidden" id="locationModal">
+      <div class="modal-card">
+        <div class="modal-heading">
+          <div>
+            <p class="card-kicker">LOKALIZACJA OFERT</p>
+            <h2>Ustaw raz do wystawiania</h2>
+          </div>
+          <button class="close-button" id="closeLocationModalButton" type="button" aria-label="Zamknij">×</button>
+        </div>
+        <p class="modal-copy">Te dane program zapamięta i będzie podstawiał przy każdej aukcji.</p>
+        <label class="field">
+          <span>Miasto</span>
+          <input id="locationCityInput" type="text" placeholder="np. Żnin" />
+        </label>
+        <label class="field">
+          <span>Kod pocztowy</span>
+          <input id="locationPostCodeInput" type="text" placeholder="np. 88-400" />
+        </label>
+        <label class="field">
+          <span>Województwo</span>
+          <select id="locationProvinceInput">
+            <option value="DOLNOSLASKIE">dolnośląskie</option>
+            <option value="KUJAWSKO_POMORSKIE" selected>kujawsko-pomorskie</option>
+            <option value="LUBELSKIE">lubelskie</option>
+            <option value="LUBUSKIE">lubuskie</option>
+            <option value="LODZKIE">łódzkie</option>
+            <option value="MALOPOLSKIE">małopolskie</option>
+            <option value="MAZOWIECKIE">mazowieckie</option>
+            <option value="OPOLSKIE">opolskie</option>
+            <option value="PODKARPACKIE">podkarpackie</option>
+            <option value="PODLASKIE">podlaskie</option>
+            <option value="POMORSKIE">pomorskie</option>
+            <option value="SLASKIE">śląskie</option>
+            <option value="SWIETOKRZYSKIE">świętokrzyskie</option>
+            <option value="WARMINSKO_MAZURSKIE">warmińsko-mazurskie</option>
+            <option value="WIELKOPOLSKIE">wielkopolskie</option>
+            <option value="ZACHODNIOPOMORSKIE">zachodniopomorskie</option>
+          </select>
+        </label>
+        <button class="primary-button" id="saveLocationButton" type="button">Zapisz lokalizację</button>
+      </div>
+    </div>
+    <div class="modal hidden" id="connectionModal">
+      <div class="modal-card">
+        <div class="modal-heading">
+          <div>
+            <p class="card-kicker">TYLKO ODCZYT</p>
+            <h2>Połącz konto Allegro</h2>
+          </div>
+          <button class="close-button" id="closeModalButton" type="button" aria-label="Zamknij">×</button>
+        </div>
+        <div id="credentialsStep">
+          <p class="modal-copy">
+            Dane aplikacji zostaną przekazane przez HTTPS serwerowi Wystawiacza i serwerowi logowania Allegro. Zostaną zapisane w postaci zaszyfrowanej dla Twojego konta.
+          </p>
+          <label class="field">
+            <span>Client ID</span>
+            <input id="clientIdInput" type="text" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>Client Secret</span>
+            <input id="clientSecretInput" type="password" autocomplete="off" />
+          </label>
+          <button class="primary-button" id="startLoginButton" type="button">Rozpocznij logowanie</button>
+        </div>
+        <div class="hidden" id="deviceStep">
+          <p class="modal-copy">Otwórz stronę Allegro i wpisz poniższy kod:</p>
+          <div class="device-code" id="deviceCode"></div>
+          <a class="external-link" id="verificationLink" href="#" target="_blank" rel="noreferrer">Otwórz stronę logowania Allegro</a>
+          <p class="helper-text" id="loginStatus">Czekamy na potwierdzenie logowania...</p>
+        </div>
+      </div>
+    </div>
+    <script src="web-auth.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

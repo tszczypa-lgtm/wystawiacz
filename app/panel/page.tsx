@@ -1,5 +1,5 @@
-import { DraftList } from "./draft-list";
+import { OriginalWystawiacz } from "./original-wystawiacz";
 
 export default function PanelPage() {
-  return <DraftList />;
+  return <OriginalWystawiacz />;
 }
