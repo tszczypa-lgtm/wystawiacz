@@ -1,6 +1,9 @@
 type Env = {
   SUPABASE_SERVICE_ROLE_KEY?: string;
   ALLEGRO_ENCRYPTION_KEY?: string;
+  ALLEGRO_CLIENT_ID?: string;
+  ALLEGRO_CLIENT_SECRET?: string;
+  ALLEGRO_REDIRECT_URI?: string;
   NEXT_PUBLIC_SUPABASE_URL?: string;
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?: string;
 };
@@ -12,6 +15,8 @@ type Connection = {
   refreshToken?: string;
   expiresAt?: number;
 };
+type OAuthCookie = { owner: string; state: string; verifier: string; expiresAt: number; clientId: string; redirectUri: string };
+const oauthCookieName = "__Host-wystawiacz-oauth";
 type RemotePayload = {
   errors?: { userMessage?: string; message?: string }[];
   error_description?: string;
@@ -38,19 +43,65 @@ function bytes(value: string) { return Uint8Array.from(atob(value), character =>
 function json(value: unknown, status = 200) {
   return Response.json(value, { status, headers: { "Cache-Control": "no-store" } });
 }
+function base64url(value: Uint8Array) { return base64(value).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
+function cookie(value: string, age: number) { return `${oauthCookieName}=${encodeURIComponent(value)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${age}`; }
+async function encryptionKey(env: Env) {
+  if (!env.ALLEGRO_ENCRYPTION_KEY) throw new ApiError(503, "Brakuje klucza szyfrowania serwera.");
+  const raw = bytes(env.ALLEGRO_ENCRYPTION_KEY);
+  if (raw.length !== 32) throw new ApiError(503, "Nieprawidłowy klucz szyfrowania serwera.");
+  return crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+function appConfig(env: Env, origin: string) {
+  if (!env.ALLEGRO_CLIENT_ID || !env.ALLEGRO_CLIENT_SECRET || !env.ALLEGRO_REDIRECT_URI) throw new ApiError(503, "Administrator musi skonfigurować aplikację Allegro na serwerze. Użytkownik nie wpisuje kluczy.");
+  if (env.ALLEGRO_REDIRECT_URI !== `${origin}/api/allegro/auth/callback` || !origin.startsWith("https://")) throw new ApiError(503, "Nieprawidłowy adres powrotu Allegro w ustawieniach serwera.");
+  return { clientId: env.ALLEGRO_CLIENT_ID, clientSecret: env.ALLEGRO_CLIENT_SECRET, redirectUri: env.ALLEGRO_REDIRECT_URI };
+}
+function callbackPage(origin: string, ok: boolean) {
+  const nonce = crypto.randomUUID();
+  const message = ok ? "Konto Allegro połączone. Możesz wrócić do Wystawiacza." : "Nie udało się połączyć konta Allegro lub zgoda została anulowana. Wróć do Wystawiacza i spróbuj ponownie.";
+  return new Response(`<!doctype html><html lang="pl"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Połączenie Allegro</title><body><h1>${message}</h1><a href="/panel">Wróć do Wystawiacza</a><script nonce="${nonce}">if(window.opener){window.opener.postMessage({type:"wystawiacz-allegro-complete",ok:${ok}},${JSON.stringify(origin)});}window.close();</script></body></html>`, { status: ok ? 200 : 400, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "Set-Cookie": cookie("", 0), "Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'` } });
+}
 
-export async function sealConnection(value: Connection, key: CryptoKey, owner: string) {
+async function completeOAuth(request: Request, env: Env) {
+  const url = new URL(request.url);
+  try {
+    const config = appConfig(env, url.origin);
+    if (!env.SUPABASE_SERVICE_ROLE_KEY) throw new Error("Missing database configuration");
+    const encoded = request.headers.get("Cookie")?.split(";").map(part => part.trim()).find(part => part.startsWith(`${oauthCookieName}=`))?.slice(oauthCookieName.length + 1);
+    if (!encoded) throw new Error("Missing OAuth cookie");
+    const key = await encryptionKey(env);
+    const pending = await openConnection<OAuthCookie>(decodeURIComponent(encoded), key, "allegro-oauth");
+    if (!pending.owner || pending.expiresAt <= Date.now() || pending.state !== url.searchParams.get("state") || pending.clientId !== config.clientId || pending.redirectUri !== config.redirectUri || url.searchParams.has("error")) throw new Error("Invalid OAuth state");
+    const code = url.searchParams.get("code");
+    if (!code) throw new Error("Missing authorization code");
+    // Allegro requires client_id + verifier, not Basic authentication, for PKCE.
+    const response = await fetch(`${oauthBase}/token`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "authorization_code", client_id: config.clientId, code, redirect_uri: config.redirectUri, code_verifier: pending.verifier }) });
+    if (!response.ok) throw new Error("Token exchange rejected");
+    const tokens = await response.json() as RemotePayload;
+    if (!tokens.access_token || !tokens.refresh_token || !Number.isFinite(tokens.expires_in)) throw new Error("Invalid token response");
+    const sealed = await sealConnection({ clientId: config.clientId, clientSecret: "", accessToken: tokens.access_token, refreshToken: tokens.refresh_token, expiresAt: Date.now() + (tokens.expires_in - 60) * 1000 }, key, pending.owner);
+    const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL || "https://wgshalvkjfefavnbccil.supabase.co";
+    const saved = await fetch(`${supabaseUrl}/rest/v1/allegro_connections?on_conflict=owner_id`, { method: "POST", headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates" }, body: JSON.stringify({ owner_id: pending.owner, sealed, updated_at: new Date().toISOString() }) });
+    if (!saved.ok) throw new Error("Connection save failed");
+    return callbackPage(url.origin, true);
+  } catch {
+    return callbackPage(url.origin, false);
+  }
+}
+
+export async function sealConnection(value: unknown, key: CryptoKey, owner: string) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: utf8.encode(owner) }, key, utf8.encode(JSON.stringify(value)));
   return `${base64(iv)}.${base64(new Uint8Array(encrypted))}`;
 }
-export async function openConnection(value: string, key: CryptoKey, owner: string): Promise<Connection> {
+export async function openConnection<T = Connection>(value: string, key: CryptoKey, owner: string): Promise<T> {
   const [iv, encrypted] = value.split(".");
   const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv: bytes(iv), additionalData: utf8.encode(owner) }, key, bytes(encrypted));
   return JSON.parse(new TextDecoder().decode(decrypted));
 }
 
 export async function handleAllegroApi(request: Request, env: Env): Promise<Response> {
+  if (new URL(request.url).pathname === "/api/allegro/auth/callback" && request.method === "GET") return completeOAuth(request, env);
   try {
     const authorization = request.headers.get("Authorization");
     if (!authorization?.startsWith("Bearer ")) throw new ApiError(401, "Zaloguj się do Wystawiacza.");
@@ -63,9 +114,7 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
     if (!userResponse.ok) throw new ApiError(401, "Sesja wygasła. Zaloguj się ponownie.");
     const user = await userResponse.json() as { id: string };
     if (!user.id) throw new ApiError(401, "Nieprawidłowa sesja.");
-    const keyBytes = bytes(env.ALLEGRO_ENCRYPTION_KEY);
-    if (keyBytes.length !== 32) throw new ApiError(503, "Nieprawidłowy klucz szyfrowania serwera.");
-    const key = await crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, ["encrypt", "decrypt"]);
+    const key = await encryptionKey(env);
     const table = `${supabaseUrl}/rest/v1/allegro_connections`;
     const dbHeaders = { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" };
     async function db(path: string, options: RequestInit = {}) {
@@ -89,7 +138,8 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
       return payload;
     }
     async function oauth(path: string, values: Record<string, string>, current: Connection) {
-      return fetch(oauthBase + path, { method: "POST", headers: { Authorization: `Basic ${base64(utf8.encode(`${current.clientId}:${current.clientSecret}`))}`, "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(values) });
+      if (!env.ALLEGRO_CLIENT_SECRET || env.ALLEGRO_CLIENT_ID !== current.clientId) throw new ApiError(409, "Połącz konto ponownie z aplikacją Tymo Garage.");
+      return fetch(oauthBase + path, { method: "POST", headers: { Authorization: `Basic ${base64(utf8.encode(`${current.clientId}:${env.ALLEGRO_CLIENT_SECRET}`))}`, "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(values) });
     }
     async function accessToken() {
       if (!connection?.accessToken) throw new ApiError(409, "Najpierw połącz konto Allegro.");
@@ -113,8 +163,6 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
     const path = url.pathname.slice("/api/allegro".length);
     if (request.method === "GET") {
       if (path === "/health") return json({ ok: true, connected: Boolean(connection?.accessToken), build: "2026-06-02.35", mode: "web" });
-      // Secrets never return to the browser, unlike the original local helper.
-      if (path === "/auth/credentials") return json({ clientId: connection?.clientId || "", clientSecret: "" });
       const routes: Record<string, string> = { "/me": "/me", "/shipping-rates": "/sale/shipping-rates", "/responsible-producers": "/sale/responsible-producers", "/responsible-persons": "/sale/responsible-persons" };
       if (routes[path]) return json(await remote(routes[path]));
       if (["/return-policies", "/implied-warranties", "/warranties"].includes(path)) {
@@ -150,23 +198,17 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
         await db(`?owner_id=eq.${encodeURIComponent(user.id)}`, { method: "DELETE" });
         return json({ connected: false });
       }
-      if (path === "/auth/device") {
-        const input = await body();
-        if (typeof input.clientId !== "string" || typeof input.clientSecret !== "string" || !input.clientId || !input.clientSecret) throw new ApiError(400, "Brakuje Client ID lub Client Secret.");
-        const current = { clientId: input.clientId, clientSecret: input.clientSecret };
-        const result = await readRemote(await oauth("/device", { client_id: current.clientId, scope: scopes }, current));
-        await save({ ...current, deviceCode: result.device_code });
-        const { device_code: _secret, ...publicResult } = result;
-        return json(publicResult);
-      }
-      if (path === "/auth/poll") {
-        if (!connection?.deviceCode) throw new ApiError(409, "Najpierw rozpocznij logowanie Allegro.");
-        const response = await oauth("/token", { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: connection.deviceCode }, connection);
-        const result = await response.clone().json() as RemotePayload;
-        if (result.error && ["authorization_pending", "slow_down"].includes(result.error)) return json({ connected: false, status: result.error });
-        await readRemote(response);
-        await save({ clientId: connection.clientId, clientSecret: connection.clientSecret, accessToken: result.access_token, refreshToken: result.refresh_token, expiresAt: Date.now() + (result.expires_in - 60) * 1000 });
-        return json({ connected: true });
+      if (path === "/auth/start") {
+        const config = appConfig(env, url.origin);
+        const state = base64url(crypto.getRandomValues(new Uint8Array(32)));
+        const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));
+        const challenge = base64url(new Uint8Array(await crypto.subtle.digest("SHA-256", utf8.encode(verifier))));
+        const pending: OAuthCookie = { owner: user.id, state, verifier, expiresAt: Date.now() + 600000, clientId: config.clientId, redirectUri: config.redirectUri };
+        const authorize = new URL(`${oauthBase}/authorize`);
+        authorize.search = new URLSearchParams({ response_type: "code", client_id: config.clientId, redirect_uri: config.redirectUri, state, code_challenge: challenge, code_challenge_method: "S256", prompt: "confirm", scope: scopes }).toString();
+        const response = json({ url: authorize.href });
+        response.headers.set("Set-Cookie", cookie(await sealConnection(pending, key, "allegro-oauth"), 600));
+        return response;
       }
       if (path === "/upload-image") {
         const input = await body();

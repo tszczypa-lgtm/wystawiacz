@@ -7,7 +7,7 @@ const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.Modu
 const { handleAllegroApi, sealConnection, openConnection } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
 const rawKey = crypto.getRandomValues(new Uint8Array(32));
 const key = await crypto.subtle.importKey("raw", rawKey, "AES-GCM", false, ["encrypt", "decrypt"]);
-const env = { SUPABASE_SERVICE_ROLE_KEY: "server-only", ALLEGRO_ENCRYPTION_KEY: Buffer.from(rawKey).toString("base64") };
+const env = { SUPABASE_SERVICE_ROLE_KEY: "server-only", ALLEGRO_ENCRYPTION_KEY: Buffer.from(rawKey).toString("base64"), ALLEGRO_CLIENT_ID: "app", ALLEGRO_CLIENT_SECRET: "shared-server-secret", ALLEGRO_REDIRECT_URI: "https://example.test/api/allegro/auth/callback" };
 const owner = "00000000-0000-0000-0000-000000000001";
 const connection = { clientId: "app", clientSecret: "secret", accessToken: "allegro-access", refreshToken: "refresh", expiresAt: Date.now() + 3600000 };
 const sealed = await sealConnection(connection, key, owner);
@@ -22,6 +22,7 @@ const originalFetch = globalThis.fetch;
 let saved = sealed;
 let deleted = false;
 let remoteCalls = [];
+let tokenCalls = [];
 globalThis.fetch = async (url, options = {}) => {
   url = String(url);
   const headers = new Headers(options.headers);
@@ -41,8 +42,10 @@ globalThis.fetch = async (url, options = {}) => {
     if (options.method === "DELETE") { deleted = true; return new Response(null, { status: 204 }); }
     return Response.json([{ sealed: saved }]);
   }
-  if (url.includes("/auth/oauth/device")) return Response.json({ device_code: "device-secret", user_code: "ABCD", interval: 5, verification_uri: "https://allegro.pl" });
-  if (url.includes("/auth/oauth/token")) return Response.json({ access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600 });
+  if (url.includes("/auth/oauth/token")) {
+    tokenCalls.push({ headers, form: new URLSearchParams(options.body) });
+    return Response.json({ access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600 });
+  }
   assert.ok(url.startsWith("https://api.allegro.pl/") || url.startsWith("https://upload.allegro.pl/"));
   assert.ok(headers.get("Authorization").startsWith("Bearer "));
   assert.notEqual(headers.get("Authorization"), "Bearer user-session");
@@ -53,8 +56,7 @@ globalThis.fetch = async (url, options = {}) => {
 };
 try {
   assert.equal((await (await handleAllegroApi(request("/health"), env)).json()).connected, true);
-  const credentials = await (await handleAllegroApi(request("/auth/credentials"), env)).json();
-  assert.deepEqual(credentials, { clientId: "app", clientSecret: "" });
+  assert.equal((await handleAllegroApi(request("/auth/credentials"), env)).status, 404);
   for (const path of ["/me", "/shipping-rates", "/return-policies", "/implied-warranties", "/warranties", "/responsible-producers", "/responsible-persons", "/matching-categories?name=door", "/categories?parentId=123", "/category-parameters/123", "/category-path?id=123"]) {
     assert.equal((await handleAllegroApi(request(path), env)).status, 200, path);
   }
@@ -63,12 +65,39 @@ try {
   const post = (path, data) => handleAllegroApi(request(path, { method: "POST", body: JSON.stringify(data) }), env);
   assert.equal((await post("/upload-image", { image: { base64: Buffer.from("image").toString("base64"), contentType: "image/jpeg" } })).status, 200);
   assert.equal((await post("/product-offers", { offerBase64: Buffer.from(JSON.stringify({ name: "Test" })).toString("base64") })).status, 200);
-  const device = await (await post("/auth/device", { clientId: "app", clientSecret: "secret" })).json();
-  assert.equal(device.user_code, "ABCD");
-  assert.equal(device.device_code, undefined);
-  assert.equal((await openConnection(saved, key, owner)).deviceCode, "device-secret");
-  assert.equal((await (await post("/auth/poll", {})).json()).connected, true);
+  assert.equal((await post("/auth/device", { clientId: "app", clientSecret: "secret" })).status, 404);
+  const start = await post("/auth/start", {});
+  assert.equal(start.status, 200);
+  const authorize = new URL((await start.json()).url);
+  assert.equal(authorize.origin, "https://allegro.pl");
+  assert.equal(authorize.searchParams.get("prompt"), "confirm");
+  assert.equal(authorize.searchParams.get("code_challenge_method"), "S256");
+  assert.ok(!authorize.href.includes("secret"));
+  const setCookie = start.headers.get("Set-Cookie");
+  assert.ok(setCookie.includes("HttpOnly; Secure; SameSite=Lax"));
+  const cookieHeader = setCookie.split(";")[0];
+  const pending = await openConnection(decodeURIComponent(cookieHeader.split("=")[1]), key, "allegro-oauth");
+  const expectedChallenge = Buffer.from(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(pending.verifier))).toString("base64url");
+  assert.equal(authorize.searchParams.get("code_challenge"), expectedChallenge);
+  const callback = (state, cookieValue = cookieHeader, extra = "") => handleAllegroApi(new Request(`${env.ALLEGRO_REDIRECT_URI}?code=authorization-code&state=${state}${extra}`, { headers: { Cookie: cookieValue } }), env);
+  const before = tokenCalls.length;
+  assert.equal((await callback("wrong-state")).status, 400);
+  assert.equal((await callback(pending.state, "")).status, 400);
+  assert.equal((await callback(pending.state, cookieHeader, "&error=access_denied")).status, 400);
+  assert.equal(tokenCalls.length, before);
+  const invalidCookie = "__Host-wystawiacz-oauth=" + encodeURIComponent(await sealConnection({ ...pending, expiresAt: 0 }, key, "allegro-oauth"));
+  assert.equal((await callback(pending.state, invalidCookie)).status, 400);
+  const result = await callback(pending.state);
+  assert.equal(result.status, 200);
+  assert.ok(result.headers.get("Set-Cookie").includes("Max-Age=0"));
+  assert.ok(!(await result.text()).includes("new-access"));
+  const exchange = tokenCalls.at(-1);
+  assert.equal(exchange.form.get("grant_type"), "authorization_code");
+  assert.equal(exchange.form.get("code_verifier"), pending.verifier);
+  assert.equal(exchange.form.get("client_id"), "app");
+  assert.equal(exchange.headers.get("Authorization"), null);
   assert.equal((await openConnection(saved, key, owner)).accessToken, "new-access");
+  assert.equal((await openConnection(saved, key, owner)).clientSecret, "");
   assert.equal((await post("/auth/logout", {})).status, 200);
   assert.ok(deleted);
   assert.ok(remoteCalls.some(call => call.url.includes("seller.id=seller")));
@@ -83,6 +112,8 @@ const html = await readFile(new URL("../public/wystawiacz/index.html", import.me
 const app = await readFile(new URL("../public/wystawiacz/app.js", import.meta.url), "utf8");
 for (const match of app.matchAll(/document\.querySelector\("#([^\"]+)"\)/g)) assert.ok(html.includes(`id="${match[1]}"`), match[1]);
 assert.ok(app.includes('confirm(`Wystawić tę jedną aukcję'));
+assert.ok(!html.includes("clientSecretInput"));
+assert.ok(!app.includes("/api/auth/device"));
 const originalDirectory = new URL("../../outputs/allegro-assistant/", import.meta.url);
 try {
   const originalApp = await readFile(new URL("app.js", originalDirectory), "utf8");
@@ -92,7 +123,7 @@ try {
   };
   const portFunctions = functions(app);
   for (const [name, implementation] of functions(originalApp)) {
-    if (!["apiRequest", "checkConnectionStatus"].includes(name)) assert.equal(portFunctions.get(name), implementation, `Original function changed: ${name}`);
+    if (!["apiRequest", "checkConnectionStatus", "checkLoginStatus", "closeConnectionModal", "prefillAllegroCredentials"].includes(name)) assert.equal(portFunctions.get(name), implementation, `Original function changed: ${name}`);
   }
   const originalCss = await readFile(new URL("styles.css", originalDirectory), "utf8");
   const portCss = await readFile(new URL("../public/wystawiacz/styles.css", import.meta.url), "utf8");

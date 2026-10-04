@@ -14,7 +14,11 @@ Web-specific differences:
 - A logged-in Supabase session is required for every Allegro API call.
 - Calls go to /api/allegro/* instead of the local PowerShell helper.
 - The parent panel supplies a fresh session token only to its own same-origin frame.
-- Tokens and application credentials are encrypted per user with AES-GCM.
+- One shared application is configured by the owner on the server. Users do not enter keys.
+- The connection button opens Allegro Authorization Code flow with PKCE S256 and account confirmation.
+- An encrypted HttpOnly/Secure/SameSite cookie binds state, verifier, initiating user and a ten-minute expiry.
+- The callback exchanges the code immediately server-side; tokens are encrypted per user with AES-GCM.
+- A popup keeps the original workspace and selected photo File objects alive during authorization.
 - Client secrets and Allegro access/refresh/device tokens never return to the browser.
 - Disconnect deletes the user's saved connection; it does not affect other users.
 
@@ -25,7 +29,13 @@ Web-specific differences:
    SUPABASE_SERVICE_ROLE_KEY: this project's Supabase service-role secret.
    ALLEGRO_ENCRYPTION_KEY: a cryptographically random 32-byte key, base64 encoded.
    Keep this encryption key stable; changing it invalidates existing connections.
-3. Deploy, log in, and connect Allegro using its device-flow application credentials.
+   ALLEGRO_CLIENT_ID: the shared Tymo Garage application ID.
+   ALLEGRO_CLIENT_SECRET: its server-only secret (used for refresh, never entered by users).
+   ALLEGRO_REDIRECT_URI: https://wystawiacz.tszczypa.workers.dev/api/allegro/auth/callback
+3. Register an Allegro application with browser access (Authorization Code flow).
+   Register the exact ALLEGRO_REDIRECT_URI in Allegro's application settings.
+   Existing device-only applications cannot change type; create a new one if needed.
+   Deploy, log in, and click Connect. Confirm the account on Allegro; no user keys.
 4. Verify categories, delivery/after-sales templates, images and one manually
    approved offer against the live seller account. No live offer is created by tests.
 

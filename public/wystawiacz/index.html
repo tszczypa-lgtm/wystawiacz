@@ -402,37 +402,6 @@
         <button class="primary-button" id="saveLocationButton" type="button">Zapisz lokalizację</button>
       </div>
     </div>
-    <div class="modal hidden" id="connectionModal">
-      <div class="modal-card">
-        <div class="modal-heading">
-          <div>
-            <p class="card-kicker">TYLKO ODCZYT</p>
-            <h2>Połącz konto Allegro</h2>
-          </div>
-          <button class="close-button" id="closeModalButton" type="button" aria-label="Zamknij">×</button>
-        </div>
-        <div id="credentialsStep">
-          <p class="modal-copy">
-            Dane aplikacji zostaną przekazane przez HTTPS serwerowi Wystawiacza i serwerowi logowania Allegro. Zostaną zapisane w postaci zaszyfrowanej dla Twojego konta.
-          </p>
-          <label class="field">
-            <span>Client ID</span>
-            <input id="clientIdInput" type="text" autocomplete="off" />
-          </label>
-          <label class="field">
-            <span>Client Secret</span>
-            <input id="clientSecretInput" type="password" autocomplete="off" />
-          </label>
-          <button class="primary-button" id="startLoginButton" type="button">Rozpocznij logowanie</button>
-        </div>
-        <div class="hidden" id="deviceStep">
-          <p class="modal-copy">Otwórz stronę Allegro i wpisz poniższy kod:</p>
-          <div class="device-code" id="deviceCode"></div>
-          <a class="external-link" id="verificationLink" href="#" target="_blank" rel="noreferrer">Otwórz stronę logowania Allegro</a>
-          <p class="helper-text" id="loginStatus">Czekamy na potwierdzenie logowania...</p>
-        </div>
-      </div>
-    </div>
     <script src="web-auth.js"></script>
     <script src="app.js"></script>
   </body>

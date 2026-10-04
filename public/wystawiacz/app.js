@@ -95,22 +95,13 @@ const saveLocationButton = document.querySelector("#saveLocationButton");
 const locationCityInput = document.querySelector("#locationCityInput");
 const locationPostCodeInput = document.querySelector("#locationPostCodeInput");
 const locationProvinceInput = document.querySelector("#locationProvinceInput");
-const connectionModal = document.querySelector("#connectionModal");
 const connectButton = document.querySelector("#connectButton");
 const disconnectButton = document.querySelector("#disconnectButton");
-const closeModalButton = document.querySelector("#closeModalButton");
-const startLoginButton = document.querySelector("#startLoginButton");
-const clientIdInput = document.querySelector("#clientIdInput");
-const clientSecretInput = document.querySelector("#clientSecretInput");
-const credentialsStep = document.querySelector("#credentialsStep");
-const deviceStep = document.querySelector("#deviceStep");
-const deviceCode = document.querySelector("#deviceCode");
-const verificationLink = document.querySelector("#verificationLink");
-const loginStatus = document.querySelector("#loginStatus");
 const connectionTitle = document.querySelector("#connectionTitle");
 const connectionDescription = document.querySelector("#connectionDescription");
 const compatibleServerBuilds = ["2026-06-02.35"];
-let loginPollTimer;
+let allegroLoginWindow;
+let allegroLoginTimer;
 let categoryLookupTimer;
 let categoryParents = [];
 let activeProductId = "";
@@ -146,14 +137,44 @@ checkConnectionStatus();
 renderVehicles();
 
 connectButton.addEventListener("click", async () => {
-  await prefillAllegroCredentials();
-  connectionModal.classList.remove("hidden");
+  if (allegroLoginWindow && !allegroLoginWindow.closed) { allegroLoginWindow.focus(); return; }
+  // Keep the original workspace and selected File objects alive during OAuth.
+  allegroLoginWindow = window.open("about:blank", "wystawiacz-allegro", "width=720,height=800");
+  if (!allegroLoginWindow) { showToast("Zezwól na otwarcie okna Allegro i kliknij ponownie Połącz z Allegro."); return; }
+  connectButton.disabled = true;
+  try {
+    const result = await apiRequest("/api/auth/start", { method: "POST" });
+    const target = new URL(result.url);
+    if (target.origin !== "https://allegro.pl" || target.pathname !== "/auth/oauth/authorize") throw new Error("Nieprawidłowy adres logowania Allegro.");
+    allegroLoginWindow.location.replace(target.href);
+    allegroLoginTimer = setInterval(() => {
+      if (allegroLoginWindow?.closed) {
+        clearInterval(allegroLoginTimer);
+        connectButton.disabled = state.allegroConnected;
+        void checkConnectionStatus();
+      }
+    }, 1000);
+  } catch (error) {
+    allegroLoginWindow.close();
+    connectButton.disabled = false;
+    showToast(error.message);
+  }
+});
+
+window.addEventListener("message", (event) => {
+  if (event.origin !== location.origin || event.source !== allegroLoginWindow || event.data?.type !== "wystawiacz-allegro-complete") return;
+  clearInterval(allegroLoginTimer);
+  connectButton.disabled = state.allegroConnected;
+  if (event.data.ok) {
+    void checkConnectionStatus();
+    showToast("Konto Allegro połączone.");
+  } else showToast("Połączenie anulowane lub nieudane. Możesz spróbować ponownie.");
 });
 
 disconnectButton.addEventListener("click", async () => {
   try {
     await apiRequest("/api/auth/logout", { method: "POST" });
-  } catch {}
+  } catch (error) { showToast(error.message); return; }
   state.allegroConnected = false;
   connectButton.textContent = "Połącz z Allegro";
   connectButton.disabled = false;
@@ -162,65 +183,6 @@ disconnectButton.addEventListener("click", async () => {
   connectionDescription.textContent = "Połącz właściwe konto Allegro. Po zmianie konta pobierzemy jego kategorie, wysyłkę oraz szablony.";
   showToast("Konto odłączone. Możesz połączyć inne Allegro.");
 });
-
-closeModalButton.addEventListener("click", closeConnectionModal);
-
-startLoginButton.addEventListener("click", async () => {
-  const clientId = clientIdInput.value.trim();
-  const clientSecret = clientSecretInput.value.trim();
-  if (!clientId || !clientSecret) {
-    showToast("Wpisz Client ID oraz Client Secret.");
-    return;
-  }
-
-  startLoginButton.disabled = true;
-  try {
-    const result = await apiRequest("/api/auth/device", {
-      method: "POST",
-      body: JSON.stringify({ clientId, clientSecret })
-    });
-    credentialsStep.classList.add("hidden");
-    deviceStep.classList.remove("hidden");
-    deviceCode.textContent = result.user_code;
-    verificationLink.href = result.verification_uri_complete || result.verification_uri;
-    loginPollTimer = setInterval(checkLoginStatus, Math.max(result.interval || 5, 3) * 1000);
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    startLoginButton.disabled = false;
-  }
-});
-
-async function checkLoginStatus() {
-  try {
-    const result = await apiRequest("/api/auth/poll", { method: "POST" });
-    if (!result.connected) {
-      loginStatus.textContent = "Czekamy na zatwierdzenie kodu w Allegro...";
-      return;
-    }
-    clearInterval(loginPollTimer);
-    closeConnectionModal();
-    connectionTitle.textContent = "Konto Allegro połączone";
-    connectionDescription.textContent = "Tryb tylko do odczytu jest aktywny. Możemy pobrać prawdziwe kategorie i cenniki dostawy.";
-    connectButton.textContent = "Połączono";
-    connectButton.disabled = true;
-    disconnectButton.classList.remove("hidden");
-    state.allegroConnected = true;
-    await refreshConnectedAccountInfo();
-    await loadShippingRates();
-    await loadAfterSalesServices();
-    await loadComplianceData();
-    scheduleAllegroCategoryLookup();
-    showToast("Konto Allegro połączone w trybie odczytu.");
-  } catch (error) {
-    clearInterval(loginPollTimer);
-    loginStatus.textContent = error.message;
-  }
-}
-
-function closeConnectionModal() {
-  connectionModal.classList.add("hidden");
-}
 
 async function apiRequest(path, options = {}) {
   const token = await window.getWystawiaczToken();
@@ -998,14 +960,6 @@ async function checkConnectionStatus() {
   } catch (error) {
     connectionDescription.textContent = error.message;
   }
-}
-
-async function prefillAllegroCredentials() {
-  try {
-    const credentials = await apiRequest("/api/auth/credentials");
-    if (credentials.clientId && !clientIdInput.value) clientIdInput.value = credentials.clientId;
-    if (credentials.clientSecret && !clientSecretInput.value) clientSecretInput.value = credentials.clientSecret;
-  } catch {}
 }
 
 async function refreshConnectedAccountInfo() {
