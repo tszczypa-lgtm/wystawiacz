@@ -19,22 +19,20 @@ export default function LoginPage() {
           Logowanie do panelu
         </p>
         <h1 className="text-4xl font-black tracking-[-0.05em] sm:text-5xl">
-          Konto firmy, pracownicy i dostep sprzedawany w abonamencie.
+          Twoje konto firmowe w Wystawiaczu.
         </h1>
         <p className="mt-5 text-lg leading-8 text-white/62">
-          To jest pierwszy prawdziwy element SaaS: uzytkownik moze zalozyc konto,
-          zalogowac sie i wejsc do panelu. Sekrety Allegro beda pozniej trzymane
-          tylko po stronie serwera.
+          Zarejestruj firmę, potwierdź e-mail i wejdź do panelu konta. Rejestracja nie uruchamia płatności. Abonament i dane do faktury znajdziesz w rozliczeniach.
         </p>
 
         <div className="mt-8 grid gap-3 text-sm text-white/70">
           <div className="flex gap-3 rounded-2xl border border-white/10 bg-white/[.04] p-4">
             <ShieldCheck className="h-5 w-5 shrink-0 text-emerald-300" />
-            Sesje, zdjecia i tokeny beda przypisane do firmy, nie do komputera.
+            Hasło potwierdzasz podczas rejestracji. Sekrety Allegro pozostają na serwerze.
           </div>
           <div className="flex gap-3 rounded-2xl border border-white/10 bg-white/[.04] p-4">
             <LockKeyhole className="h-5 w-5 shrink-0 text-emerald-300" />
-            Publikowanie ofert zablokujemy, gdy abonament nie jest aktywny.
+            Dostęp kontroluje administrator lub opłacony abonament. W wersji roboczej płatność może nie być wymagana.
           </div>
         </div>
       </section>

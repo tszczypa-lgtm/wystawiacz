@@ -1,5 +1,6 @@
 import { AccountShell } from "./account-shell";
 import { AccountDetails } from "./account-details";
+import { AccessSummary } from "./access-summary";
 
 export default function PanelPage() {
   return <AccountShell active="/panel">
@@ -13,7 +14,7 @@ export default function PanelPage() {
     <div className="mt-5 grid gap-5 lg:grid-cols-2">
       <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
         <h2 className="text-xl font-bold">Abonament</h2>
-        <p className="mt-3 text-white/65">Wersja robocza bez opłat. Nie masz aktywnego płatnego abonamentu; płatności nie są jeszcze uruchomione.</p>
+        <AccessSummary />
         <a href="/panel/billing" className="mt-5 inline-block font-bold text-[#ff8a3d]">Przejdź do abonamentu</a>
       </section>
       <section className="rounded-3xl border border-white/10 bg-white/5 p-6">

@@ -1,12 +1,14 @@
 import handler from "vinext/server/fetch-handler";
 import { handleAllegroApi } from "../lib/allegro-api";
+import { handleAccountApi, protectAllegroRequest, type AccountEnv } from "../lib/account-api";
 import { runWithConnectorBinding } from "../lib/connector-context";
 import type { ConnectorBinding } from "../lib/connector-contract.mjs";
 
 export default {
   fetch(request: Request, env: Cloudflare.Env, ctx: ExecutionContext<{ CONNECTORS?: ConnectorBinding }>) {
+    if (new URL(request.url).pathname.startsWith("/api/account/")) return handleAccountApi(request, env as AccountEnv);
     if (new URL(request.url).pathname.startsWith("/api/allegro/")) {
-      return handleAllegroApi(request, env as Cloudflare.Env & Parameters<typeof handleAllegroApi>[1]);
+      return protectAllegroRequest(request, env as AccountEnv, () => handleAllegroApi(request, env as Cloudflare.Env & Parameters<typeof handleAllegroApi>[1]));
     }
     let binding = ctx.props?.CONNECTORS;
     // Local preview emulates the same request-scoped capability. This branch and

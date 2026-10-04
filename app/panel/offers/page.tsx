@@ -1,5 +1,6 @@
 import { OriginalWystawiacz } from "../original-wystawiacz";
+import { OffersAccess } from "./offers-access";
 
 export default function OffersPage() {
-  return <OriginalWystawiacz />;
+  return <OffersAccess><OriginalWystawiacz /></OffersAccess>;
 }
