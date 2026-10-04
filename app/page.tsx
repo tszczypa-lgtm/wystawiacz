@@ -1,5 +1,3 @@
-import Link from "next/link";
-
 export default function Home() {
   return (
     <main className="grid min-h-screen place-items-center bg-[#0d1117] px-5 text-white">
@@ -7,7 +5,7 @@ export default function Home() {
         <p className="font-black text-[#ff8a3d]">Wystawiacz</p>
         <h1 className="mt-4 text-4xl font-black">Przygotuj produkty do wystawienia</h1>
         <p className="mt-4 leading-7 text-white/65">Zaloguj się, aby tworzyć listę produktów, edytować opisy i uzupełniać ceny.</p>
-        <Link href="/login" className="mt-6 inline-flex rounded-2xl bg-[#ff5a00] px-6 py-3 font-bold">Zaloguj się lub załóż konto</Link>
+        <a href="/login" className="mt-6 inline-flex rounded-2xl bg-[#ff5a00] px-6 py-3 font-bold">Zaloguj się lub załóż konto</a>
         <p className="mt-6 text-sm text-white/50">Wersja robocza. Publikacja na Allegro, zdjęcia i płatności nie są jeszcze podłączone.</p>
       </section>
     </main>

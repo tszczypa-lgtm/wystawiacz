@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { LockKeyhole, ShieldCheck } from "lucide-react";
 import { LoginForm } from "./login-form";
 
@@ -6,7 +5,7 @@ export default function LoginPage() {
   return (
     <main className="grid min-h-screen bg-[#0d1117] px-5 py-10 text-white lg:grid-cols-[0.92fr_1.08fr]">
       <section className="mx-auto flex w-full max-w-xl flex-col justify-center">
-        <Link href="/" className="mb-10 flex items-center gap-3">
+        <a href="/" className="mb-10 flex items-center gap-3">
           <span className="grid h-11 w-11 place-items-center rounded-2xl bg-[#ff5a00] font-black">
             A
           </span>
@@ -14,7 +13,7 @@ export default function LoginPage() {
             <span className="block text-lg font-black">Wystawiacz</span>
             <span className="block text-sm text-white/55">konto firmowe</span>
           </span>
-        </Link>
+        </a>
 
         <p className="mb-4 inline-flex w-fit rounded-full border border-[#ff5a00]/35 bg-[#ff5a00]/10 px-4 py-2 text-sm font-bold text-[#ffb38a]">
           Logowanie do panelu

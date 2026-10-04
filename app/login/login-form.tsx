@@ -1,14 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { LockKeyhole, Mail } from "lucide-react";
 import { createSupabaseBrowserClient } from "@/lib/supabase";
 
 type Mode = "login" | "signup";
 
 export function LoginForm() {
-  const router = useRouter();
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -37,8 +35,7 @@ export function LoginForm() {
         return;
       }
 
-      router.push("/panel");
-      router.refresh();
+      window.location.assign("/panel");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Nie udalo sie zalogowac.");
     } finally {

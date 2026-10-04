@@ -1,11 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase";
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
   const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState("");
 
@@ -23,7 +21,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
         return;
       }
       if (!data.session) {
-        router.replace("/login");
+        window.location.replace("/login");
         return;
       }
 
@@ -36,7 +34,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!session) {
-        router.replace("/login");
+        window.location.replace("/login");
       }
     });
 
@@ -44,7 +42,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, [router]);
+  }, []);
 
   if (!isReady) {
     return (
