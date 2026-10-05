@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Dokumentacja Wystawiacza | Tymo Garage",
+  title: "Dokumentacja | Wystawiacz by Tymo",
   description: "Opis Wystawiacza, połączenia konta Allegro, uprawnień i pracy z sesjami produktów.",
 };
 
@@ -10,7 +10,7 @@ export default function DocumentationPage() {
     <main className="min-h-screen bg-[#0d1117] px-5 py-12 text-white">
       <article className="mx-auto grid max-w-3xl gap-8 leading-7">
         <header>
-          <a href="/" className="font-bold text-[#ff8a3d]">Tymo Garage · Wystawiacz</a>
+          <a href="/" className="font-bold text-[#ff8a3d]">Wystawiacz by Tymo</a>
           <h1 className="mt-5 text-4xl font-black">Dokumentacja Wystawiacza</h1>
           <p className="mt-4 text-white/70">Narzędzie do przygotowywania ofert używanych części samochodowych i ich publikowania na własnym koncie sprzedawcy Allegro.</p>
           <p className="mt-4 rounded-xl border border-amber-300/20 bg-amber-300/10 p-4 text-amber-100">Wersja rozwojowa. Integracja Allegro wymaga konfiguracji administratora oraz sprawdzenia na rzeczywistym koncie. Płatności i abonamenty nie są uruchomione.</p>

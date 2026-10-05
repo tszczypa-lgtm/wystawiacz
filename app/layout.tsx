@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Wystawiacz Allegro SaaS",
+  title: "Wystawiacz by Tymo",
   description: "Panel abonamentowy do przygotowywania i wystawiania ofert części samochodowych na Allegro.",
   other: {
     "codex-preview": "development",

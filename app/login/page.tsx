@@ -7,10 +7,10 @@ export default function LoginPage() {
       <section className="mx-auto flex w-full max-w-xl flex-col justify-center">
         <a href="/" className="mb-10 flex items-center gap-3">
           <span className="grid h-11 w-11 place-items-center rounded-2xl bg-[#ff5a00] font-black">
-            A
+            T
           </span>
           <span>
-            <span className="block text-lg font-black">Wystawiacz</span>
+            <span className="block text-lg font-black">Wystawiacz by Tymo</span>
             <span className="block text-sm text-white/55">konto firmowe</span>
           </span>
         </a>
@@ -40,9 +40,9 @@ export default function LoginPage() {
       <section className="mx-auto flex w-full max-w-xl items-center">
         <div className="w-full rounded-[2rem] border border-white/10 bg-white/[.07] p-5 shadow-2xl">
           <div className="rounded-[1.5rem] bg-white p-6 text-[#172033]">
-            <h2 className="text-2xl font-black tracking-tight">Wejdz do panelu</h2>
+            <h2 className="text-2xl font-black tracking-tight">Wejdź do panelu</h2>
             <p className="mt-2 text-sm leading-6 text-slate-500">
-              Uzyj emaila i hasla. Jezeli konta jeszcze nie ma, kliknij rejestracje.
+              Zaloguj się swoim adresem e-mail i hasłem. Nie masz konta? Wybierz rejestrację.
             </p>
             <LoginForm />
           </div>

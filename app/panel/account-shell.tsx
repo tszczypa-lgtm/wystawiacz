@@ -6,7 +6,7 @@ export function AccountShell({ children, active }: { children: React.ReactNode; 
   return (
     <main className="min-h-screen bg-[#0d1117] text-white">
       <header className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 px-6 py-5">
-        <a href="/panel" className="text-xl font-black text-[#ff8a3d]">Tymo Garage · Wystawiacz</a>
+        <a href="/panel" className="text-xl font-black text-[#ff8a3d]">Wystawiacz by Tymo</a>
         <div className="w-36"><LogoutButton /></div>
       </header>
       <div className="mx-auto grid max-w-7xl gap-6 p-5 md:grid-cols-[220px_1fr] md:p-8">
