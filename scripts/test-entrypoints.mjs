@@ -11,4 +11,5 @@ assert.match(home, /Strona w budowie/);
 assert.match(home, /warsztatu elektroniki/);
 assert.match(home, /href="https:\/\/wystawiacz\.tszczypa\.workers\.dev\/login"/);
 assert.equal((home.match(/<a\s/g) || []).length, 1);
+assert.match(read("../vite.config.ts"), /keep_vars:\s*true/);
 console.log("Entry points and branding checks passed.");

@@ -76,6 +76,8 @@ export default defineConfig(async ({ command }) => {
               }),
           name: "wystawiacz",
           workers_dev: true,
+          // Runtime settings are managed in the Cloudflare dashboard.
+          keep_vars: true,
           ...(command === "serve"
             ? {
                 services: [
