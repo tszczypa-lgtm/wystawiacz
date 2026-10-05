@@ -113,6 +113,18 @@ let previewPhotoName = "";
 let categoryLocked = false;
 let allegroManufacturerOptions = [];
 
+window.PartNumberOcr.mount({
+  getSelection: () => ({
+    productId: activeProductId,
+    photos: state.selectedPhotoNames.map(name => ({ name, file: state.localPhotosByName.get(name)?.file,
+      rotating: state.localPhotosByName.get(name)?.rotating }))
+  }),
+  choose: number => {
+    partNumber.value = number;
+    partNumber.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+});
+
 const OE_MANUFACTURERS = [
   "Abarth", "AC", "Acura", "Aiways", "Aixam", "Alfa Romeo", "Alpine", "Aro", "Asia", "Aston Martin", "Audi", "Austin",
   "Austin-Healey", "Autobianchi", "Avia", "Baic", "Bentley", "Bertone", "BMW", "Borgward", "Brilliance", "Bugatti",
