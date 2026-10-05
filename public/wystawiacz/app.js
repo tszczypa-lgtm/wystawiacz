@@ -113,7 +113,7 @@ let previewPhotoName = "";
 let categoryLocked = false;
 let allegroManufacturerOptions = [];
 
-window.PartNumberOcr.mount({
+const partNumberOcr = window.PartNumberOcr.mount({
   getSelection: () => ({
     productId: activeProductId,
     photos: state.selectedPhotoNames.map(name => ({ name, file: state.localPhotosByName.get(name)?.file,
@@ -397,6 +397,7 @@ addButton.addEventListener("click", () => {
 });
 
 function renderPhotos() {
+  partNumberOcr.refresh();
   const selectedCount = state.selectedPhotoNames.length;
   photoCounter.textContent = `${selectedCount} ${selectedCount === 1 ? "zdjęcie" : "zdjęć"}`;
   const folderPhotos = [...state.localPhotosByName.values()];

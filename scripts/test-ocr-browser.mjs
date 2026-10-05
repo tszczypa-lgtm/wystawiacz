@@ -8,7 +8,7 @@ const source = await readFile(new URL("../public/wystawiacz/part-number-ocr.js",
 const server = createServer((req, res) => {
   if (req.url === "/ocr.js") { res.setHeader("Content-Type", "text/javascript"); res.end(source); return; }
   res.setHeader("Content-Type", "text/html");
-  res.end('<button id="scanPartNumbers">Scan</button><button id="cancelPartNumberScan" class="hidden">Cancel</button><p id="partNumberScanStatus"></p><div id="partNumberCandidates"></div><script src="/ocr.js"></script>');
+  res.end('<input id="enablePartNumberOcr" type="checkbox"><button id="scanPartNumbers">Scan</button><button id="cancelPartNumberScan" class="hidden">Cancel</button><p id="partNumberScanStatus"></p><div id="partNumberCandidates"></div><script src="/ocr.js"></script>');
 });
 await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
 let browser;
@@ -62,6 +62,37 @@ try {
   await page.locator("#cancelPartNumberScan").click();
   await page.waitForFunction(() => !document.getElementById("scanPartNumbers").disabled, { timeout: 10000 });
   assert.equal(await page.locator("#partNumberScanStatus").innerText(), "Odczyt przerwany.");
+  await page.locator("#enablePartNumberOcr").check();
+  assert.equal(await page.evaluate(() => localStorage.getItem("wystawiaczPartNumberOcrEnabled")), "true");
+  await page.reload();
+  await page.evaluate(() => {
+    window.fixture = { productId: "", photos: [] };
+    window.controller = window.PartNumberOcr.mount({ getSelection: () => ({ ...window.fixture, photos: [...window.fixture.photos] }), choose() {} });
+  });
+  assert.equal(await page.locator("#enablePartNumberOcr").isChecked(), true);
+  await page.locator("#enablePartNumberOcr").uncheck();
+  assert.equal(await page.evaluate(() => localStorage.getItem("wystawiaczPartNumberOcrEnabled")), "false");
+  await page.evaluate(async () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 10; canvas.height = 10;
+    const blob = await new Promise(resolve => canvas.toBlob(resolve));
+    window.fixture.photos = [{ name: "test.png", file: new File([blob], "test.png", { type: "image/png" }) }];
+    window.recognitions = 0;
+    window.Tesseract = { createWorker: async () => ({
+      setParameters: async () => {}, terminate: async () => {},
+      recognize: async () => { window.recognitions++; return { data: { text: "S/N: 0281015009\n" + Array.from({ length: 9 }, (_, i) => `P/N: 5Q09598${50 + i}`).join("\n") } }; }
+    }) };
+    window.controller.refresh();
+  });
+  await page.waitForTimeout(1000);
+  assert.equal(await page.evaluate(() => window.recognitions), 0, "Unchecked OCR must not run automatically");
+  await page.locator("#enablePartNumberOcr").check();
+  await page.waitForFunction(() => document.querySelectorAll(".part-number-candidate").length === 6);
+  assert.equal(await page.evaluate(() => window.recognitions), 2, "Automatic OCR uses two reading passes");
+  assert.ok(!(await page.locator(".part-number-candidate strong").allTextContents()).includes("0281015009"));
+  await page.evaluate(() => window.controller.refresh());
+  await page.waitForTimeout(1000);
+  assert.equal(await page.evaluate(() => window.recognitions), 2, "Unchanged selection must not rescan");
   assert.deepEqual(errors, []);
   console.log("Real browser OCR and click/stale-offer protection passed.");
 } finally {

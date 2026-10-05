@@ -18,7 +18,13 @@ const ranked = rankCandidates([
 assert.equal(ranked[0].number, "5Q0959857");
 assert.deepEqual(Array.from(ranked[0].photos), ["one.jpg", "two.jpg"]);
 assert.equal(ranked.filter(item => item.number === "5Q0959857").length, 1);
-assert.equal(ranked.find(item => item.number === "123456789").serial, true);
+assert.ok(!ranked.some(item => item.number === "123456789"), "Serial numbers must be excluded, not offered lower down");
+assert.equal(extractCandidates("S/N: 5Q0959857\nVIN: A2118201585\nLOT: 0281015009\nABCD123\n12345678", "noise.jpg").length, 0);
+assert.ok(extractCandidates("P/N: 5Q0959857 S/N: 123456789", "mixed.jpg").some(item => item.number === "5Q0959857"));
+assert.equal(extractCandidates("S/N:\n0281015009", "serial-newline.jpg").length, 0);
+assert.ok(extractCandidates("P/N:\n12345678", "part-newline.jpg").some(item => item.number === "12345678"));
+const six = rankCandidates([{ name: "many.jpg", text: Array.from({ length: 9 }, (_, i) => `P/N: 5Q09598${50 + i}`).join("\n") }]);
+assert.equal(six.length, 6, "Offer six distinct candidates when enough plausible numbers exist");
 assert.equal(extractCandidates("<script>alert(1)</script>\nMADE IN GERMANY", "unsafe.jpg").length, 0);
 const correction = extractCandidates("SNA 803 881 F", "label.jpg");
 assert.ok(correction.some(item => item.number === "SNA803881F"));
