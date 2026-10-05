@@ -1,5 +1,6 @@
 const state = {
   selectedPhotos: [],
+  photoRotations: new Map(),
   localPhotosByName: new Map(),
   selectedPhotoNames: [],
   products: [],
@@ -39,6 +40,8 @@ const previousPhotoButton = document.querySelector("#previousPhotoButton");
 const togglePhotoButton = document.querySelector("#togglePhotoButton");
 const mainPhotoButton = document.querySelector("#mainPhotoButton");
 const nextPhotoButton = document.querySelector("#nextPhotoButton");
+const rotatePhotoLeftButton = document.querySelector("#rotatePhotoLeftButton");
+const rotatePhotoRightButton = document.querySelector("#rotatePhotoRightButton");
 const relinkFolderInput = document.querySelector("#relinkFolderInput");
 const sessionNameInput = document.querySelector("#sessionNameInput");
 const sessionStatus = document.querySelector("#sessionStatus");
@@ -202,7 +205,7 @@ clearSelectionButton.addEventListener("click", () => {
   renderPhotos();
 });
 
-relinkFolderInput.addEventListener("change", () => {
+relinkFolderInput.addEventListener("change", async () => {
   [...relinkFolderInput.files]
     .filter((file) => file.type.startsWith("image/"))
     .forEach((file) => {
@@ -214,6 +217,7 @@ relinkFolderInput.addEventListener("change", () => {
   localStorage.setItem("allegroAssistantPhotoFolder", folder);
   sessionStatus.textContent = `Lokalny folder zdjęć: ${folder}. Dopasowano pliki po nazwach.`;
   previewPhotoName = state.localPhotosByName.keys().next().value || "";
+  await restorePhotoRotations();
   renderPhotos();
   renderProducts();
 });
@@ -253,6 +257,8 @@ previousPhotoButton.addEventListener("click", () => navigatePhoto(-1));
 nextPhotoButton.addEventListener("click", () => navigatePhoto(1));
 togglePhotoButton.addEventListener("click", () => togglePhoto(previewPhotoName));
 mainPhotoButton.addEventListener("click", setPreviewAsMainPhoto);
+rotatePhotoLeftButton.addEventListener("click", () => rotatePreviewPhoto(-1));
+rotatePhotoRightButton.addEventListener("click", () => rotatePreviewPhoto(1));
 photoPreviewWrap.addEventListener("mousemove", (event) => {
   if (!photoPreview.src) return;
   const rect = photoPreviewWrap.getBoundingClientRect();
@@ -390,6 +396,8 @@ function renderPhotos() {
   const preview = state.localPhotosByName.get(previewPhotoName) || folderPhotos[0];
   photoPreview.src = preview?.url || "";
   photoPreviewName.textContent = preview?.name || "";
+  rotatePhotoLeftButton.disabled = !preview || Boolean(preview.rotating);
+  rotatePhotoRightButton.disabled = !preview || Boolean(preview.rotating);
   mainPhotoStatus.textContent = preview?.name && state.selectedPhotoNames[0] === preview.name ? "ZDJĘCIE GŁÓWNE" : "";
   togglePhotoButton.disabled = !preview;
   mainPhotoButton.disabled = !preview || !state.selectedPhotoNames.includes(preview?.name) || state.selectedPhotoNames[0] === preview?.name;
@@ -1064,6 +1072,7 @@ function saveSession() {
     version: 1,
     name: sessionName,
     photoFolderLabel: folderLabel,
+    photoRotations: [...state.photoRotations],
     savedAt: new Date().toISOString(),
     vehicles: state.vehicles,
     products: state.products.map(({ image, ...product }) => product)
@@ -1086,6 +1095,9 @@ async function loadSession() {
       throw new Error("To nie jest plik sesji programu.");
     }
     state.products = payload.products;
+    state.photoRotations = new Map((Array.isArray(payload.photoRotations) ? payload.photoRotations : [])
+      .filter((entry) => Array.isArray(entry) && typeof entry[0] === "string" && Number.isInteger(entry[1]) && entry[1] >= 0 && entry[1] < 4));
+    await restorePhotoRotations();
     state.vehicles = Array.isArray(payload.vehicles) ? payload.vehicles.map(normalizeVehicle) : [];
     state.products.forEach((product) => {
       if (!product.id) product.id = crypto.randomUUID();
@@ -1270,6 +1282,67 @@ function navigatePhoto(direction) {
   const currentIndex = Math.max(names.indexOf(previewPhotoName), 0);
   previewPhotoName = names[(currentIndex + direction + names.length) % names.length];
   renderPhotos();
+}
+
+async function rotatePreviewPhoto(direction) {
+  const name = previewPhotoName;
+  const photo = state.localPhotosByName.get(name);
+  if (!photo || photo.rotating) return;
+  const turns = ((state.photoRotations.get(name) || 0) + direction + 4) % 4;
+  try {
+    photo.rotating = true;
+    renderPhotos();
+    await applyPhotoRotation(photo, turns);
+    state.photoRotations.set(name, turns);
+  } catch (error) {
+    showToast(error.message || "Nie udalo sie obrocic zdjecia.");
+  } finally {
+    photo.rotating = false;
+    renderPhotos();
+    renderProducts();
+  }
+}
+
+async function restorePhotoRotations() {
+  for (const photo of state.localPhotosByName.values()) {
+    try {
+      await applyPhotoRotation(photo, state.photoRotations.get(photo.name) || 0);
+    } catch (error) {
+      showToast(`Nie udalo sie przywrocic obrotu: ${photo.name}. ${error.message}`);
+    }
+  }
+}
+
+async function applyPhotoRotation(photo, turns) {
+  photo.originalFile ||= photo.file;
+  let file = photo.originalFile;
+  if (turns) {
+    // Always render from the original to avoid accumulating JPEG compression.
+    const sourceUrl = URL.createObjectURL(photo.originalFile);
+    try {
+      const img = new Image();
+      img.src = sourceUrl;
+      await img.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = turns % 2 ? img.naturalHeight : img.naturalWidth;
+      canvas.height = turns % 2 ? img.naturalWidth : img.naturalHeight;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Nie mozna przygotowac obrotu zdjecia.");
+      context.translate(canvas.width / 2, canvas.height / 2);
+      context.rotate(turns * Math.PI / 2);
+      context.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+      const type = photo.originalFile.type === "image/png" ? "image/png" : "image/jpeg";
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, type, 0.95));
+      if (!blob) throw new Error("Nie udalo sie zapisac obroconego zdjecia.");
+      file = new File([blob], photo.name, { type, lastModified: photo.originalFile.lastModified });
+    } finally {
+      URL.revokeObjectURL(sourceUrl);
+    }
+  }
+  const url = URL.createObjectURL(file);
+  URL.revokeObjectURL(photo.url);
+  photo.file = file;
+  photo.url = url;
 }
 
 function setPreviewAsMainPhoto() {
@@ -1527,6 +1600,7 @@ async function uploadProductImages(product) {
   for (const photoName of product.photoNames) {
     const photo = state.localPhotosByName.get(photoName);
     if (!photo?.file) throw new Error(`Brakuje lokalnego pliku zdjęcia: ${photoName}`);
+    if (photo.rotating) throw new Error("Poczekaj na zakonczenie obracania zdjecia.");
     const base64 = await fileToBase64(photo.file);
     const result = await apiRequest("/api/upload-image", {
       method: "POST",

@@ -153,11 +153,11 @@ try {
   };
   const portFunctions = functions(app);
   for (const [name, implementation] of functions(originalApp)) {
-    if (!["apiRequest", "checkConnectionStatus", "checkLoginStatus", "closeConnectionModal", "prefillAllegroCredentials"].includes(name)) assert.equal(portFunctions.get(name), implementation, `Original function changed: ${name}`);
+    if (!["apiRequest", "checkConnectionStatus", "checkLoginStatus", "closeConnectionModal", "prefillAllegroCredentials", "renderPhotos", "saveSession", "loadSession", "uploadProductImages"].includes(name)) assert.equal(portFunctions.get(name), implementation, `Original function changed: ${name}`);
   }
   const originalCss = await readFile(new URL("styles.css", originalDirectory), "utf8");
   const portCss = await readFile(new URL("../public/wystawiacz/styles.css", import.meta.url), "utf8");
   assert.equal(portCss, originalCss);
-  console.log("Original source parity: styling and all business functions unchanged.");
+  console.log("Original source parity: styling and business functions unchanged except web auth and photo rotation integration.");
 } catch (error) { if (error.code !== "ENOENT") throw error; }
 console.log("Allegro port: encryption, user isolation, auth, routes, OAuth, image/offer mock calls and original DOM checks passed. No live requests.");
