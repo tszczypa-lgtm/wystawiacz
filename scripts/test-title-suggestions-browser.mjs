@@ -4,9 +4,11 @@ import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href : "playwright");
 const source = await readFile(new URL("../public/wystawiacz/title-suggestions.js", import.meta.url));
+const styles = await readFile(new URL("../public/wystawiacz/title-suggestions.css", import.meta.url));
 const server = createServer((req, res) => {
+  if (req.url === "/titles.css") { res.setHeader("Content-Type", "text/css"); res.end(styles); return; }
   res.setHeader("Content-Type", req.url === "/titles.js" ? "text/javascript" : "text/html");
-  res.end(req.url === "/titles.js" ? source : '<input id="partNumber"><input id="titleModeFull" type="checkbox"><input id="titleModePart" type="checkbox"><p id="titleSuggestionStatus"></p><div id="titleSuggestionResults"></div><script src="/titles.js"></script>');
+  res.end(req.url === "/titles.js" ? source : '<link rel="stylesheet" href="/titles.css"><input id="partNumber"><input id="titleModeFull" type="checkbox"><input id="titleModePart" type="checkbox"><p id="titleSuggestionStatus"></p><section class="title-suggestions" style="width:350px;box-sizing:border-box"><div id="titleSuggestionResults"></div></section><script src="/titles.js"></script>');
 });
 await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
 let browser;
@@ -88,16 +90,31 @@ try {
     window.chosen = "";
     window.TitleSuggestions.mount({
       getContext: () => ({ number: document.getElementById("partNumber").value, productId: "ai-test" }),
-      search: async () => ({ groups: [{ source: "ai", titles: [{ title: "Zespol hydrauliczny BMW F40 5A2EBA9", partName: "Zespol hydrauliczny", url: "https://parts.test/one", sources: ["https://parts.test/one", "https://other.test/two"], note: "<img src=x onerror=alert(1)> Sprawdz zestaw." }] }] }),
-      choose: title => { window.chosen = title; }
+      search: async () => ({ groups: [{ source: "ai", titles: [{ title: "Pompa ABS ze sterownikiem BMW F40 uklad hamulcowy kompletny 5A2EBA9", partName: "Zespol hydrauliczny", url: "https://parts.test/one", sources: Array.from({ length: 8 }, (_, i) => `https://parts${i}.test/part`), note: "<img src=x onerror=alert(1)> Sprawdz zestaw." }] }] }),
+      choose: title => { window.chosen = title; }, append: () => {}
     });
   });
   await page.locator("#partNumber").fill("5A2EBA9");
   await page.waitForFunction(() => document.querySelector(".title-choice")?.textContent === "Zespol hydrauliczny");
   await page.locator(".title-choice").click();
   assert.equal(await page.evaluate(() => window.chosen), "Zespol hydrauliczny", "Use explicit AI part name, not dictionary truncation");
-  assert.equal(await page.locator(".title-candidate a").count(), 2);
+  assert.equal(await page.locator(".title-candidate a").count(), 8);
   assert.equal(await page.locator(".title-source img").count(), 0, "AI explanations render only as text");
+  await page.locator("#titleModeFull").check();
+  await page.waitForFunction(() => document.querySelector(".title-choice")?.textContent.startsWith("Pompa ABS"));
+  for (const width of [350, 260, 200]) {
+    await page.evaluate(width => { document.querySelector(".title-suggestions").style.width = `${width}px`; }, width);
+    const layout = await page.evaluate(() => {
+      const row = document.querySelector(".title-candidate");
+      const choice = row.querySelector(".title-choice");
+      const add = row.querySelector(".title-add");
+      return { row: row.getBoundingClientRect().width, title: choice.getBoundingClientRect().width, height: choice.getBoundingClientRect().height, controlsBelow: add.getBoundingClientRect().top >= choice.getBoundingClientRect().bottom, overflow: row.scrollWidth > row.clientWidth + 1 };
+    });
+    assert.ok(layout.title >= layout.row * 0.98, `Title must stay full width at ${width}px`);
+    assert.ok(layout.height < 160, "Title must not become a vertical letter column");
+    assert.ok(layout.controlsBelow, "Append button and source links sit below the title");
+    assert.equal(layout.overflow, false, "Eight source links wrap without horizontal overflow");
+  }
   assert.deepEqual(errors, []);
   console.log("Browser: automatic 2+2 suggestions, click selection, complete suffix, stale-offer protection and caching passed.");
 } finally {
