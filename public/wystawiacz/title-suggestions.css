@@ -15,3 +15,9 @@
 .title-editor-options output { font-weight: 700; }
 .title-over-limit { color: #b42318; }
 #titleLengthHint { display: block; margin-bottom: 16px; color: var(--muted); }
+.title-editor-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+.title-uppercase-label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.title-uppercase-label input { width: auto; accent-color: var(--orange); }
+.title-candidate { flex-wrap: wrap; }
+.title-candidate .title-add { flex: 0 0 auto; font-size: 11px; color: var(--orange-dark); }
+.title-combine-hint { display: block; margin-top: 8px; }

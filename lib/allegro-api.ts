@@ -106,7 +106,10 @@ export async function searchTitleSuggestions(number: string, owner: string, env:
         } catch {}
       }
       const results = unique(titles);
-      return { source: "google", titles: results, ...(!results.length ? { message: "Google nie znalazlo pasujacego pelnego numeru." } : {}) };
+      const emptyMessage = data.organic_results?.length
+        ? `Google zwrocilo ${data.organic_results.length} wynikow, ale nie potwierdzaja pelnego numeru ${number}. Nie podpowiadamy innych koncowek.`
+        : `Google nie znalazlo wynikow dla numeru ${number} poza Allegro.`;
+      return { source: "google", titles: results, ...(!results.length ? { message: emptyMessage } : {}) };
     } catch (error) {
       if (error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name)) return failure("timeout", "Google: przekroczono czas oczekiwania na SerpApi (12 sekund). Sprobuj ponownie.");
       return failure("network", "Google: nie udalo sie odczytac odpowiedzi SerpApi. Sprobuj ponownie pozniej.");

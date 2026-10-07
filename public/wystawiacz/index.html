@@ -213,15 +213,18 @@
               <label><input id="titleModePart" type="checkbox" /> Sama nazwa części — auto wybieram z mojej listy</label>
             </div>
             <small>Bez zaznaczenia: wpisujesz ręcznie. Zaznaczony tryb zapamiętamy. Propozycję zawsze wybierasz kliknięciem.</small>
+            <small class="title-combine-hint">„+ Dopisz nazwę części” łączy elementy w tytule. Dodawaj tylko elementy, które sprzedajesz razem.</small>
             <p id="titleSuggestionStatus" role="status" aria-live="polite">Wpisz pełny numer części. Kliknięcie propozycji wpisze tytuł.</p>
             <div id="titleSuggestionResults"></div>
           </section>
-          <label class="field">
-            <span>Tytuł aukcji</span>
+          <div class="field">
+            <div class="title-editor-heading">
+              <label for="titleInput">Tytuł aukcji</label>
+              <label class="title-uppercase-label"><input id="titleUppercase" type="checkbox" /> CAPS: WIELKIE LITERY</label>
+            </div>
             <textarea id="titleInput" rows="3" aria-describedby="titleCharacterCount titleLengthHint" placeholder="np. Przełącznik szyb Volkswagen Golf VII"></textarea>
-          </label>
+          </div>
           <div class="title-editor-options">
-            <label><input id="titleUppercase" type="checkbox" /> WIELKIE LITERY w całym tytule</label>
             <output id="titleCharacterCount" for="titleInput">0 / 75 znaków</output>
           </div>
           <small id="titleLengthHint" role="status">Limit Allegro: 75 znaków ze spacjami. Minimum: 12 znaków i 3 słowa.</small>

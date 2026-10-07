@@ -128,6 +128,18 @@ const titleSuggestions = window.TitleSuggestions.mount({
     appendPartNumberToTitle();
     titleInput.dispatchEvent(new Event("input", { bubbles: true }));
     detectProductDetails();
+  },
+  append: name => {
+    const vehicle = getSelectedVehicle();
+    let base = getTitleWithoutPartNumber();
+    if (vehicle?.short) base = base.replace(new RegExp(`\\s*${escapeRegExp(vehicle.short)}\\s*$`, "i"), "").trim();
+    const alreadyPresent = new RegExp(`(?:^|\\s|\\+)${escapeRegExp(name)}(?=$|\\s|\\+)`, "i").test(base);
+    if (!alreadyPresent) base = [base, name].filter(Boolean).join(" + ");
+    titleInput.value = [base, vehicle?.short].filter(Boolean).join(" ");
+    state.appendedPartNumber = "";
+    appendPartNumberToTitle();
+    titleInput.dispatchEvent(new Event("input", { bubbles: true }));
+    detectProductDetails();
   }
 });
 

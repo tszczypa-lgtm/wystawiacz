@@ -4,10 +4,14 @@
     // Only recognizable component names are offered; never reuse a vehicle model as a part name.
     const names = /\b(hak holowniczy|prze[łl][ąa]cznik (?:zespolony|szyb|[śs]wiate[łl])|panel (?:sterowania|klimatyzacji)|sterownik (?:silnika|skrzyni bieg[oó]w|abs)|modu[łl] (?:komfortu|bluetooth|airbag)|pompa (?:paliwa|wody|oleju|abs|wspomagania)|czujnik (?:parkowania|abs|temperatury|ci[śs]nienia|po[łl]o[żz]enia)|zacisk hamulcowy|tarcza hamulcowa|klocki hamulcowe|silnik wycieraczek|mechanizm wycieraczek|zaw[oó]r egr|ch[łl]odnica (?:wody|oleju|klimatyzacji)|poduszka (?:powietrzna|silnika)|kolektor (?:ss[ąa]cy|wydechowy)|wi[ąa]zka elektryczna|zamek (?:drzwi|klapy|maski)|skrzynia bieg[oó]w|dr[ąa][żz]ek kierowniczy|ko[ńn]c[oó]wka dr[ąa][żz]ka|lusterko|reflektor|alternator|rozrusznik|turbospr[ęe][żz]arka|wtryskiwacz|wahacz|amortyzator|spr[ęe][żz]yna|zwrotnica|piasta|p[oó][łl]o[śs]|zderzak|b[łl]otnik|maska|klapa|drzwi|lamp[ay]|licznik|radio|nawigacja|kierownica|przek[łl]adnia kierownicza|maglownica|spr[ęe][żz]arka klimatyzacji|kompresor klimatyzacji|nagrzewnica|dmuchawa|wentylator|przepustnica|przep[łl]ywomierz|sonda lambda|katalizator|filtr dpf|fotel|pas bezpiecze[ńn]stwa|peda[łl] gazu|stacyjka|klamka|uchwyt|wspornik|os[łl]ona)\b/i;
     const bounded = new RegExp(names.source.replace(/^\\b/, "(?<![\\p{L}\\p{N}])").replace(/\\b$/, "(?![\\p{L}\\p{N}])"), "iu");
-    const match = title.match(bounded);
-    return match ? match[0].replace(/^./, letter => letter.toUpperCase()) : "";
+    const match = title.match(bounded) || title.match(/(?<![\p{L}\p{N}])(pompa|sterownik|modu[łl]|czujnik|hak)(?![\p{L}\p{N}])/iu);
+    if (match) return match[0].replace(/^./, letter => letter.toUpperCase());
+    // Translate explicit component phrases, not an ambiguous standalone ABS label.
+    if (/\b(?:abs pump|pump abs)\b/i.test(title)) return "Pompa ABS";
+    if (/\b(?:abs (?:control unit|controller|module)|(?:control unit|controller|module) abs)\b/i.test(title)) return "Sterownik ABS";
+    return "";
   }
-  function mount({ getContext, search, choose }) {
+  function mount({ getContext, search, choose, append }) {
     const input = document.getElementById("partNumber");
     const status = document.getElementById("titleSuggestionStatus");
     const list = document.getElementById("titleSuggestionResults");
@@ -44,6 +48,7 @@
           row.className = "title-candidate";
           const button = document.createElement("button");
           button.type = "button";
+          button.className = "title-choice";
           button.textContent = candidate;
           button.addEventListener("click", () => {
             if (key(context()) !== key(snapshot)) { refresh(); return; }
@@ -51,6 +56,20 @@
             status.textContent = snapshot.mode === "part" ? "Nazwa wpisana. Teraz kliknij auto z Twojej listy. Sprawdz nazwe czesci." : "Tytul wpisany. Sprawdz, czy opisuje Twoja czesc.";
           });
           row.appendChild(button);
+          const name = partName(item.title);
+          if (name && append) {
+            const add = document.createElement("button");
+            add.type = "button";
+            add.className = "title-add";
+            add.textContent = "+ Dopisz nazwe czesci";
+            add.setAttribute("aria-label", `Dopisz do tytulu: ${name}`);
+            add.addEventListener("click", () => {
+              if (key(context()) !== key(snapshot)) { refresh(); return; }
+              append(name);
+              status.textContent = "Nazwa dopisana do tytulu. Sprawdz sklad zestawu i limit 75 znakow.";
+            });
+            row.appendChild(add);
+          }
           try {
             const url = new URL(item.url);
             if (url.protocol === "https:") {

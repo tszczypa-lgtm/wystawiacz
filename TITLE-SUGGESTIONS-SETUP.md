@@ -32,6 +32,13 @@ Saving a product over 75 characters is blocked. Publication additionally checks
 Allegro's minimum of 12 characters and three words. These controls cover typed
 titles, chosen suggestions, selected vehicles and restored drafts.
 
+The CAPS preference is now alongside the title label, above the textarea.
+Recognized suggestions include a separate append action for composing an offer
+such as `Pompa ABS + Sterownik ABS VW Tiguan 5NA803881F`. Appending preserves the
+selected session vehicle and one complete number, avoids repeated identical
+names, and does not silently truncate. Only combine components actually sold
+together; different search results do not prove they form a set.
+
 ## Google Setup
 
 Create a SerpApi account, review its current pricing and set a spending/usage

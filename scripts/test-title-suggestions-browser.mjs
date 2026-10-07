@@ -61,6 +61,28 @@ try {
   await page.locator("#partNumber").fill("5NA803881C");
   await page.waitForTimeout(1700);
   assert.equal(await page.evaluate(() => window.calls.length), calls);
+  await page.reload();
+  await page.evaluate(() => {
+    window.chosen = "";
+    window.appended = [];
+    window.product = "one";
+    window.TitleSuggestions.mount({
+      getContext: () => ({ number: document.getElementById("partNumber").value, productId: window.product }),
+      search: async () => ({ groups: [{ source: "allegro", titles: ["Pompa ABS VW Golf", "Sterownik ABS VW Golf"].map(title => ({ title, url: "https://example.test/part" })) }] }),
+      choose: title => { window.chosen = title; },
+      append: name => window.appended.push(name)
+    });
+  });
+  await page.locator("#titleModePart").check();
+  await page.locator("#partNumber").fill("5NA803881F");
+  await page.waitForFunction(() => document.querySelectorAll(".title-add").length === 2);
+  await page.locator(".title-choice").first().click();
+  await page.locator(".title-add").nth(1).click();
+  assert.equal(await page.evaluate(() => window.chosen), "Pompa ABS");
+  assert.deepEqual(await page.evaluate(() => window.appended), ["Sterownik ABS"]);
+  await page.evaluate(() => { window.product = "two"; });
+  await page.locator(".title-add").nth(1).click();
+  assert.deepEqual(await page.evaluate(() => window.appended), ["Sterownik ABS"], "Reject stale append after changing products");
   assert.deepEqual(errors, []);
   console.log("Browser: automatic 2+2 suggestions, click selection, complete suffix, stale-offer protection and caching passed.");
 } finally {

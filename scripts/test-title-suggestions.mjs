@@ -10,6 +10,8 @@ assert.ok(matchesTitleResult("Hak Volkswagen Tiguan", "Numer OE: 5NA 803 881 F",
 assert.ok(!matchesTitleResult("Hak 5NA803881J", "Pasuje tez do 5NA803881F", "5NA803881F"));
 assert.ok(!matchesTitleResult("Hak 5NA803881FB", "5NA803881F", "5NA803881F"));
 assert.ok(!matchesTitleResult("Hak Volkswagen", "5NA803881", "5NA803881F"));
+assert.ok(matchesTitleResult("BMW F40 ABS Pump + Module -5A2EBA9", "", "5A2EBA9"));
+assert.ok(matchesTitleResult("ABS PUMP UNIT ATE BMW F40", "Ref. 5A2EBA9 5A2EBA8", "5A2EBA9"));
 assert.ok(exactPartNumber("Hak 5NA 803 881 F Volkswagen", "5NA803881F"));
 assert.ok(!exactPartNumber("Hak 5NA803881FB", "5NA803881F"));
 assert.ok(!exactPartNumber("Hak 5NA 803 881 FB", "5NA803881F"));
@@ -90,6 +92,9 @@ assert.equal(sandbox.window.TitleSuggestions.partName("VW Tiguan Hak holowniczy 
 assert.equal(sandbox.window.TitleSuggestions.partName("Pół oś"), "");
 assert.equal(sandbox.window.TitleSuggestions.partName("Półoś Volkswagen Golf"), "Półoś");
 assert.equal(sandbox.window.TitleSuggestions.partName("Volkswagen Golf 5NA803881F"), "");
+assert.equal(sandbox.window.TitleSuggestions.partName("BMW F40 ABS Pump + Module -5A2EBA9"), "Pompa ABS");
+assert.equal(sandbox.window.TitleSuggestions.partName("BMW ABS control unit 5A2EBA9"), "Sterownik ABS");
+assert.equal(sandbox.window.TitleSuggestions.partName("Referencia 5A2EBA9 ABS"), "");
 assert.ok(!client.includes("innerHTML"));
 assert.ok(client.includes("version !== revision"));
 assert.ok(client.includes("choose(candidate, snapshot.mode)"));
@@ -97,8 +102,9 @@ const ast = ts.createSourceFile("app.js", app, ts.ScriptTarget.Latest, true, ts.
 const functions = ast.statements.filter(ts.isFunctionDeclaration).map(fn => fn.getText(ast)).join("\n");
 const mount = ast.statements.find(node => ts.isVariableStatement(node) && node.declarationList.declarations.some(item => item.name.getText(ast) === "titleSuggestions"));
 let choose;
+let append;
 const editor = vm.createContext({
-  window: { TitleSuggestions: { mount: options => { choose = options.choose; return {}; } } },
+  window: { TitleSuggestions: { mount: options => { choose = options.choose; append = options.append; return {}; } } },
   state: { vehicles: [{ id: "golf", short: "VW Golf VII" }, { id: "tiguan", short: "VW Tiguan" }], selectedVehicleId: "golf", appendedPartNumber: "", descriptionManuallyEdited: true },
   partNumber: { value: "5NA803881F" }, titleInput: { value: "", dispatchEvent() {} },
   suggestionPanel: { classList: { remove() {} } }, summaryCard: { classList: { remove() {} } },
@@ -112,5 +118,14 @@ assert.equal(editor.state.selectedVehicleId, "");
 assert.equal(editor.titleInput.value, "Hak holowniczy 5NA803881F");
 vm.runInContext('useVehicle("golf"); useVehicle("tiguan");', editor);
 assert.equal(editor.titleInput.value, "Hak holowniczy VW Tiguan 5NA803881F");
+choose("Pompa ABS", "part");
+vm.runInContext('useVehicle("tiguan");', editor);
+editor.state.descriptionManuallyEdited = true;
+append("Sterownik ABS");
+append("Sterownik ABS");
+assert.equal(editor.titleInput.value, "Pompa ABS + Sterownik ABS VW Tiguan 5NA803881F");
+assert.equal(editor.state.selectedVehicleId, "tiguan");
+assert.equal(editor.state.descriptionManuallyEdited, true, "Appending a component preserves manual description edits");
+assert.equal(sandbox.window.TitleSuggestions.partName("Sterownik Volkswagen 5NA803881F"), "Sterownik");
 console.log("Part-only integration: source model removed, own vehicle selection/replacement and one complete part number passed.");
 console.log("Title suggestions: 2+2, full suffix, MPN search, deduplication, caching, missing provider, secret protection and OCR removal passed.");
