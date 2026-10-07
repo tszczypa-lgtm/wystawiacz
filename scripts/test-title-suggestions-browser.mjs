@@ -31,7 +31,7 @@ try {
       search: async number => {
         window.calls.push(number);
         await new Promise(resolve => setTimeout(resolve, 200));
-        return { groups: ["allegro", "google"].map(source => ({ source, titles: [1, 2].map(i => ({ title: `${i === 1 ? "Hak holowniczy" : "Wspornik"} VW Tiguan ${source} ${number}`, url: "https://example.test/part" })) })) };
+        return { groups: [{ source: "allegro", titles: ["Hak holowniczy", "Wspornik", "Pompa ABS", "Sterownik ABS"].map(name => ({ title: `${name} VW Tiguan allegro ${number}`, url: "https://allegro.pl/listing" })) }] };
       },
       choose: title => { window.chosen = title; }
     });
@@ -93,17 +93,16 @@ try {
   await page.evaluate(() => {
     window.chosen = "";
     window.TitleSuggestions.mount({
-      getContext: () => ({ number: document.getElementById("partNumber").value, productId: "ai-test" }),
-      search: async () => ({ groups: [{ source: "ai", titles: [{ title: "Pompa ABS ze sterownikiem BMW F40 uklad hamulcowy kompletny 5A2EBA9", partName: "Zespol hydrauliczny", url: "https://parts.test/one", sources: Array.from({ length: 8 }, (_, i) => `https://parts${i}.test/part`), note: "<img src=x onerror=alert(1)> Sprawdz zestaw." }] }] }),
+      getContext: () => ({ number: document.getElementById("partNumber").value, productId: "four-test" }),
+      search: async () => ({ groups: [{ source: "allegro", titles: ["Pompa ABS", "Sterownik ABS", "Czujnik ABS", "Wspornik"].map(name => ({ title: `${name} BMW F40 uklad hamulcowy kompletny 5A2EBA9`, url: "https://allegro.pl/listing" })) }] }),
       choose: title => { window.chosen = title; }, append: () => {}
     });
   });
   await page.locator("#partNumber").fill("5A2EBA9");
-  await page.waitForFunction(() => document.querySelector(".title-choice")?.textContent === "Zespol hydrauliczny");
-  await page.locator(".title-choice").click();
-  assert.equal(await page.evaluate(() => window.chosen), "Zespol hydrauliczny", "Use explicit AI part name, not dictionary truncation");
-  assert.equal(await page.locator(".title-candidate a").count(), 8);
-  assert.equal(await page.locator(".title-source img").count(), 0, "AI explanations render only as text");
+  await page.waitForFunction(() => document.querySelectorAll(".title-choice").length === 4);
+  await page.locator(".title-choice").first().click();
+  assert.equal(await page.evaluate(() => window.chosen), "Pompa ABS");
+  assert.equal(await page.locator(".title-candidate a").count(), 4);
   await page.locator("#titleModeFull").check();
   await page.waitForFunction(() => document.querySelector(".title-choice")?.textContent.startsWith("Pompa ABS"));
   for (const width of [350, 260, 200]) {
@@ -117,7 +116,7 @@ try {
     assert.ok(layout.title >= layout.row * 0.98, `Title must stay full width at ${width}px`);
     assert.ok(layout.height < 160, "Title must not become a vertical letter column");
     assert.ok(layout.controlsBelow, "Append button and source links sit below the title");
-    assert.equal(layout.overflow, false, "Eight source links wrap without horizontal overflow");
+    assert.equal(layout.overflow, false, "Controls wrap without horizontal overflow");
   }
   assert.deepEqual(errors, []);
   await page.goto(`http://127.0.0.1:${server.address().port}/full.html`);
@@ -126,7 +125,7 @@ try {
     localStorage.setItem("wystawiacz-title-mode", "full");
     window.TitleSuggestions.mount({
       getContext: () => ({ number: document.getElementById("partNumber").value, productId: "full-page" }),
-      search: async () => ({ groups: [{ source: "ai", titles: [{ title: "VOLKSWAGEN TIGUAN MK2 TOW BAR ELECTRIC WITH HOOK & WIRING 5NA803881F", partName: "Hak holowniczy", url: "https://parts.test/part", sources: Array.from({ length: 8 }, (_, i) => `https://parts${i}.test/part`) }] }] }),
+      search: async () => ({ groups: [{ source: "allegro", titles: [{ title: "VOLKSWAGEN TIGUAN MK2 TOW BAR ELECTRIC WITH HOOK & WIRING 5NA803881F", url: "https://allegro.pl/listing" }] }] }),
       choose: () => {}, append: () => {}
     });
   });
@@ -143,7 +142,7 @@ try {
     assert.ok(layout.height < 160, `Full form title height at viewport ${width}: ${JSON.stringify(layout)}`);
     assert.equal(layout.overflow, false);
   }
-  console.log("Browser: automatic 2+2 suggestions, click selection, complete suffix, stale-offer protection and caching passed.");
+  console.log("Browser: four Allegro suggestions, modes, append, full-form layout, complete suffix, stale-offer protection and caching passed.");
 } finally {
   if (browser) await browser.close();
   await new Promise(resolve => server.close(resolve));

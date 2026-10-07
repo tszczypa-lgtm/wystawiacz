@@ -88,7 +88,6 @@ const descriptionPreviewText = document.querySelector("#descriptionPreviewText")
 const descriptionTextInput = document.querySelector("#descriptionTextInput");
 const searchAllegroPartButton = document.querySelector("#searchAllegroPartButton");
 const searchAllegroTitleButton = document.querySelector("#searchAllegroTitleButton");
-const searchGooglePartButton = document.querySelector("#searchGooglePartButton");
 const productList = document.querySelector("#productList");
 const emptyState = document.querySelector("#emptyState");
 const toast = document.querySelector("#toast");
@@ -262,7 +261,6 @@ descriptionTextInput.addEventListener("input", () => {
 });
 searchAllegroPartButton.addEventListener("click", () => openSearch("https://allegro.pl/listing?string=", partNumber.value.trim()));
 searchAllegroTitleButton.addEventListener("click", () => openSearch("https://allegro.pl/listing?string=", getTitleWithoutPartNumber()));
-searchGooglePartButton.addEventListener("click", () => openSearch("https://www.google.com/search?q=", partNumber.value.trim()));
 
 locationSettingsButton.addEventListener("click", () => {
   fillLocationModal();

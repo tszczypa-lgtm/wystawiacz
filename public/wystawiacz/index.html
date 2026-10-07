@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Wystawiacz Allegro</title>
     <link rel="stylesheet" href="styles.css" />
-    <link rel="stylesheet" href="title-suggestions.css" />
+    <link rel="stylesheet" href="title-suggestions.css?v=allegro4" />
   </head>
   <body>
     <header class="topbar">
@@ -207,7 +207,7 @@
           </label>
 
           <section class="title-suggestions" aria-label="Propozycje tytułów po numerze części">
-            <strong>Propozycje nazw i tytułów: Allegro + analiza AI</strong>
+            <strong>Propozycje tytułów: do 4 z Allegro</strong>
             <div class="title-modes">
               <label><input id="titleModeFull" type="checkbox" /> Pełny tytuł z wyszukiwania</label>
               <label><input id="titleModePart" type="checkbox" /> Sama nazwa części — auto wybieram z mojej listy</label>
@@ -340,7 +340,6 @@
           <span>Sprawdź ceny i podobne oferty:</span>
           <button id="searchAllegroPartButton" class="secondary-button" type="button">Allegro: numer części</button>
           <button id="searchAllegroTitleButton" class="secondary-button" type="button">Allegro: tytuł bez numeru</button>
-          <button id="searchGooglePartButton" class="secondary-button" type="button">Google: numer części</button>
         </div>
         <div class="pricing-final-row">
           <label class="field">
@@ -425,7 +424,7 @@
       </div>
     </div>
     <script src="web-auth.js"></script>
-    <script src="title-suggestions.js"></script>
+    <script src="title-suggestions.js?v=allegro4"></script>
     <script src="title-editor.js"></script>
     <script src="app.js"></script>
   </body>

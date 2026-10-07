@@ -5,81 +5,50 @@ import vm from "node:vm";
 
 const source = await readFile(new URL("../lib/allegro-api.ts", import.meta.url), "utf8");
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-const { searchTitleSuggestions, exactPartNumber, matchesTitleResult } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
-assert.ok(matchesTitleResult("Hak Volkswagen Tiguan", "Numer OE: 5NA 803 881 F", "5NA803881F"));
-assert.ok(!matchesTitleResult("Hak 5NA803881J", "Pasuje tez do 5NA803881F", "5NA803881F"));
-assert.ok(!matchesTitleResult("Hak 5NA803881FB", "5NA803881F", "5NA803881F"));
-assert.ok(!matchesTitleResult("Hak Volkswagen", "5NA803881", "5NA803881F"));
-assert.ok(matchesTitleResult("BMW F40 ABS Pump + Module -5A2EBA9", "", "5A2EBA9"));
-assert.ok(matchesTitleResult("ABS PUMP UNIT ATE BMW F40", "Ref. 5A2EBA9 5A2EBA8", "5A2EBA9"));
-assert.ok(exactPartNumber("Hak 5NA 803 881 F Volkswagen", "5NA803881F"));
-assert.ok(!exactPartNumber("Hak 5NA803881FB", "5NA803881F"));
-assert.ok(!exactPartNumber("Hak 5NA 803 881 FB", "5NA803881F"));
-assert.ok(!exactPartNumber("Hak 5NA803881", "5NA803881F"));
-let calls = 0;
+const { searchTitleSuggestions } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
 const originalFetch = globalThis.fetch;
-globalThis.fetch = async url => {
-  calls++;
-  const u = new URL(url);
-  assert.equal(u.hostname, "serpapi.com");
-  assert.equal(u.searchParams.get("q"), '5NA803881F -site:allegro.pl');
-  assert.equal(u.searchParams.get("api_key"), "server-only");
-  return Response.json({ organic_results: [
-    { title: "Hak 5NA803881FB", snippet: "Pasuje takze do 5NA803881F", link: "https://parts.test/wrong" },
-    { title: "Hak 5NA 803 881 F Volkswagen | Sklep", link: "https://parts.test/one" },
-    { title: "Zaczep Tiguan", snippet: "Czesc numer 5NA 803 881 F", link: "https://parts.test/two" },
-    { title: "Trzeci hak 5NA803881F", link: "https://parts.test/three" },
-    { title: "Hak 5NA803881F", link: "javascript:alert(1)" }
-  ] });
-};
+let externalCalls = 0;
+let catalogCalls = 0;
+globalThis.fetch = async () => { externalCalls++; throw new Error("Paid providers must never be called"); };
 const remote = async (path, options) => {
+  catalogCalls++;
   assert.ok(path.includes("mode=MPN"));
   assert.ok(path.includes("5NA803881F"));
   assert.ok(options.signal);
-  return { products: [{ name: "Hak Volkswagen" }, { name: "Hak Volkswagen" }, { name: "Zaczep Tiguan" }, { name: "Inny hak" }] };
+  return { products: [
+    { name: "Hak Volkswagen" }, { name: "Hak Volkswagen" }, { name: "Wspornik Tiguan" },
+    { name: "Pompa ABS" }, { name: "Sterownik ABS" }, { name: "Piaty produkt" }
+  ] };
 };
 try {
-  const result = await searchTitleSuggestions("5NA803881F", "owner1", { SERPAPI_API_KEY: "server-only" }, remote);
-  assert.equal(result.groups[0].titles.length, 2);
-  assert.equal(result.groups[1].titles.length, 2);
-  assert.ok(result.groups[1].titles.every(item => !item.url.endsWith("/wrong")));
-  for (const group of result.groups) for (const item of group.titles) {
+  const result = await searchTitleSuggestions("5NA803881F", "owner1", {}, remote);
+  assert.equal(result.groups.length, 1);
+  assert.equal(result.groups[0].source, "allegro");
+  assert.equal(result.groups[0].titles.length, 4);
+  assert.equal(new Set(result.groups[0].titles.map(item => item.title)).size, 4);
+  for (const item of result.groups[0].titles) {
     assert.ok(item.title.endsWith("5NA803881F"));
     assert.ok(item.title.length <= 75);
+    assert.equal(new URL(item.url).hostname, "allegro.pl");
   }
-  assert.ok(!JSON.stringify(result).includes("server-only"));
-  await searchTitleSuggestions("5NA803881F", "owner1", { SERPAPI_API_KEY: "server-only" }, remote);
-  assert.equal(calls, 1, "Repeated number uses cached results");
-  const partial = await searchTitleSuggestions("5NA803881F", "owner2", {}, remote);
-  assert.equal(partial.groups[0].titles.length, 2);
-  assert.equal(partial.groups[1].titles.length, 0);
-  assert.ok(partial.groups[1].message.includes("SERPAPI_API_KEY"));
-  const failed = await searchTitleSuggestions("5NA803881F", "owner3", {}, async () => { throw new Error("secret-token"); });
+  await searchTitleSuggestions("5NA803881F", "owner1", {}, remote);
+  assert.equal(catalogCalls, 1, "Repeated number uses cached catalog results");
+  const fewer = await searchTitleSuggestions("5NA803881F", "fewer", {}, async () => ({ products: [{ name: "Pompa ABS" }] }));
+  assert.equal(fewer.groups[0].titles.length, 1, "Do not invent four results");
+  const empty = await searchTitleSuggestions("5NA803881F", "empty", {}, async () => ({ products: [] }));
+  assert.equal(empty.groups[0].titles.length, 0);
+  let failedCalls = 0;
+  const failedRemote = async () => { failedCalls++; throw new Error("secret-token"); };
+  const failed = await searchTitleSuggestions("5NA803881F", "failed", {}, failedRemote);
+  assert.equal(failed.groups[0].errorCode, "allegro");
   assert.ok(!JSON.stringify(failed).includes("secret-token"));
+  await searchTitleSuggestions("5NA803881F", "failed", {}, failedRemote);
+  assert.equal(failedCalls, 2, "Do not cache catalog outages");
   await assert.rejects(searchTitleSuggestions('bad?query="', "owner1", {}, remote));
-  for (const [status, code] of [[401, "invalid_key"], [403, "account_denied"], [429, "quota"], [400, "request"], [503, "provider"]]) {
-    let attempts = 0;
-    globalThis.fetch = async () => { attempts++; return Response.json({ error: "secret-token server-only" }, { status }); };
-    const owner = `status-${status}`;
-    const first = await searchTitleSuggestions("5NA803881F", owner, { SERPAPI_API_KEY: "server-only" }, remote);
-    assert.equal(first.groups[1].errorCode, code);
-    assert.ok(!JSON.stringify(first).includes("server-only"));
-    assert.ok(!JSON.stringify(first).includes("secret-token"));
-    await searchTitleSuggestions("5NA803881F", owner, { SERPAPI_API_KEY: "server-only" }, remote);
-    assert.equal(attempts, 2, "Failed provider requests must not be cached for five minutes");
-  }
-  globalThis.fetch = async () => Response.json({ search_metadata: { status: "Success" }, error: "Google hasn't returned any results for this query." });
-  const empty = await searchTitleSuggestions("5NA803881F", "empty", { SERPAPI_API_KEY: "server-only" }, remote);
-  assert.equal(empty.groups[1].titles.length, 0);
-  assert.equal(empty.groups[1].errorCode, undefined, "Successful empty results are not a provider outage");
-  assert.ok(empty.groups[1].message.includes("nie znalazlo"));
-  globalThis.fetch = async url => {
-    assert.equal(new URL(url).searchParams.get("api_key"), "server-only");
-    throw new DOMException("secret-token", "TimeoutError");
-  };
-  const timeout = await searchTitleSuggestions("5NA803881F", "timeout", { SERPAPI_API_KEY: " server-only\n" }, remote);
-  assert.equal(timeout.groups[1].errorCode, "timeout");
-  assert.ok(!JSON.stringify(timeout).includes("secret-token"));
+  for (let i = 0; i < 8; i++) await searchTitleSuggestions(`PART000${i}`, "limited", {}, async () => ({ products: [] }));
+  await assert.rejects(searchTitleSuggestions("PART0009", "limited", {}, remote), /Za duzo/);
+  assert.equal(externalCalls, 0, "No Google or AI requests, even during failures");
+  assert.ok(!source.includes("serpapi.com") && !source.includes("api.openai.com"));
 } finally { globalThis.fetch = originalFetch; }
 const app = await readFile(new URL("../public/wystawiacz/app.js", import.meta.url), "utf8");
 const html = await readFile(new URL("../public/wystawiacz/index.html", import.meta.url), "utf8");
@@ -128,4 +97,4 @@ assert.equal(editor.state.selectedVehicleId, "tiguan");
 assert.equal(editor.state.descriptionManuallyEdited, true, "Appending a component preserves manual description edits");
 assert.equal(sandbox.window.TitleSuggestions.partName("Sterownik Volkswagen 5NA803881F"), "Sterownik");
 console.log("Part-only integration: source model removed, own vehicle selection/replacement and one complete part number passed.");
-console.log("Title suggestions: 2+2, full suffix, MPN search, deduplication, caching, missing provider, secret protection and OCR removal passed.");
+console.log("Title suggestions: four Allegro candidates, full suffix, deduplication, caching, rate limit, safe failures and zero paid-provider requests passed.");
