@@ -64,6 +64,19 @@ assert.equal(sandbox.window.TitleSuggestions.partName("Volkswagen Golf 5NA803881
 assert.equal(sandbox.window.TitleSuggestions.partName("BMW F40 ABS Pump + Module -5A2EBA9"), "Pompa ABS");
 assert.equal(sandbox.window.TitleSuggestions.partName("BMW ABS control unit 5A2EBA9"), "Sterownik ABS");
 assert.equal(sandbox.window.TitleSuggestions.partName("Referencia 5A2EBA9 ABS"), "");
+for (const [title, name] of [
+  ["Czujnik parktronik PDC VW Golf VII 5Q0919275", "Czujnik parktronik PDC"],
+  ["VW Golf VII Czujnik parkowania PDC przód tył 5Q0919275", "Czujnik parkowania PDC przód tył"],
+  ["Lewy przedni czujnik ABS Volkswagen Golf 5Q0927803", "Lewy przedni czujnik ABS"],
+  ["Czujnik położenia wału korbowego Audi A4 03L906433", "Czujnik położenia wału korbowego"],
+  ["Czujnik poziomu paliwa VW Tiguan 5NA919673", "Czujnik poziomu paliwa"],
+  ["Pompa wspomagania elektryczna VW Golf 5Q0423156", "Pompa wspomagania elektryczna"],
+  ["Czujnik parkowania Volkswagen Golf VII PDC 5Q0919275", "Czujnik parkowania"],
+  ["Czujnik parkowania 5Q0919275", "Czujnik parkowania"],
+  ["Czujnik temperatury wody BMW F40 12345678", "Czujnik temperatury wody"],
+  ["Czujnik PDCness Volkswagen Golf 12345678", "Czujnik"],
+  ["Pompa ABS + Sterownik ABS BMW F40 5A2EBA9", "Pompa ABS"]
+]) assert.equal(sandbox.window.TitleSuggestions.partName(title), name, title);
 assert.ok(!client.includes("innerHTML"));
 assert.ok(client.includes("version !== revision"));
 assert.ok(client.includes("choose(candidate, snapshot.mode)"));
@@ -96,5 +109,8 @@ assert.equal(editor.titleInput.value, "Pompa ABS + Sterownik ABS VW Tiguan 5NA80
 assert.equal(editor.state.selectedVehicleId, "tiguan");
 assert.equal(editor.state.descriptionManuallyEdited, true, "Appending a component preserves manual description edits");
 assert.equal(sandbox.window.TitleSuggestions.partName("Sterownik Volkswagen 5NA803881F"), "Sterownik");
+choose(sandbox.window.TitleSuggestions.partName("Czujnik parktronik PDC BMW F40 5NA803881F"), "part");
+vm.runInContext('useVehicle("tiguan");', editor);
+assert.equal(editor.titleInput.value, "Czujnik parktronik PDC VW Tiguan 5NA803881F", "Keep rich part name and use only the selected own vehicle");
 console.log("Part-only integration: source model removed, own vehicle selection/replacement and one complete part number passed.");
 console.log("Title suggestions: four Allegro candidates, full suffix, deduplication, caching, rate limit, safe failures and zero paid-provider requests passed.");

@@ -19,6 +19,10 @@ The mutually exclusive full-title and part-only checkboxes are remembered
 in this browser. Part-only mode recognizes common component names; choose the
 vehicle from your own list. If a name cannot be recognized, switch to full-title
 mode to view the catalog result. Proposals are never selected automatically.
+Recognized technical and position qualifiers are kept when adjacent in the
+source title, e.g. `Czujnik parktronik PDC`, `Czujnik polozenia walu korbowego`
+or `Lewy przedni czujnik ABS`. Extraction stops before unknown vehicle tokens
+and identifiers. Missing synonyms/specifications are never invented.
 
 The separate append action composes names such as
 `Pompa ABS + Sterownik ABS VW Tiguan 5NA803881F`. It preserves the selected

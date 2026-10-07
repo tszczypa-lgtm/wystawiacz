@@ -2,10 +2,23 @@
   "use strict";
   function partName(title) {
     // Only recognizable component names are offered; never reuse a vehicle model as a part name.
-    const names = /\b(hak holowniczy|prze[łl][ąa]cznik (?:zespolony|szyb|[śs]wiate[łl])|panel (?:sterowania|klimatyzacji)|sterownik (?:silnika|skrzyni bieg[oó]w|abs)|modu[łl] (?:komfortu|bluetooth|airbag)|pompa (?:paliwa|wody|oleju|abs|wspomagania)|czujnik (?:parkowania|abs|temperatury|ci[śs]nienia|po[łl]o[żz]enia)|zacisk hamulcowy|tarcza hamulcowa|klocki hamulcowe|silnik wycieraczek|mechanizm wycieraczek|zaw[oó]r egr|ch[łl]odnica (?:wody|oleju|klimatyzacji)|poduszka (?:powietrzna|silnika)|kolektor (?:ss[ąa]cy|wydechowy)|wi[ąa]zka elektryczna|zamek (?:drzwi|klapy|maski)|skrzynia bieg[oó]w|dr[ąa][żz]ek kierowniczy|ko[ńn]c[oó]wka dr[ąa][żz]ka|lusterko|reflektor|alternator|rozrusznik|turbospr[ęe][żz]arka|wtryskiwacz|wahacz|amortyzator|spr[ęe][żz]yna|zwrotnica|piasta|p[oó][łl]o[śs]|zderzak|b[łl]otnik|maska|klapa|drzwi|lamp[ay]|licznik|radio|nawigacja|kierownica|przek[łl]adnia kierownicza|maglownica|spr[ęe][żz]arka klimatyzacji|kompresor klimatyzacji|nagrzewnica|dmuchawa|wentylator|przepustnica|przep[łl]ywomierz|sonda lambda|katalizator|filtr dpf|fotel|pas bezpiecze[ńn]stwa|peda[łl] gazu|stacyjka|klamka|uchwyt|wspornik|os[łl]ona)\b/i;
+    const names = /\b(hak holowniczy|prze[łl][ąa]cznik (?:zespolony|szyb|[śs]wiate[łl])|panel (?:sterowania|klimatyzacji)|sterownik (?:silnika|skrzyni bieg[oó]w|abs)|modu[łl] (?:komfortu|bluetooth|airbag)|pompa (?:paliwa|wody|oleju|abs|wspomagania)|czujnik (?:parkowania|parktronik|parktronic|pdc|abs|temperatury|ci[śs]nienia|po[łl]o[żz]enia)|zacisk hamulcowy|tarcza hamulcowa|klocki hamulcowe|silnik wycieraczek|mechanizm wycieraczek|zaw[oó]r egr|ch[łl]odnica (?:wody|oleju|klimatyzacji)|poduszka (?:powietrzna|silnika)|kolektor (?:ss[ąa]cy|wydechowy)|wi[ąa]zka elektryczna|zamek (?:drzwi|klapy|maski)|skrzynia bieg[oó]w|dr[ąa][żz]ek kierowniczy|ko[ńn]c[oó]wka dr[ąa][żz]ka|lusterko|reflektor|alternator|rozrusznik|turbospr[ęe][żz]arka|wtryskiwacz|wahacz|amortyzator|spr[ęe][żz]yna|zwrotnica|piasta|p[oó][łl]o[śs]|zderzak|b[łl]otnik|maska|klapa|drzwi|lamp[ay]|licznik|radio|nawigacja|kierownica|przek[łl]adnia kierownicza|maglownica|spr[ęe][żz]arka klimatyzacji|kompresor klimatyzacji|nagrzewnica|dmuchawa|wentylator|przepustnica|przep[łl]ywomierz|sonda lambda|katalizator|filtr dpf|fotel|pas bezpiecze[ńn]stwa|peda[łl] gazu|stacyjka|klamka|uchwyt|wspornik|os[łl]ona)\b/i;
     const bounded = new RegExp(names.source.replace(/^\\b/, "(?<![\\p{L}\\p{N}])").replace(/\\b$/, "(?![\\p{L}\\p{N}])"), "iu");
     const match = title.match(bounded) || title.match(/(?<![\p{L}\p{N}])(pompa|sterownik|modu[łl]|czujnik|hak)(?![\p{L}\p{N}])/iu);
-    if (match) return match[0].replace(/^./, letter => letter.toUpperCase());
+    if (match) {
+      // Keep known technical/position qualifiers, stopping before vehicle names or identifiers.
+      const qualifier = /^[\s,/+()-]+(parktronik|parktronic|pdc|abs|esp|airbag|srs|parkowania|parkingowy|parkingowa|parkingowe|przedni|przednia|przednie|tylny|tylna|tylne|lewy|lewa|lewe|prawy|prawa|prawe|prz[oó]d|ty[łl]|zewn[ęe]trzny|zewn[ęe]trzna|wewn[ęe]trzny|wewn[ęe]trzna|elektryczny|elektryczna|elektryczne|manualny|manualna|hydrauliczny|hydrauliczna|temperatury|ci[śs]nienia|po[łl]o[żz]enia|poziomu|paliwa|wody|oleju|powietrza|do[łl]adowania|spalin|deszczu|zmierzchu|wa[łl]u|korbowego|wa[łl]ka|rozrz[ąa]du|silnika|skrzyni|bieg[oó]w|klimatyzacji|wspomagania|hamulcowy|hamulcowa|hamulcowe|holowniczy|holownicza|komfortu|bluetooth|ksenon|xenon|led)(?![\p{L}\p{N}])/iu;
+      const prefix = title.slice(0, match.index).match(/(?<![\p{L}\p{N}])((?:lewy|lewa|lewe|prawy|prawa|prawe|przedni|przednia|przednie|tylny|tylna|tylne)(?:\s+(?:lewy|lewa|lewe|prawy|prawa|prawe|przedni|przednia|przednie|tylny|tylna|tylne))?)\s*$/iu);
+      const words = [prefix?.[1], match[0]].filter(Boolean);
+      let rest = title.slice(match.index + match[0].length);
+      for (let i = 0; i < 8; i++) {
+        const next = rest.match(qualifier);
+        if (!next) break;
+        words.push(next[1]);
+        rest = rest.slice(next[0].length);
+      }
+      return words.join(" ").replace(/^./, letter => letter.toUpperCase());
+    }
     // Translate explicit component phrases, not an ambiguous standalone ABS label.
     if (/\b(?:abs pump|pump abs)\b/i.test(title)) return "Pompa ABS";
     if (/\b(?:abs (?:control unit|controller|module)|(?:control unit|controller|module) abs)\b/i.test(title)) return "Sterownik ABS";

@@ -125,8 +125,8 @@ try {
     localStorage.setItem("wystawiacz-title-mode", "full");
     window.TitleSuggestions.mount({
       getContext: () => ({ number: document.getElementById("partNumber").value, productId: "full-page" }),
-      search: async () => ({ groups: [{ source: "allegro", titles: [{ title: "VOLKSWAGEN TIGUAN MK2 TOW BAR ELECTRIC WITH HOOK & WIRING 5NA803881F", url: "https://allegro.pl/listing" }] }] }),
-      choose: () => {}, append: () => {}
+      search: async () => ({ groups: [{ source: "allegro", titles: ["VOLKSWAGEN TIGUAN MK2 TOW BAR ELECTRIC WITH HOOK & WIRING 5NA803881F", "Czujnik parktronik PDC VW Golf VII 5NA803881F"].map(title => ({ title, url: "https://allegro.pl/listing" })) }] }),
+      choose: title => { window.chosen = title; }, append: () => {}
     });
   });
   await page.locator("#partNumber").fill("5NA803881F");
@@ -142,6 +142,10 @@ try {
     assert.ok(layout.height < 160, `Full form title height at viewport ${width}: ${JSON.stringify(layout)}`);
     assert.equal(layout.overflow, false);
   }
+  await page.locator("#titleModePart").check();
+  await page.waitForFunction(() => document.querySelector(".title-choice")?.textContent === "Czujnik parktronik PDC");
+  await page.locator(".title-choice").click();
+  assert.equal(await page.evaluate(() => window.chosen), "Czujnik parktronik PDC", "Keep descriptive name without the catalog vehicle");
   console.log("Browser: four Allegro suggestions, modes, append, full-form layout, complete suffix, stale-offer protection and caching passed.");
 } finally {
   if (browser) await browser.close();
