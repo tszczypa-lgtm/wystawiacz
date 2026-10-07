@@ -37,11 +37,12 @@
         const section = document.createElement("div");
         section.className = "title-source";
         const heading = document.createElement("strong");
-        heading.textContent = group.source === "allegro" ? "Allegro - katalog produktow" : "Google";
+        heading.textContent = group.source === "allegro" ? "Allegro - katalog produktow" : group.source === "ai" ? "AI - nazwy na podstawie zrodel" : "Google - wyniki bez analizy AI";
         section.appendChild(heading);
         let offered = 0;
         for (const item of (group.titles || []).slice(0, 2)) {
-          const candidate = snapshot.mode === "part" ? partName(item.title) : item.title;
+          const name = typeof item.partName === "string" ? item.partName : partName(item.title);
+          const candidate = snapshot.mode === "part" ? name : item.title;
           if (!candidate || seen.has(candidate.toLowerCase())) continue;
           seen.add(candidate.toLowerCase());
           const row = document.createElement("div");
@@ -56,7 +57,6 @@
             status.textContent = snapshot.mode === "part" ? "Nazwa wpisana. Teraz kliknij auto z Twojej listy. Sprawdz nazwe czesci." : "Tytul wpisany. Sprawdz, czy opisuje Twoja czesc.";
           });
           row.appendChild(button);
-          const name = partName(item.title);
           if (name && append) {
             const add = document.createElement("button");
             add.type = "button";
@@ -70,16 +70,21 @@
             });
             row.appendChild(add);
           }
-          try {
-            const url = new URL(item.url);
+          for (const [index, source] of (Array.isArray(item.sources) ? item.sources : [item.url]).entries()) try {
+            const url = new URL(source);
             if (url.protocol === "https:") {
               const link = document.createElement("a");
               link.href = url.href; link.target = "_blank"; link.rel = "noopener noreferrer";
-              link.textContent = "Zrodlo";
+              link.textContent = index ? `Zrodlo ${index + 1}` : "Zrodlo";
               row.appendChild(link);
             }
           } catch {}
           section.appendChild(row);
+          if (typeof item.note === "string" && item.note) {
+            const note = document.createElement("p");
+            note.textContent = item.note;
+            section.appendChild(note);
+          }
           count++;
           offered++;
         }
@@ -102,7 +107,7 @@
       const saved = cache.get(number);
       if (saved && saved.until > Date.now()) { render(saved.payload, snapshot); return; }
       controller = new AbortController();
-      status.textContent = "Szukam tytulow po pelnym numerze czesci...";
+      status.textContent = "Szukam po pelnym numerze i analizuje dostepne zrodla...";
       try {
         const payload = await search(number, controller.signal);
         if (version !== revision || key(context()) !== key(snapshot)) return;

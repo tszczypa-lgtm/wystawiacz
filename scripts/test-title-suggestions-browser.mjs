@@ -83,6 +83,21 @@ try {
   await page.evaluate(() => { window.product = "two"; });
   await page.locator(".title-add").nth(1).click();
   assert.deepEqual(await page.evaluate(() => window.appended), ["Sterownik ABS"], "Reject stale append after changing products");
+  await page.reload();
+  await page.evaluate(() => {
+    window.chosen = "";
+    window.TitleSuggestions.mount({
+      getContext: () => ({ number: document.getElementById("partNumber").value, productId: "ai-test" }),
+      search: async () => ({ groups: [{ source: "ai", titles: [{ title: "Zespol hydrauliczny BMW F40 5A2EBA9", partName: "Zespol hydrauliczny", url: "https://parts.test/one", sources: ["https://parts.test/one", "https://other.test/two"], note: "<img src=x onerror=alert(1)> Sprawdz zestaw." }] }] }),
+      choose: title => { window.chosen = title; }
+    });
+  });
+  await page.locator("#partNumber").fill("5A2EBA9");
+  await page.waitForFunction(() => document.querySelector(".title-choice")?.textContent === "Zespol hydrauliczny");
+  await page.locator(".title-choice").click();
+  assert.equal(await page.evaluate(() => window.chosen), "Zespol hydrauliczny", "Use explicit AI part name, not dictionary truncation");
+  assert.equal(await page.locator(".title-candidate a").count(), 2);
+  assert.equal(await page.locator(".title-source img").count(), 0, "AI explanations render only as text");
   assert.deepEqual(errors, []);
   console.log("Browser: automatic 2+2 suggestions, click selection, complete suffix, stale-offer protection and caching passed.");
 } finally {

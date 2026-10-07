@@ -58,3 +58,32 @@ Google requests send only the entered part number, not photos or customer data.
 Allegro uses the seller's existing server-side connection. The route is guarded
 by the existing account and subscription checks. Provider errors never return
 API credentials to the browser.
+
+## AI Analysis Setup
+
+Create an OpenAI API project and enable API billing separately from ChatGPT.
+Create a project API key at https://platform.openai.com/api-keys and add it as
+the Secret `OPENAI_API_KEY` in Cloudflare Worker `wystawiacz`, Production,
+Settings > Variables and secrets, then deploy. Do not send the key in chat,
+screenshots or Git. Set provider spending alerts and monitor usage; local
+per-instance limits are not a global hard billing cap. Avoid automatic top-ups
+while testing. Optional plain variable `OPENAI_PART_MODEL` overrides the default
+`gpt-4.1-mini`. No new dependency or customer-side credentials are required.
+
+AI receives only the entered number and up to eight matching search titles,
+snippets and public URLs (including exact-number Allegro names when present).
+It does not receive photos, customer details or seller access tokens. It does
+not browse full pages. Search evidence is treated as untrusted data. Results
+contain Polish component names, proposed full titles, explanations and source
+links. They are not verified catalog records or guarantees of compatibility.
+Separate pump/controller offers do not prove a combined assembly. The seller
+must confirm what is physically included. Unsupported/ambiguous results should
+produce no suggestion; source IDs are validated against the supplied evidence.
+
+Responses API uses structured output, `store: false`, a 900 output-token cap
+and a 15-second timeout, with no automatic AI retry. With no key, no matching
+evidence, refusal, invalid output or provider failure, the ordinary search
+results remain available and the interface explains the limitation. Successful
+analysis replaces the Google group with up to two AI proposals; Allegro stays.
+Mode selection, manual selection, CAPS, append and own-vehicle controls remain.
+Tests use mocked providers; live paid requests require the owner's setup.
