@@ -5,8 +5,12 @@ import { pathToFileURL } from "node:url";
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href : "playwright");
 const source = await readFile(new URL("../public/wystawiacz/title-suggestions.js", import.meta.url));
 const styles = await readFile(new URL("../public/wystawiacz/title-suggestions.css", import.meta.url));
+const originalStyles = await readFile(new URL("../public/wystawiacz/styles.css", import.meta.url));
+const fullPage = (await readFile(new URL("../public/wystawiacz/index.html", import.meta.url), "utf8")).replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, "");
 const server = createServer((req, res) => {
-  if (req.url === "/titles.css") { res.setHeader("Content-Type", "text/css"); res.end(styles); return; }
+  const path = new URL(req.url, "http://test.local").pathname;
+  if (["/titles.css", "/title-suggestions.css", "/styles.css"].includes(path)) { res.setHeader("Content-Type", "text/css"); res.end(path === "/styles.css" ? originalStyles : styles); return; }
+  if (path === "/full.html") { res.setHeader("Content-Type", "text/html"); res.end(fullPage); return; }
   res.setHeader("Content-Type", req.url === "/titles.js" ? "text/javascript" : "text/html");
   res.end(req.url === "/titles.js" ? source : '<link rel="stylesheet" href="/titles.css"><input id="partNumber"><input id="titleModeFull" type="checkbox"><input id="titleModePart" type="checkbox"><p id="titleSuggestionStatus"></p><section class="title-suggestions" style="width:350px;box-sizing:border-box"><div id="titleSuggestionResults"></div></section><script src="/titles.js"></script>');
 });
@@ -116,6 +120,29 @@ try {
     assert.equal(layout.overflow, false, "Eight source links wrap without horizontal overflow");
   }
   assert.deepEqual(errors, []);
+  await page.goto(`http://127.0.0.1:${server.address().port}/full.html`);
+  await page.addScriptTag({ url: "/titles.js" });
+  await page.evaluate(() => {
+    localStorage.setItem("wystawiacz-title-mode", "full");
+    window.TitleSuggestions.mount({
+      getContext: () => ({ number: document.getElementById("partNumber").value, productId: "full-page" }),
+      search: async () => ({ groups: [{ source: "ai", titles: [{ title: "VOLKSWAGEN TIGUAN MK2 TOW BAR ELECTRIC WITH HOOK & WIRING 5NA803881F", partName: "Hak holowniczy", url: "https://parts.test/part", sources: Array.from({ length: 8 }, (_, i) => `https://parts${i}.test/part`) }] }] }),
+      choose: () => {}, append: () => {}
+    });
+  });
+  await page.locator("#partNumber").fill("5NA803881F");
+  await page.waitForFunction(() => document.querySelector(".title-choice"));
+  for (const width of [1280, 1024, 768, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    const layout = await page.evaluate(() => {
+      const row = document.querySelector(".title-candidate");
+      const title = row.querySelector(".title-choice");
+      return { row: row.getBoundingClientRect().width, title: title.getBoundingClientRect().width, height: title.getBoundingClientRect().height, overflow: row.scrollWidth > row.clientWidth + 1 };
+    });
+    assert.ok(layout.title >= layout.row * 0.98, `Full form title width at viewport ${width}: ${JSON.stringify(layout)}`);
+    assert.ok(layout.height < 160, `Full form title height at viewport ${width}: ${JSON.stringify(layout)}`);
+    assert.equal(layout.overflow, false);
+  }
   console.log("Browser: automatic 2+2 suggestions, click selection, complete suffix, stale-offer protection and caching passed.");
 } finally {
   if (browser) await browser.close();
