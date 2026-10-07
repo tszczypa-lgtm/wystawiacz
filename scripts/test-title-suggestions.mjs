@@ -57,8 +57,33 @@ const html = await readFile(new URL("../public/wystawiacz/index.html", import.me
 assert.ok(!app.includes("PartNumberOcr"));
 assert.ok(!html.includes("part-number-ocr"));
 const client = await readFile(new URL("../public/wystawiacz/title-suggestions.js", import.meta.url), "utf8");
-vm.runInNewContext(client, { window: {} });
+const sandbox = { window: {} };
+vm.runInNewContext(client, sandbox);
+assert.equal(sandbox.window.TitleSuggestions.partName("VW Tiguan Hak holowniczy 5NA803881F"), "Hak holowniczy");
+assert.equal(sandbox.window.TitleSuggestions.partName("Pół oś"), "");
+assert.equal(sandbox.window.TitleSuggestions.partName("Półoś Volkswagen Golf"), "Półoś");
+assert.equal(sandbox.window.TitleSuggestions.partName("Volkswagen Golf 5NA803881F"), "");
 assert.ok(!client.includes("innerHTML"));
 assert.ok(client.includes("version !== revision"));
-assert.ok(client.includes("choose(item.title)"));
+assert.ok(client.includes("choose(candidate, snapshot.mode)"));
+const ast = ts.createSourceFile("app.js", app, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+const functions = ast.statements.filter(ts.isFunctionDeclaration).map(fn => fn.getText(ast)).join("\n");
+const mount = ast.statements.find(node => ts.isVariableStatement(node) && node.declarationList.declarations.some(item => item.name.getText(ast) === "titleSuggestions"));
+let choose;
+const editor = vm.createContext({
+  window: { TitleSuggestions: { mount: options => { choose = options.choose; return {}; } } },
+  state: { vehicles: [{ id: "golf", short: "VW Golf VII" }, { id: "tiguan", short: "VW Tiguan" }], selectedVehicleId: "golf", appendedPartNumber: "", descriptionManuallyEdited: true },
+  partNumber: { value: "5NA803881F" }, titleInput: { value: "", dispatchEvent() {} },
+  suggestionPanel: { classList: { remove() {} } }, summaryCard: { classList: { remove() {} } },
+  Event: class {}, activeProductId: ""
+});
+vm.runInContext(functions, editor);
+vm.runInContext("renderVehicleButtons = () => {}; updateSummary = () => {}; scheduleAllegroCategoryLookup = () => {}; detectProductDetails = () => {};", editor);
+vm.runInContext(mount.getText(ast), editor);
+choose("Hak holowniczy", "part");
+assert.equal(editor.state.selectedVehicleId, "");
+assert.equal(editor.titleInput.value, "Hak holowniczy 5NA803881F");
+vm.runInContext('useVehicle("golf"); useVehicle("tiguan");', editor);
+assert.equal(editor.titleInput.value, "Hak holowniczy VW Tiguan 5NA803881F");
+console.log("Part-only integration: source model removed, own vehicle selection/replacement and one complete part number passed.");
 console.log("Title suggestions: 2+2, full suffix, MPN search, deduplication, caching, missing provider, secret protection and OCR removal passed.");

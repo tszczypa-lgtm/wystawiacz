@@ -1,10 +1,22 @@
 # Title suggestions
 
-The listing UI automatically searches after a 1.5-second pause in entering a
+When a suggestion mode is enabled, the listing UI automatically searches after a 1.5-second pause in entering a
 complete part number. It shows up to two product names from Allegro's catalog
 (GET /sale/products, mode=MPN) and two Google organic results through SerpApi.
 These are source suggestions, not verified vehicle fitment. Selecting a title
 does not publish an offer or change the entered part number or photo order.
+
+## Modes
+
+Both checkboxes unchecked means manual entry with no title-search requests.
+Full-title mode retains the source suggestion. Part-name mode conservatively
+extracts recognizable component names from those same results (a local phrase
+list, not AI identification), without their vehicle models. Unsupported names
+are not offered. Click a name, then select an existing vehicle from the session
+list. The full part number is appended once by the existing editor. The two
+checkboxes are mutually exclusive; the selected mode is remembered in this
+browser's local storage. Mode changes cancel stale requests and reuse cached
+source results instead of charging for another Google search.
 
 ## Google Setup
 

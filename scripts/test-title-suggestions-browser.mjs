@@ -6,7 +6,7 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ? pathToFileURL(
 const source = await readFile(new URL("../public/wystawiacz/title-suggestions.js", import.meta.url));
 const server = createServer((req, res) => {
   res.setHeader("Content-Type", req.url === "/titles.js" ? "text/javascript" : "text/html");
-  res.end(req.url === "/titles.js" ? source : '<input id="partNumber"><p id="titleSuggestionStatus"></p><div id="titleSuggestionResults"></div><script src="/titles.js"></script>');
+  res.end(req.url === "/titles.js" ? source : '<input id="partNumber"><input id="titleModeFull" type="checkbox"><input id="titleModePart" type="checkbox"><p id="titleSuggestionStatus"></p><div id="titleSuggestionResults"></div><script src="/titles.js"></script>');
 });
 await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
 let browser;
@@ -25,17 +25,20 @@ try {
       search: async number => {
         window.calls.push(number);
         await new Promise(resolve => setTimeout(resolve, 200));
-        return { groups: ["allegro", "google"].map(source => ({ source, titles: [1, 2].map(i => ({ title: `Hak ${source} ${i} ${number}`, url: "https://example.test/part" })) })) };
+        return { groups: ["allegro", "google"].map(source => ({ source, titles: [1, 2].map(i => ({ title: `${i === 1 ? "Hak holowniczy" : "Wspornik"} VW Tiguan ${source} ${number}`, url: "https://example.test/part" })) })) };
       },
       choose: title => { window.chosen = title; }
     });
   });
   await page.locator("#partNumber").fill("5NA803881F");
+  await page.waitForTimeout(1700);
+  assert.deepEqual(await page.evaluate(() => window.calls), [], "Disabled mode must not call either source");
+  await page.locator("#titleModeFull").check();
   await page.waitForFunction(() => document.querySelectorAll(".title-candidate button").length === 4);
   assert.deepEqual(await page.evaluate(() => window.calls), ["5NA803881F"]);
   assert.equal(await page.evaluate(() => window.chosen), "", "Never select a title automatically");
   await page.locator(".title-candidate button").first().click();
-  assert.equal(await page.evaluate(() => window.chosen), "Hak allegro 1 5NA803881F");
+  assert.equal(await page.evaluate(() => window.chosen), "Hak holowniczy VW Tiguan allegro 5NA803881F");
   await page.evaluate(() => { window.product = "two"; window.chosen = ""; });
   await page.locator(".title-candidate button").first().click();
   assert.equal(await page.evaluate(() => window.chosen), "", "Reject a stale title after changing offers");
@@ -45,6 +48,19 @@ try {
   assert.equal(await page.locator(".title-candidate button").count(), 0);
   await page.waitForFunction(() => document.querySelectorAll(".title-candidate button").length === 4);
   assert.ok((await page.locator(".title-candidate button").allTextContents()).every(title => title.endsWith("5NA803881B")));
+  const calls = await page.evaluate(() => window.calls.length);
+  await page.locator("#titleModePart").check();
+  assert.equal(await page.locator("#titleModeFull").isChecked(), false);
+  await page.waitForFunction(() => document.querySelector(".title-candidate button")?.textContent === "Hak holowniczy");
+  await page.locator(".title-candidate button").first().click();
+  assert.equal(await page.evaluate(() => window.chosen), "Hak holowniczy", "Part mode contains no car model or OEM number");
+  assert.equal(await page.evaluate(() => window.calls.length), calls, "Changing modes reuses source results");
+  assert.equal(await page.evaluate(() => localStorage.getItem("wystawiacz-title-mode")), "part");
+  await page.locator("#titleModePart").uncheck();
+  assert.equal(await page.locator(".title-candidate button").count(), 0);
+  await page.locator("#partNumber").fill("5NA803881C");
+  await page.waitForTimeout(1700);
+  assert.equal(await page.evaluate(() => window.calls.length), calls);
   assert.deepEqual(errors, []);
   console.log("Browser: automatic 2+2 suggestions, click selection, complete suffix, stale-offer protection and caching passed.");
 } finally {

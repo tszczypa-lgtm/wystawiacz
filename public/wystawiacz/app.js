@@ -116,7 +116,12 @@ let allegroManufacturerOptions = [];
 const titleSuggestions = window.TitleSuggestions.mount({
   getContext: () => ({ number: partNumber.value.trim(), productId: activeProductId }),
   search: (number, signal) => apiRequest(`/api/title-suggestions?number=${encodeURIComponent(number)}`, { signal }),
-  choose: title => {
+  choose: (title, mode) => {
+    if (mode === "part") {
+      state.selectedVehicleId = "";
+      state.descriptionManuallyEdited = false;
+      renderVehicleButtons();
+    }
     titleInput.value = title;
     state.appendedPartNumber = "";
     appendPartNumberToTitle();
