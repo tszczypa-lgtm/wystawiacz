@@ -1,0 +1,8 @@
+.title-suggestions { margin: -4px 0 18px; padding: 12px; border: 1px solid #d8dce3; border-radius: 10px; background: #f7f8fa; font-size: 13px; }
+.title-suggestions p { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.title-source { display: grid; gap: 7px; margin-top: 12px; }
+.title-candidate { display: flex; align-items: center; gap: 8px; }
+.title-candidate button { flex: 1; padding: 10px; border: 1px solid #d8dce3; border-radius: 8px; background: white; color: var(--ink); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.title-candidate button:hover, .title-candidate button:focus-visible { border-color: var(--orange); }
+.title-candidate a { font-size: 12px; color: var(--orange-dark); }
+.photo-controls { flex-wrap: wrap; }

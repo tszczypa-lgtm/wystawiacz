@@ -1,9 +1,0 @@
-.part-number-ocr { margin: -4px 0 18px; padding: 12px; border: 1px solid #d8dce3; border-radius: 10px; background: #f7f8fa; }
-.part-number-ocr p { color: var(--muted); font-size: 12px; line-height: 1.5; }
-.part-number-candidates { display: grid; gap: 8px; }
-.ocr-option { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 13px; cursor: pointer; }
-.ocr-option input { width: auto; flex-shrink: 0; }
-.part-number-candidate { display: grid; gap: 5px; padding: 10px; border: 1px solid #d8dce3; border-radius: 8px; background: white; color: var(--ink); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
-.part-number-candidate:hover, .part-number-candidate:focus-visible { border-color: var(--orange); }
-.part-number-candidate span { font-size: 12px; color: var(--muted); }
-.photo-controls { flex-wrap: wrap; }

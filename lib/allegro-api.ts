@@ -4,6 +4,7 @@ type Env = {
   ALLEGRO_CLIENT_ID?: string;
   ALLEGRO_CLIENT_SECRET?: string;
   ALLEGRO_REDIRECT_URI?: string;
+  SERPAPI_API_KEY?: string;
   NEXT_PUBLIC_SUPABASE_URL?: string;
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?: string;
 };
@@ -32,6 +33,71 @@ type RemotePayload = {
 };
 class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
+}
+type Title = { title: string; url: string };
+type TitleGroup = { source: string; titles: Title[]; message?: string };
+const titleCache = new Map<string, { until: number; result: { groups: TitleGroup[] } }>();
+const titleLimits = new Map<string, number[]>();
+export function exactPartNumber(text: string, number: string) {
+  const pattern = number.split("").join("[ .\\/-]*");
+  return new RegExp(`(?:^|[^A-Z0-9])${pattern}(?![A-Z0-9]|[ .\\/-]+[A-Z0-9](?:$|[^A-Z0-9]))`, "i").test(text);
+}
+export async function searchTitleSuggestions(number: string, owner: string, env: Env, remote: (path: string, options?: RequestInit) => Promise<RemotePayload>) {
+  if (!/^[A-Z0-9]{6,32}$/.test(number) || !/\d/.test(number)) throw new ApiError(400, "Wpisz poprawny, pelny numer czesci.");
+  const now = Date.now();
+  const cacheKey = `${owner}:${number}:${Boolean(env.SERPAPI_API_KEY)}`;
+  const cached = titleCache.get(cacheKey);
+  if (cached && cached.until > now) return cached.result;
+  const recent = (titleLimits.get(owner) || []).filter(time => now - time < 60000);
+  if (recent.length >= 8) throw new ApiError(429, "Za duzo wyszukiwan. Poczekaj minute przed kolejnym numerem.");
+  if (titleLimits.size >= 1000) titleLimits.delete(titleLimits.keys().next().value!);
+  titleLimits.set(owner, [...recent, now]);
+  const finishTitle = (value: string) => {
+    const clean = value.replace(/\s+/g, " ").trim().slice(0, 500);
+    if (!clean || clean.length < 5) return "";
+    // Reserve room for the full number, including its suffix, in Allegro's title.
+    const tail = new RegExp(`\\s*${number.split("").join("[ .\\/-]*")}\\s*$`, "i");
+    const base = clean.replace(tail, "").trim();
+    return `${base.slice(0, 74 - number.length).trim()} ${number}`.trim();
+  };
+  const unique = (titles: Title[]) => {
+    const seen = new Set<string>();
+    return titles.filter(item => { const key = item.title.toLowerCase(); if (!item.title || seen.has(key)) return false; seen.add(key); return true; }).slice(0, 2);
+  };
+  const allegro = async (): Promise<TitleGroup> => {
+    try {
+      const data = await remote(`/sale/products?phrase=${encodeURIComponent(number)}&mode=MPN&language=pl-PL`, { signal: AbortSignal.timeout(10000) });
+      const products = Array.isArray(data.products) ? data.products as { name?: string }[] : [];
+      const titles = unique(products.filter(item => typeof item.name === "string").map(item => ({ title: finishTitle(item.name!), url: `https://allegro.pl/listing?string=${encodeURIComponent(number)}` })));
+      return { source: "allegro", titles, ...(!titles.length ? { message: "Brak produktu z tym numerem w katalogu Allegro." } : {}) };
+    } catch { return { source: "allegro", titles: [], message: "Nie udalo sie pobrac katalogu Allegro. Sprawdz polaczenie konta." }; }
+  };
+  const google = async (): Promise<TitleGroup> => {
+    if (!env.SERPAPI_API_KEY) return { source: "google", titles: [], message: "Google nie jest jeszcze podlaczone: administrator musi dodac SERPAPI_API_KEY na serwerze." };
+    try {
+      const url = new URL("https://serpapi.com/search.json");
+      url.search = new URLSearchParams({ engine: "google", q: `"${number}" -site:allegro.pl`, hl: "pl", gl: "pl", num: "10", api_key: env.SERPAPI_API_KEY }).toString();
+      const response = await fetch(url, { signal: AbortSignal.timeout(12000) });
+      if (!response.ok) throw new Error("Search provider unavailable");
+      const data = await response.json() as { error?: string; organic_results?: { title?: string; snippet?: string; link?: string }[] };
+      if (data.error || !Array.isArray(data.organic_results)) throw new Error("Invalid search result");
+      const titles: Title[] = [];
+      for (const item of data.organic_results) {
+        if (typeof item.title !== "string" || typeof item.link !== "string" || !exactPartNumber(item.title, number)) continue;
+        try {
+          const link = new URL(item.link);
+          if (link.protocol !== "https:" || link.username || link.password || /(^|\.)allegro\.pl$/i.test(link.hostname)) continue;
+          titles.push({ title: finishTitle(item.title.replace(/\s+[|].*$/, "")), url: link.href });
+        } catch {}
+      }
+      const results = unique(titles);
+      return { source: "google", titles: results, ...(!results.length ? { message: "Google nie znalazlo pasujacego pelnego numeru." } : {}) };
+    } catch { return { source: "google", titles: [], message: "Google niedostepne: sprawdz klucz i limit uslugi wyszukiwania." }; }
+  };
+  const result = { groups: await Promise.all([allegro(), google()]) };
+  if (titleCache.size >= 200) titleCache.delete(titleCache.keys().next().value!);
+  titleCache.set(cacheKey, { until: now + 300000, result });
+  return result;
 }
 const apiBase = "https://api.allegro.pl";
 const oauthBase = "https://allegro.pl/auth/oauth";
@@ -162,6 +228,7 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
     const url = new URL(request.url);
     const path = url.pathname.slice("/api/allegro".length);
     if (request.method === "GET") {
+      if (path === "/title-suggestions") return json(await searchTitleSuggestions(url.searchParams.get("number") || "", user.id, env, remote));
       if (path === "/health") return json({ ok: true, connected: Boolean(connection?.accessToken), build: "2026-06-02.35", mode: "web" });
       const routes: Record<string, string> = { "/me": "/me", "/shipping-rates": "/sale/shipping-rates", "/responsible-producers": "/sale/responsible-producers", "/responsible-persons": "/sale/responsible-persons" };
       if (routes[path]) return json(await remote(routes[path]));

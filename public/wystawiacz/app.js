@@ -113,15 +113,15 @@ let previewPhotoName = "";
 let categoryLocked = false;
 let allegroManufacturerOptions = [];
 
-const partNumberOcr = window.PartNumberOcr.mount({
-  getSelection: () => ({
-    productId: activeProductId,
-    photos: state.selectedPhotoNames.map(name => ({ name, file: state.localPhotosByName.get(name)?.file,
-      rotating: state.localPhotosByName.get(name)?.rotating }))
-  }),
-  choose: number => {
-    partNumber.value = number;
-    partNumber.dispatchEvent(new Event("input", { bubbles: true }));
+const titleSuggestions = window.TitleSuggestions.mount({
+  getContext: () => ({ number: partNumber.value.trim(), productId: activeProductId }),
+  search: (number, signal) => apiRequest(`/api/title-suggestions?number=${encodeURIComponent(number)}`, { signal }),
+  choose: title => {
+    titleInput.value = title;
+    state.appendedPartNumber = "";
+    appendPartNumberToTitle();
+    titleInput.dispatchEvent(new Event("input", { bubbles: true }));
+    detectProductDetails();
   }
 });
 
@@ -397,7 +397,7 @@ addButton.addEventListener("click", () => {
 });
 
 function renderPhotos() {
-  partNumberOcr.refresh();
+  titleSuggestions.refresh();
   const selectedCount = state.selectedPhotoNames.length;
   photoCounter.textContent = `${selectedCount} ${selectedCount === 1 ? "zdjęcie" : "zdjęć"}`;
   const folderPhotos = [...state.localPhotosByName.values()];
