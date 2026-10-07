@@ -18,6 +18,20 @@ checkboxes are mutually exclusive; the selected mode is remembered in this
 browser's local storage. Mode changes cancel stale requests and reuse cached
 source results instead of charging for another Google search.
 
+Google searches use the complete number without exact-phrase quotes so that
+spaced catalog numbers can be returned. The complete number (including suffix)
+must occur in the title or snippet; a title mentioning another suffix in the
+same number family is rejected even if the snippet lists the requested number.
+No extra fallback search is sent automatically.
+
+## Title Editor
+
+The remembered uppercase checkbox changes the actual title, not only its CSS.
+The counter includes spaces; titles over 75 characters are never silently cut.
+Saving a product over 75 characters is blocked. Publication additionally checks
+Allegro's minimum of 12 characters and three words. These controls cover typed
+titles, chosen suggestions, selected vehicles and restored drafts.
+
 ## Google Setup
 
 Create a SerpApi account, review its current pricing and set a spending/usage

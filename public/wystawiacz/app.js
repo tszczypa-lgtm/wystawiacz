@@ -113,6 +113,7 @@ let previewPhotoName = "";
 let categoryLocked = false;
 let allegroManufacturerOptions = [];
 
+const titleEditor = window.TitleEditor.mount();
 const titleSuggestions = window.TitleSuggestions.mount({
   getContext: () => ({ number: partNumber.value.trim(), productId: activeProductId }),
   search: (number, signal) => apiRequest(`/api/title-suggestions?number=${encodeURIComponent(number)}`, { signal }),
@@ -351,12 +352,17 @@ categoryInput.addEventListener("change", () => {
 });
 
 addButton.addEventListener("click", () => {
+  titleEditor.refresh();
   const title = titleInput.value.trim();
   const price = priceInput.value.trim();
   const stock = Number(stockInput.value);
 
   if (!title || stock < 1) {
     showToast("Uzupełnij tytuł i liczbę sztuk. Cenę można dopisać później.");
+    return;
+  }
+  if (window.TitleEditor.length(title) > 75) {
+    showToast(window.TitleEditor.error(title));
     return;
   }
 
@@ -438,6 +444,7 @@ function renderPhotos() {
 }
 
 function updateSummary() {
+  titleEditor.refresh();
   summaryTitle.textContent = titleInput.value.trim() || "Brak tytułu";
   renderDescriptionPreview();
   detectProductDetails();
@@ -507,6 +514,7 @@ function resetForm() {
   state.selectedPhotoNames = [];
   partNumber.value = "";
   titleInput.value = "";
+  titleEditor.refresh();
   categoryInput.innerHTML = '<option value="">Wykryjemy z tytułu</option>';
   categorySearchInput.value = "";
   categoryStatus.textContent = state.allegroConnected ? "Wpisz tytuł, aby pobrać kategorię z Allegro" : "Lokalna podpowiedź";
@@ -1571,6 +1579,8 @@ function applyDefaultAfterSalesToProduct(product) {
 function validateProductBeforePublish(product) {
   if (!state.allegroConnected) return "Najpierw połącz konto Allegro na świeżej wersji programu.";
   if (!product.title) return "Brakuje tytułu.";
+  const titleError = window.TitleEditor.error(product.title);
+  if (titleError) return titleError;
   if (!product.categoryId) return "Brakuje kategorii Allegro.";
   if (!Number(product.price)) return "Brakuje ceny.";
   if (!product.shippingRateId) return "Brakuje profilu wysyłki Allegro.";

@@ -218,8 +218,13 @@
           </section>
           <label class="field">
             <span>Tytuł aukcji</span>
-            <textarea id="titleInput" rows="3" placeholder="np. Przełącznik szyb Volkswagen Golf VII"></textarea>
+            <textarea id="titleInput" rows="3" aria-describedby="titleCharacterCount titleLengthHint" placeholder="np. Przełącznik szyb Volkswagen Golf VII"></textarea>
           </label>
+          <div class="title-editor-options">
+            <label><input id="titleUppercase" type="checkbox" /> WIELKIE LITERY w całym tytule</label>
+            <output id="titleCharacterCount" for="titleInput">0 / 75 znaków</output>
+          </div>
+          <small id="titleLengthHint" role="status">Limit Allegro: 75 znaków ze spacjami. Minimum: 12 znaków i 3 słowa.</small>
           <div class="vehicle-buttons-wrap">
             <span>Dodaj model auta do tytułu:</span>
             <div class="vehicle-buttons" id="vehicleButtons">
@@ -418,6 +423,7 @@
     </div>
     <script src="web-auth.js"></script>
     <script src="title-suggestions.js"></script>
+    <script src="title-editor.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

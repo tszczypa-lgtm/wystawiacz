@@ -42,6 +42,12 @@ export function exactPartNumber(text: string, number: string) {
   const pattern = number.split("").join("[ .\\/-]*");
   return new RegExp(`(?:^|[^A-Z0-9])${pattern}(?![A-Z0-9]|[ .\\/-]+[A-Z0-9](?:$|[^A-Z0-9]))`, "i").test(text);
 }
+export function matchesTitleResult(title: string, snippet: string, number: string) {
+  if (exactPartNumber(title, number)) return true;
+  const family = number.replace(/[A-Z]+$/, "") || number;
+  const mentionsFamily = new RegExp(`(?:^|[^A-Z0-9])${family.split("").join("[ .\\/-]*")}`, "i").test(title);
+  return !mentionsFamily && exactPartNumber(snippet, number);
+}
 export async function searchTitleSuggestions(number: string, owner: string, env: Env, remote: (path: string, options?: RequestInit) => Promise<RemotePayload>) {
   if (!/^[A-Z0-9]{6,32}$/.test(number) || !/\d/.test(number)) throw new ApiError(400, "Wpisz poprawny, pelny numer czesci.");
   const now = Date.now();
@@ -78,7 +84,7 @@ export async function searchTitleSuggestions(number: string, owner: string, env:
     const failure = (errorCode: string, message: string): TitleGroup => ({ source: "google", titles: [], errorCode, message });
     try {
       const url = new URL("https://serpapi.com/search.json");
-      url.search = new URLSearchParams({ engine: "google", q: `"${number}" -site:allegro.pl`, hl: "pl", gl: "pl", api_key: apiKey }).toString();
+      url.search = new URLSearchParams({ engine: "google", q: `${number} -site:allegro.pl`, hl: "pl", gl: "pl", api_key: apiKey }).toString();
       const response = await fetch(url, { signal: AbortSignal.timeout(12000) });
       if (response.status === 401) return failure("invalid_key", "Google: SerpApi odrzucilo klucz (401). Administrator musi poprawic sekret SERPAPI_API_KEY w Cloudflare Production.");
       if (response.status === 403) return failure("account_denied", "Google: konto SerpApi nie ma dostepu (403). Sprawdz status konta SerpApi.");
@@ -92,7 +98,7 @@ export async function searchTitleSuggestions(number: string, owner: string, env:
       if (!Array.isArray(data.organic_results) && !successful) return failure("response", "Google: nieprawidlowa odpowiedz SerpApi. Sprobuj ponownie pozniej.");
       const titles: Title[] = [];
       for (const item of data.organic_results || []) {
-        if (typeof item.title !== "string" || typeof item.link !== "string" || !exactPartNumber(item.title, number)) continue;
+        if (typeof item.title !== "string" || typeof item.link !== "string" || !matchesTitleResult(item.title, typeof item.snippet === "string" ? item.snippet : "", number)) continue;
         try {
           const link = new URL(item.link);
           if (link.protocol !== "https:" || link.username || link.password || /(^|\.)allegro\.pl$/i.test(link.hostname)) continue;

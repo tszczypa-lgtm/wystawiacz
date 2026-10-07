@@ -5,7 +5,11 @@ import vm from "node:vm";
 
 const source = await readFile(new URL("../lib/allegro-api.ts", import.meta.url), "utf8");
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-const { searchTitleSuggestions, exactPartNumber } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
+const { searchTitleSuggestions, exactPartNumber, matchesTitleResult } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
+assert.ok(matchesTitleResult("Hak Volkswagen Tiguan", "Numer OE: 5NA 803 881 F", "5NA803881F"));
+assert.ok(!matchesTitleResult("Hak 5NA803881J", "Pasuje tez do 5NA803881F", "5NA803881F"));
+assert.ok(!matchesTitleResult("Hak 5NA803881FB", "5NA803881F", "5NA803881F"));
+assert.ok(!matchesTitleResult("Hak Volkswagen", "5NA803881", "5NA803881F"));
 assert.ok(exactPartNumber("Hak 5NA 803 881 F Volkswagen", "5NA803881F"));
 assert.ok(!exactPartNumber("Hak 5NA803881FB", "5NA803881F"));
 assert.ok(!exactPartNumber("Hak 5NA 803 881 FB", "5NA803881F"));
@@ -16,12 +20,12 @@ globalThis.fetch = async url => {
   calls++;
   const u = new URL(url);
   assert.equal(u.hostname, "serpapi.com");
-  assert.equal(u.searchParams.get("q"), '"5NA803881F" -site:allegro.pl');
+  assert.equal(u.searchParams.get("q"), '5NA803881F -site:allegro.pl');
   assert.equal(u.searchParams.get("api_key"), "server-only");
   return Response.json({ organic_results: [
     { title: "Hak 5NA803881FB", snippet: "Pasuje takze do 5NA803881F", link: "https://parts.test/wrong" },
     { title: "Hak 5NA 803 881 F Volkswagen | Sklep", link: "https://parts.test/one" },
-    { title: "Zaczep 5NA803881F Tiguan", link: "https://parts.test/two" },
+    { title: "Zaczep Tiguan", snippet: "Czesc numer 5NA 803 881 F", link: "https://parts.test/two" },
     { title: "Trzeci hak 5NA803881F", link: "https://parts.test/three" },
     { title: "Hak 5NA803881F", link: "javascript:alert(1)" }
   ] });

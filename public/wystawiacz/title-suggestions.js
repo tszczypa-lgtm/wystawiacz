@@ -35,6 +35,7 @@
         const heading = document.createElement("strong");
         heading.textContent = group.source === "allegro" ? "Allegro - katalog produktow" : "Google";
         section.appendChild(heading);
+        let offered = 0;
         for (const item of (group.titles || []).slice(0, 2)) {
           const candidate = snapshot.mode === "part" ? partName(item.title) : item.title;
           if (!candidate || seen.has(candidate.toLowerCase())) continue;
@@ -61,6 +62,12 @@
           } catch {}
           section.appendChild(row);
           count++;
+          offered++;
+        }
+        if (snapshot.mode === "part" && group.titles?.length && !offered) {
+          const note = document.createElement("p");
+          note.textContent = "Znaleziono wyniki, ale nie rozpoznano samej nazwy czesci. Zaznacz Pelny tytul, aby je obejrzec.";
+          section.appendChild(note);
         }
         if (group.message) {
           const note = document.createElement("p");
