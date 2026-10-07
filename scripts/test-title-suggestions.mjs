@@ -51,6 +51,29 @@ try {
   const failed = await searchTitleSuggestions("5NA803881F", "owner3", {}, async () => { throw new Error("secret-token"); });
   assert.ok(!JSON.stringify(failed).includes("secret-token"));
   await assert.rejects(searchTitleSuggestions('bad?query="', "owner1", {}, remote));
+  for (const [status, code] of [[401, "invalid_key"], [403, "account_denied"], [429, "quota"], [400, "request"], [503, "provider"]]) {
+    let attempts = 0;
+    globalThis.fetch = async () => { attempts++; return Response.json({ error: "secret-token server-only" }, { status }); };
+    const owner = `status-${status}`;
+    const first = await searchTitleSuggestions("5NA803881F", owner, { SERPAPI_API_KEY: "server-only" }, remote);
+    assert.equal(first.groups[1].errorCode, code);
+    assert.ok(!JSON.stringify(first).includes("server-only"));
+    assert.ok(!JSON.stringify(first).includes("secret-token"));
+    await searchTitleSuggestions("5NA803881F", owner, { SERPAPI_API_KEY: "server-only" }, remote);
+    assert.equal(attempts, 2, "Failed provider requests must not be cached for five minutes");
+  }
+  globalThis.fetch = async () => Response.json({ search_metadata: { status: "Success" }, error: "Google hasn't returned any results for this query." });
+  const empty = await searchTitleSuggestions("5NA803881F", "empty", { SERPAPI_API_KEY: "server-only" }, remote);
+  assert.equal(empty.groups[1].titles.length, 0);
+  assert.equal(empty.groups[1].errorCode, undefined, "Successful empty results are not a provider outage");
+  assert.ok(empty.groups[1].message.includes("nie znalazlo"));
+  globalThis.fetch = async url => {
+    assert.equal(new URL(url).searchParams.get("api_key"), "server-only");
+    throw new DOMException("secret-token", "TimeoutError");
+  };
+  const timeout = await searchTitleSuggestions("5NA803881F", "timeout", { SERPAPI_API_KEY: " server-only\n" }, remote);
+  assert.equal(timeout.groups[1].errorCode, "timeout");
+  assert.ok(!JSON.stringify(timeout).includes("secret-token"));
 } finally { globalThis.fetch = originalFetch; }
 const app = await readFile(new URL("../public/wystawiacz/app.js", import.meta.url), "utf8");
 const html = await readFile(new URL("../public/wystawiacz/index.html", import.meta.url), "utf8");

@@ -81,7 +81,7 @@
         const payload = await search(number, controller.signal);
         if (version !== revision || key(context()) !== key(snapshot)) return;
         if (cache.size >= 30) cache.delete(cache.keys().next().value);
-        cache.set(number, { payload, until: Date.now() + 300000 });
+        if (!(payload.groups || []).some(group => group.errorCode)) cache.set(number, { payload, until: Date.now() + 300000 });
         render(payload, snapshot);
       } catch (error) {
         if (version === revision && error.name !== "AbortError") status.textContent = error.message || "Nie udalo sie pobrac tytulow.";

@@ -35,7 +35,7 @@ class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 type Title = { title: string; url: string };
-type TitleGroup = { source: string; titles: Title[]; message?: string };
+type TitleGroup = { source: string; titles: Title[]; message?: string; errorCode?: string };
 const titleCache = new Map<string, { until: number; result: { groups: TitleGroup[] } }>();
 const titleLimits = new Map<string, number[]>();
 export function exactPartNumber(text: string, number: string) {
@@ -73,16 +73,25 @@ export async function searchTitleSuggestions(number: string, owner: string, env:
     } catch { return { source: "allegro", titles: [], message: "Nie udalo sie pobrac katalogu Allegro. Sprawdz polaczenie konta." }; }
   };
   const google = async (): Promise<TitleGroup> => {
-    if (!env.SERPAPI_API_KEY) return { source: "google", titles: [], message: "Google nie jest jeszcze podlaczone: administrator musi dodac SERPAPI_API_KEY na serwerze." };
+    const apiKey = env.SERPAPI_API_KEY?.trim();
+    if (!apiKey) return { source: "google", titles: [], message: "Google nie jest jeszcze podlaczone: administrator musi dodac SERPAPI_API_KEY na serwerze." };
+    const failure = (errorCode: string, message: string): TitleGroup => ({ source: "google", titles: [], errorCode, message });
     try {
       const url = new URL("https://serpapi.com/search.json");
-      url.search = new URLSearchParams({ engine: "google", q: `"${number}" -site:allegro.pl`, hl: "pl", gl: "pl", num: "10", api_key: env.SERPAPI_API_KEY }).toString();
+      url.search = new URLSearchParams({ engine: "google", q: `"${number}" -site:allegro.pl`, hl: "pl", gl: "pl", api_key: apiKey }).toString();
       const response = await fetch(url, { signal: AbortSignal.timeout(12000) });
-      if (!response.ok) throw new Error("Search provider unavailable");
-      const data = await response.json() as { error?: string; organic_results?: { title?: string; snippet?: string; link?: string }[] };
-      if (data.error || !Array.isArray(data.organic_results)) throw new Error("Invalid search result");
+      if (response.status === 401) return failure("invalid_key", "Google: SerpApi odrzucilo klucz (401). Administrator musi poprawic sekret SERPAPI_API_KEY w Cloudflare Production.");
+      if (response.status === 403) return failure("account_denied", "Google: konto SerpApi nie ma dostepu (403). Sprawdz status konta SerpApi.");
+      if (response.status === 429) return failure("quota", "Google: wyczerpany limit wyszukiwan lub limit godzinowy SerpApi (429). Sprawdz wykorzystanie w panelu SerpApi.");
+      if (response.status === 400) return failure("request", "Google: SerpApi odrzucilo parametry wyszukiwania (400). Zglos blad administratorowi aplikacji.");
+      if (!response.ok) return failure("provider", `Google: blad uslugi SerpApi (HTTP ${response.status}). Sprobuj ponownie pozniej.`);
+      const data = await response.json() as { error?: string; search_metadata?: { status?: string }; search_information?: { organic_results_state?: string }; organic_results?: { title?: string; snippet?: string; link?: string }[] };
+      // SerpApi can include an error field for a successful search with no results.
+      const successful = data.search_metadata?.status === "Success";
+      if (data.search_metadata?.status === "Error" || (data.error && !successful)) return failure("search", "Google: SerpApi nie wykonalo wyszukiwania. Sprawdz ostatnie zapytanie w panelu SerpApi.");
+      if (!Array.isArray(data.organic_results) && !successful) return failure("response", "Google: nieprawidlowa odpowiedz SerpApi. Sprobuj ponownie pozniej.");
       const titles: Title[] = [];
-      for (const item of data.organic_results) {
+      for (const item of data.organic_results || []) {
         if (typeof item.title !== "string" || typeof item.link !== "string" || !exactPartNumber(item.title, number)) continue;
         try {
           const link = new URL(item.link);
@@ -92,11 +101,14 @@ export async function searchTitleSuggestions(number: string, owner: string, env:
       }
       const results = unique(titles);
       return { source: "google", titles: results, ...(!results.length ? { message: "Google nie znalazlo pasujacego pelnego numeru." } : {}) };
-    } catch { return { source: "google", titles: [], message: "Google niedostepne: sprawdz klucz i limit uslugi wyszukiwania." }; }
+    } catch (error) {
+      if (error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name)) return failure("timeout", "Google: przekroczono czas oczekiwania na SerpApi (12 sekund). Sprobuj ponownie.");
+      return failure("network", "Google: nie udalo sie odczytac odpowiedzi SerpApi. Sprobuj ponownie pozniej.");
+    }
   };
   const result = { groups: await Promise.all([allegro(), google()]) };
   if (titleCache.size >= 200) titleCache.delete(titleCache.keys().next().value!);
-  titleCache.set(cacheKey, { until: now + 300000, result });
+  if (!result.groups.some(group => group.errorCode)) titleCache.set(cacheKey, { until: now + 300000, result });
   return result;
 }
 const apiBase = "https://api.allegro.pl";
