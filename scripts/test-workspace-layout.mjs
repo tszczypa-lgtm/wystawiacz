@@ -162,6 +162,10 @@ try {
   assert.equal(await page.locator("#catalogNumberWithSuffix").isChecked(), true);
   assert.equal(await page.locator("#catalogNumberSuffix").inputValue(), "X9");
   assert.equal(await page.evaluate(() => window.CatalogNumberOptions.value("1234567", "Full title")), "1234567 X9");
+  assert.equal(await page.evaluate(() => window.CatalogNumberOptions.value("", "Pompa ABS VW Golf VII")), "Pompa ABS X9");
+  assert.equal(await page.evaluate(() => window.CatalogNumberOptions.value("   ", "  Czujnik   parktronik PDC VW Golf  ")), "Czujnik parktronik X9");
+  assert.equal(await page.evaluate(() => window.CatalogNumberOptions.value("", "Pompa")), "Pompa X9");
+  assert.equal(await page.evaluate(() => window.CatalogNumberOptions.value("", "   ")), "", "Do not use the suffix alone as a part number");
   assert.deepEqual(errors, []);
   console.log("Workspace: actual app scripts, modal add/edit/cancel, selected model/title, photo order/rotation/main, session save/load and responsive layout passed. No live API calls.");
 } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }

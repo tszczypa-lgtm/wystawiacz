@@ -31,7 +31,7 @@
     value(partNumber, title) {
       if (mode === "off") return null;
       if (mode === "title") return title.trim();
-      const part = partNumber.trim();
+      const part = partNumber.trim() || title.trim().split(/\s+/).slice(0, 2).join(" ");
       return part ? [part, suffix.value.trim()].filter(Boolean).join(" ") : "";
     }
   };
