@@ -175,7 +175,7 @@ try {
   };
   const portFunctions = functions(app);
   for (const [name, implementation] of functions(originalApp)) {
-    if (!["apiRequest", "checkConnectionStatus", "checkLoginStatus", "refreshConnectedAccountInfo", "closeConnectionModal", "prefillAllegroCredentials", "renderPhotos", "saveSession", "loadSession", "uploadProductImages", "publishProduct", "updateSummary", "validateProductBeforePublish", "resetForm", "addVehicle", "renderVehicles"].includes(name)) assert.equal(portFunctions.get(name), implementation, `Original function changed: ${name}`);
+    if (!["apiRequest", "checkConnectionStatus", "checkLoginStatus", "refreshConnectedAccountInfo", "closeConnectionModal", "prefillAllegroCredentials", "renderPhotos", "saveSession", "loadSession", "uploadProductImages", "publishProduct", "updateSummary", "validateProductBeforePublish", "resetForm", "addVehicle", "renderVehicles", "applyAutomaticParameterValues"].includes(name)) assert.equal(portFunctions.get(name), implementation, `Original function changed: ${name}`);
   }
   const originalCss = await readFile(new URL("styles.css", originalDirectory), "utf8");
   const portCss = await readFile(new URL("../public/wystawiacz/styles.css", import.meta.url), "utf8");

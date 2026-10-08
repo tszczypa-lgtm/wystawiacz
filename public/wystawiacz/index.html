@@ -6,7 +6,7 @@
     <title>Wystawiacz Allegro</title>
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="title-suggestions.css?v=counter-colors" />
-    <link rel="stylesheet" href="workspace-layout.css?v=photo-original-size" />
+    <link rel="stylesheet" href="workspace-layout.css?v=catalog-options" />
   </head>
   <body>
     <header class="topbar">
@@ -276,6 +276,14 @@
             <small id="parametersStatus"></small>
           </div>
           <div class="parameters-grid" id="parametersGrid"></div>
+          <div class="catalog-number-options" aria-label="Uzupełnianie numeru części w parametrach">
+            <strong>Numer części w parametrach</strong>
+            <label><input id="catalogNumberFullTitle" type="checkbox" /> Kopiuj cały tytuł</label>
+            <div class="catalog-number-custom">
+              <label><input id="catalogNumberWithSuffix" type="checkbox" /> Numer części + dopisek</label>
+              <input id="catalogNumberSuffix" type="text" maxlength="4" placeholder="ABCD" aria-label="Dopisek do numeru części, maksymalnie 4 znaki" />
+            </div>
+          </div>
         </div>
         <div class="description-panel">
           <div class="parameters-heading">
@@ -419,7 +427,8 @@
     <script src="web-auth.js"></script>
     <script src="title-suggestions.js?v=compact-plus"></script>
     <script src="title-editor.js?v=counter-colors"></script>
-    <script src="app.js?v=compact-workspace3"></script>
+    <script src="catalog-number-options.js?v=1"></script>
+    <script src="app.js?v=catalog-options"></script>
     <script src="workspace-layout.js?v=compact1"></script>
   </body>
 </html>

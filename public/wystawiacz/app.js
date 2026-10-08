@@ -788,9 +788,10 @@ function applyAutomaticParameterValues(detectedBrand = getPreferredManufacturer(
       state.parameterValues[parameter.id] = manufacturerValue;
     }
     if (isCatalogNumberParameter(normalizedName)) {
-      state.parameterValues[parameter.id] = isOriginalCatalogNumberParameter(normalizedName)
+      const value = isOriginalCatalogNumberParameter(normalizedName)
         ? partNumber.value.trim()
-        : titleInput.value.trim();
+        : window.CatalogNumberOptions ? window.CatalogNumberOptions.value(partNumber.value, titleInput.value) : titleInput.value.trim();
+      if (value !== null) state.parameterValues[parameter.id] = value;
     }
     if (isConditionParameter(normalizedName)) {
       state.parameterValues[parameter.id] = findDictionaryValueId(parameter, "Używany") || "Używany";
@@ -851,6 +852,16 @@ function isManufacturerParameter(name) {
 function isCatalogNumberParameter(name) {
   return name.includes("numer katalogowy") || name.includes("numer czesci");
 }
+
+document.addEventListener("catalog-number-options-change", () => {
+  state.requiredParameters.forEach((parameter) => {
+    const name = normalizeText(parameter.name);
+    if (!isCatalogNumberParameter(name) || isOriginalCatalogNumberParameter(name)) return;
+    const value = window.CatalogNumberOptions.value(partNumber.value, titleInput.value);
+    if (value !== null) state.parameterValues[parameter.id] = value;
+  });
+  syncRenderedParameterValues();
+});
 
 function isOriginalCatalogNumberParameter(name) {
   return name.includes("oryginalu") || name.includes("oryginalny") || name.includes("oe");

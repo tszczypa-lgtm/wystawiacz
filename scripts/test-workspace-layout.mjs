@@ -127,6 +127,41 @@ try {
   await page.keyboard.press("Escape");
   await page.evaluate(() => window.scrollTo(0, 500));
   assert.ok((await page.locator(".topbar").boundingBox()).y < 0, "Account navigation scrolls out with page");
+  await page.evaluate(() => {
+    state.requiredParameters = [
+      { id: "catalog", name: "Numer katalogowy czesci", type: "string" },
+      { id: "oe", name: "Numer katalogowy oryginalu", type: "string" }
+    ];
+    applyAutomaticParameterValues();
+    renderRequiredParameters();
+  });
+  const catalog = page.locator('[data-parameter-id="catalog"]');
+  const oe = page.locator('[data-parameter-id="oe"]');
+  const originalTitle = await page.locator("#titleInput").inputValue();
+  assert.equal(await catalog.inputValue(), originalTitle);
+  assert.equal(await oe.inputValue(), "5Q0919275B");
+  await page.locator("#catalogNumberWithSuffix").check();
+  assert.equal(await page.locator("#catalogNumberFullTitle").isChecked(), false);
+  await page.locator("#catalogNumberSuffix").fill("ABCD");
+  assert.equal(await catalog.inputValue(), "5Q0919275B ABCD");
+  assert.equal(await oe.inputValue(), "5Q0919275B", "OE stays the real part number");
+  assert.equal(await page.locator("#titleInput").inputValue(), originalTitle, "Auction title is not modified");
+  await page.locator("#catalogNumberSuffix").fill("ABCDE");
+  assert.equal(await page.locator("#catalogNumberSuffix").inputValue(), "ABCD");
+  await page.locator("#catalogNumberWithSuffix").uncheck();
+  await catalog.fill("Manual catalog value");
+  await catalog.dispatchEvent("change");
+  await page.evaluate(() => { applyAutomaticParameterValues(); syncRenderedParameterValues(); });
+  assert.equal(await catalog.inputValue(), "Manual catalog value", "Both off preserves manual parameter edits");
+  await page.locator("#catalogNumberFullTitle").check();
+  assert.equal(await catalog.inputValue(), originalTitle);
+  await page.locator("#catalogNumberWithSuffix").check();
+  await page.locator("#catalogNumberSuffix").fill("X9");
+  assert.equal(await catalog.inputValue(), "5Q0919275B X9");
+  await page.reload();
+  assert.equal(await page.locator("#catalogNumberWithSuffix").isChecked(), true);
+  assert.equal(await page.locator("#catalogNumberSuffix").inputValue(), "X9");
+  assert.equal(await page.evaluate(() => window.CatalogNumberOptions.value("1234567", "Full title")), "1234567 X9");
   assert.deepEqual(errors, []);
   console.log("Workspace: actual app scripts, modal add/edit/cancel, selected model/title, photo order/rotation/main, session save/load and responsive layout passed. No live API calls.");
 } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
