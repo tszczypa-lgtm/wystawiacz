@@ -39,9 +39,6 @@
 .photo-navigation { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 6px; align-items: stretch; }
 .photo-navigation button { min-height: 40px; }
 .photo-navigation .primary-button { width: 100%; padding: 11px 8px; font-size: 13px; }
-.photos-card .photo-preview { min-height: 0; }
-.photos-card .photo-preview img { height: clamp(190px, 25vh, 250px); }
-.photos-card .photo-grid { max-height: clamp(130px, 20vh, 200px); }
 .photo-rotate { position: absolute; top: 10px; z-index: 2; display: grid; place-items: center; width: 38px; height: 38px; padding: 0; border: 1px solid #d8dce3; border-radius: 10px; background: #fffffff0; color: #344054; font-size: 26px; box-shadow: 0 2px 8px #18223014; }
 .photo-rotate-left { left: 10px; }
 .photo-rotate-right { right: 10px; }
