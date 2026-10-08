@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { createSupabaseBrowserClient } from "@/lib/supabase";
 import { LogoutButton } from "./logout-button";
 
 export function OriginalWystawiacz() {
   const frame = useRef<HTMLIFrameElement>(null);
+  const [navigation, setNavigation] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
     const client = createSupabaseBrowserClient();
@@ -20,14 +22,14 @@ export function OriginalWystawiacz() {
   }, []);
 
   return (
-    <main className="min-h-screen bg-[#0d1117]">
-      <div className="flex items-center justify-between gap-4 border-b border-white/10 px-5 pb-3 text-white">
-        <a href="/panel" onClick={(event) => {
+    <main className="min-h-screen bg-[#f5f6f8]">
+      {navigation && createPortal(<>
+        <a href="/panel" target="_top" onClick={(event) => {
           if (!window.confirm("Wrócić do panelu konta? Przed wyjściem zapisz sesję w Wystawiaczu, aby nie stracić pracy.")) event.preventDefault();
-        }} className="text-sm text-[#ff8a3d]">Powrót do panelu konta</a>
-        <div className="w-36"><LogoutButton /></div>
-      </div>
-      <iframe ref={frame} src="/wystawiacz/index.html" title="Wystawiacz Allegro" className="block h-[calc(100vh-72px)] min-h-[600px] w-full border-0" />
+        }}>Powrót do panelu konta</a>
+        <LogoutButton />
+      </>, navigation)}
+      <iframe ref={frame} onLoad={() => setNavigation(frame.current?.contentDocument?.getElementById("accountNavigation") ?? null)} src="/wystawiacz/index.html" title="Wystawiacz Allegro" className="block h-screen w-full border-0" />
     </main>
   );
 }

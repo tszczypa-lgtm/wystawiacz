@@ -1455,6 +1455,16 @@ function updateAutomaticDescriptionText() {
   ].filter(Boolean).join("\n\n");
 }
 
+let editingVehicleId = null;
+function resetVehicleEditor() {
+  editingVehicleId = null;
+  vehicleManufacturerInput.value = "";
+  vehicleShortInput.value = "";
+  vehicleFullInput.value = "";
+  addVehicleButton.textContent = "Dodaj auto";
+  document.getElementById("cancelVehicleEditButton").classList.add("hidden");
+}
+
 function addVehicle() {
   const manufacturer = normalizeManufacturerName(vehicleManufacturerInput.value);
   const short = vehicleShortInput.value.trim();
@@ -1463,27 +1473,57 @@ function addVehicle() {
     showToast("Wpisz producenta OE, skrót oraz pełny opis auta.");
     return;
   }
-  state.vehicles.push({ id: crypto.randomUUID(), manufacturer, short, full });
-  vehicleManufacturerInput.value = "";
-  vehicleShortInput.value = "";
-  vehicleFullInput.value = "";
+  const existing = state.vehicles.find((item) => item.id === editingVehicleId);
+  if (editingVehicleId && !existing) {
+    resetVehicleEditor();
+    showToast("To auto nie jest juz na liscie. Dodaj je ponownie.");
+    return;
+  }
+  if (existing) {
+    const selected = state.selectedVehicleId === existing.id;
+    if (selected) {
+      titleInput.value = titleInput.value.replace(new RegExp(`\\s*${escapeRegExp(existing.short)}\\s*`, "i"), " ").trim();
+      state.selectedVehicleId = "";
+    }
+    Object.assign(existing, { manufacturer, short, full });
+    if (selected) useVehicle(existing.id);
+  } else state.vehicles.push({ id: crypto.randomUUID(), manufacturer, short, full });
+  resetVehicleEditor();
   renderVehicles();
-  showToast("Auto dodane do listy sesji.");
+  showToast(existing ? "Zapisano zmiany auta." : "Auto dodane do listy sesji.");
 }
 
 function renderVehicles() {
   vehicleList.innerHTML = state.vehicles.length
     ? state.vehicles.map((vehicle) => `
       <span class="vehicle-chip" title="${escapeHtml([vehicle.manufacturer, vehicle.full].filter(Boolean).join(" - "))}">
+        <span class="vehicle-row-actions">
+          <button type="button" data-edit-vehicle-id="${escapeHtml(vehicle.id)}">Edytuj</button>
+          <button type="button" data-remove-vehicle-id="${escapeHtml(vehicle.id)}" aria-label="Usuń auto">Usuń</button>
+        </span>
         <strong>${escapeHtml(vehicle.manufacturer || "OE")}</strong> ${escapeHtml(vehicle.short)}
-        <button type="button" data-remove-vehicle-id="${escapeHtml(vehicle.id)}" aria-label="Usuń auto">×</button>
+        <span class="vehicle-description">${escapeHtml(vehicle.full)}</span>
       </span>`).join("")
     : "<small>Lista aut jest pusta.</small>";
   vehicleList.querySelectorAll("[data-remove-vehicle-id]").forEach((button) => {
     button.addEventListener("click", () => {
+      if (editingVehicleId === button.dataset.removeVehicleId) resetVehicleEditor();
       state.vehicles = state.vehicles.filter((vehicle) => vehicle.id !== button.dataset.removeVehicleId);
       if (state.selectedVehicleId === button.dataset.removeVehicleId) state.selectedVehicleId = "";
       renderVehicles();
+    });
+  });
+  vehicleList.querySelectorAll("[data-edit-vehicle-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const vehicle = state.vehicles.find((item) => item.id === button.dataset.editVehicleId);
+      if (!vehicle) return;
+      editingVehicleId = vehicle.id;
+      vehicleManufacturerInput.value = vehicle.manufacturer;
+      vehicleShortInput.value = vehicle.short;
+      vehicleFullInput.value = vehicle.full;
+      addVehicleButton.textContent = "Zapisz zmiany";
+      document.getElementById("cancelVehicleEditButton").classList.remove("hidden");
+      vehicleShortInput.focus();
     });
   });
   renderVehicleButtons();

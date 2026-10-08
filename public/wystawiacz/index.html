@@ -6,20 +6,18 @@
     <title>Wystawiacz Allegro</title>
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="title-suggestions.css?v=allegro4" />
+    <link rel="stylesheet" href="workspace-layout.css?v=compact1" />
   </head>
   <body>
     <header class="topbar">
       <div class="brand">
         <span class="brand-mark">A</span>
         <div>
-          <strong>Wystawiacz</strong>
+          <strong>Wystawiacz by Tymo</strong>
           <small>Asystent ofert Allegro</small>
         </div>
       </div>
-      <button class="account-button" type="button">
-        <span class="status-dot"></span>
-        Tryb tylko do odczytu
-      </button>
+      <nav id="accountNavigation" class="account-navigation" aria-label="Konto Wystawiacza"></nav>
     </header>
 
     <main class="page-shell">
@@ -27,16 +25,6 @@
         <div>
           <p class="eyebrow">PROSTE WYSTAWIANIE</p>
           <h1>Dodaj produkt</h1>
-          <p class="hero-copy">
-            Wybierz zdjęcia, wpisz nazwę części i jej numer. Opis przygotujemy lokalnie; kategorie i parametry pobierzemy po połączeniu Allegro.
-          </p>
-        </div>
-        <div class="step-indicator" aria-label="Krok 1 z 3">
-          <span class="step active">1</span>
-          <span class="step-line"></span>
-          <span class="step">2</span>
-          <span class="step-line"></span>
-          <span class="step">3</span>
         </div>
       </section>
 
@@ -60,12 +48,10 @@
 
       <section class="session-card">
         <div>
-          <p class="card-kicker">PLIK ROBOCZY</p>
           <h2>Sesja produktów</h2>
-          <p>Zapisz listę do pliku i przekaż ją drugiej osobie. Zdjęcia połączą się ponownie po nazwach plików.</p>
         </div>
         <div class="session-actions">
-          <input id="sessionNameInput" class="session-name" type="text" placeholder="np. październik 2026" />
+          <input id="sessionNameInput" class="session-name" type="text" aria-label="Nazwa sesji" placeholder="Nazwa sesji" />
           <button class="secondary-button" id="saveSessionButton" type="button">Zapisz sesję</button>
           <label class="secondary-button file-button" for="loadSessionInput">
             Otwórz sesję
@@ -80,14 +66,17 @@
         <small id="sessionStatus">Folder zdjęć dla sesji nie jest jeszcze wskazany.</small>
       </section>
 
+      <dialog id="vehiclesDialog" aria-labelledby="vehiclesDialogTitle">
       <section class="vehicles-card">
         <div>
-          <p class="card-kicker">AUTA Z TEJ SESJI</p>
-          <h2>Pomocnicza lista modeli</h2>
+          <div class="models-dialog-heading">
+            <h2 id="vehiclesDialogTitle">Moje auta w tej sesji</h2>
+            <button id="closeVehiclesButton" class="secondary-button" type="button">Zamknij</button>
+          </div>
           <p>Dodaj auta przed pracą. Krótka nazwa trafi do tytułu, a pełna informacja do opisu aukcji.</p>
         </div>
         <div class="vehicle-form">
-          <input id="vehicleManufacturerInput" type="text" list="vehicleManufacturerOptions" placeholder="Producent OE, np. Volkswagen" />
+          <input id="vehicleManufacturerInput" aria-label="Producent OE" type="text" list="vehicleManufacturerOptions" placeholder="Producent OE, np. Volkswagen" />
           <datalist id="vehicleManufacturerOptions">
             <option value="Volkswagen"></option>
             <option value="Audi"></option>
@@ -140,12 +129,14 @@
             <option value="Tesla"></option>
             <option value="Vauxhall"></option>
           </datalist>
-          <input id="vehicleShortInput" type="text" placeholder="Skrót, np. VW Golf VII 5G0" />
-          <input id="vehicleFullInput" type="text" placeholder="Pełny opis, np. Volkswagen Golf Variant VII 5G0 1.6 TDI 2019 rok" />
+          <input id="vehicleShortInput" aria-label="Skrót auta do tytułu" type="text" placeholder="Skrót, np. VW Golf VII 5G0" />
+          <input id="vehicleFullInput" aria-label="Pełny opis auta" type="text" placeholder="Pełny opis, np. Volkswagen Golf Variant VII 5G0 1.6 TDI 2019 rok" />
           <button id="addVehicleButton" class="secondary-button" type="button">Dodaj auto</button>
+          <button id="cancelVehicleEditButton" class="secondary-button hidden" type="button">Anuluj edycję</button>
         </div>
         <div class="vehicle-list" id="vehicleList"></div>
       </section>
+      </dialog>
 
       <section class="workspace-grid">
         <article class="card photos-card">
@@ -169,13 +160,17 @@
                 <strong id="mainPhotoStatus"></strong>
               </div>
             </div>
-              <div class="photo-controls">
-                <button id="rotatePhotoLeftButton" class="secondary-button" type="button">Obróć w lewo</button>
-                <button id="rotatePhotoRightButton" class="secondary-button" type="button">Obróć w prawo</button>
-              <button id="previousPhotoButton" class="secondary-button" type="button">Poprzednie zdjęcie</button>
+            <div class="photo-controls photo-navigation" aria-label="Przeglądanie i wybór zdjęć">
+              <button id="previousPhotoButton" class="secondary-button" type="button" title="Poprzednie zdjęcie">&larr; Poprzednie</button>
               <button id="togglePhotoButton" class="primary-button compact-button" type="button">Zaznacz zdjęcie</button>
+              <button id="nextPhotoButton" class="secondary-button" type="button" title="Następne zdjęcie">Następne &rarr;</button>
+            </div>
+            <div class="photo-tools" aria-label="Obracanie i zdjęcie główne">
+              <div class="photo-rotation">
+                <button id="rotatePhotoLeftButton" class="secondary-button" type="button" title="Obróć zdjęcie o 90 stopni w lewo">&#8630; W lewo</button>
+                <button id="rotatePhotoRightButton" class="secondary-button" type="button" title="Obróć zdjęcie o 90 stopni w prawo">&#8631; W prawo</button>
+              </div>
               <button id="mainPhotoButton" class="secondary-button" type="button">Ustaw jako główne</button>
-              <button id="nextPhotoButton" class="secondary-button" type="button">Następne zdjęcie</button>
             </div>
             <p class="gallery-hint">
               Klikaj miniatury, aby dodać lub usunąć zdjęcia bieżącej aukcji. Pierwsze zaznaczone zdjęcie będzie główne.
@@ -229,7 +224,10 @@
           </div>
           <small id="titleLengthHint" role="status">Limit Allegro: 75 znaków ze spacjami. Minimum: 12 znaków i 3 słowa.</small>
           <div class="vehicle-buttons-wrap">
-            <span>Dodaj model auta do tytułu:</span>
+            <div class="vehicle-picker-heading">
+              <span>Dodaj model auta do tytułu:</span>
+              <button id="openVehiclesButton" class="secondary-button" type="button">Edytuj listę aut</button>
+            </div>
             <div class="vehicle-buttons" id="vehicleButtons">
               <small>Najpierw dodaj auta do listy sesji.</small>
             </div>
@@ -426,6 +424,7 @@
     <script src="web-auth.js"></script>
     <script src="title-suggestions.js?v=allegro4-rich-names"></script>
     <script src="title-editor.js"></script>
-    <script src="app.js?v=binary-upload-errors"></script>
+    <script src="app.js?v=compact-workspace1"></script>
+    <script src="workspace-layout.js?v=compact1"></script>
   </body>
 </html>

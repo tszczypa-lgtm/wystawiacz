@@ -1,0 +1,49 @@
+.topbar { padding: 14px 24px; position: static; }
+.account-navigation { display: flex; align-items: center; gap: 16px; }
+.account-navigation a { color: var(--orange-dark); font-size: 13px; text-decoration: none; }
+.account-navigation a:hover { text-decoration: underline; }
+.account-navigation button { margin: 0; width: auto; padding: 9px 14px; border: 1px solid #d8dce3; border-radius: 9px; background: #fff; color: #344054; font-size: 12px; font-weight: 700; }
+.account-navigation button:hover { color: var(--orange-dark); border-color: var(--orange); }
+.page-shell { padding-top: 24px; }
+.hero { margin-bottom: 18px; }
+.hero .eyebrow { display: none; }
+.hero h1 { font-size: 30px; margin: 0; letter-spacing: -.7px; }
+.session-card { padding: 12px 16px; gap: 8px 14px; align-items: center; }
+.session-card h2 { font-size: 15px; white-space: nowrap; }
+.session-card small { font-size: 11px; }
+.session-actions { gap: 6px; }
+.session-name { width: 150px; }
+.connection-card { padding: 14px 16px; }
+.connection-card h2 { font-size: 17px; }
+.connection-card .card-kicker { display: none; }
+.connection-card .primary-button { padding: 10px 16px; }
+.photo-navigation { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: stretch; }
+.photo-navigation button { min-height: 40px; }
+.photo-navigation .primary-button { width: 100%; padding: 11px 8px; font-size: 13px; }
+.photo-tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.photo-rotation { display: flex; gap: 6px; }
+.vehicle-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+#vehiclesDialog { width: min(760px, calc(100% - 32px)); max-height: calc(100dvh - 48px); padding: 0; border: 1px solid var(--line); border-radius: 18px; color: var(--ink); background: #fff; box-shadow: 0 24px 80px #14213d33; }
+#vehiclesDialog::backdrop { background: #14213d88; }
+#vehiclesDialog .vehicles-card { margin: 0; border: 0; padding: 24px; }
+.models-dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+#vehiclesDialog .vehicle-form { grid-template-columns: 1fr 1fr; }
+#vehicleFullInput { grid-column: 1 / -1; }
+#vehiclesDialog .vehicle-list { display: grid; gap: 8px; margin-top: 20px; }
+#vehiclesDialog .vehicle-chip { border-radius: 10px; padding: 12px; font-size: 12px; }
+.vehicle-description { display: block; margin-top: 6px; color: var(--muted); font-weight: 400; overflow-wrap: anywhere; }
+.vehicle-row-actions { float: right; }
+#vehiclesDialog .vehicle-chip button { margin-left: 10px; font-size: 12px; }
+@media (max-width: 700px) {
+  .topbar { align-items: flex-start; gap: 12px; flex-wrap: wrap; padding: 12px 16px; }
+  .account-navigation { gap: 12px; flex-wrap: wrap; }
+  .session-card { grid-template-columns: 1fr; }
+  .session-actions { justify-content: flex-start; }
+  .session-name { flex: 1; min-width: 140px; }
+  .photo-navigation { gap: 5px; }
+  .photo-navigation .secondary-button { padding: 9px 6px; font-size: 11px; }
+  .photo-tools { flex-wrap: wrap; }
+  #vehiclesDialog .vehicles-card { padding: 18px; }
+  #vehiclesDialog .vehicle-form { grid-template-columns: 1fr; }
+  .vehicle-picker-heading { flex-wrap: wrap; }
+}
