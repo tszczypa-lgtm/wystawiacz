@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Wystawiacz Allegro</title>
     <link rel="stylesheet" href="styles.css" />
-    <link rel="stylesheet" href="title-suggestions.css?v=allegro4" />
+    <link rel="stylesheet" href="title-suggestions.css?v=compact-plus" />
     <link rel="stylesheet" href="workspace-layout.css?v=compact3" />
   </head>
   <body>
@@ -212,9 +212,7 @@
               <label><input id="titleModeFull" type="checkbox" /> Pełny tytuł z wyszukiwania</label>
               <label><input id="titleModePart" type="checkbox" /> Sama nazwa części — auto wybieram z mojej listy</label>
             </div>
-            <small>Bez zaznaczenia: wpisujesz ręcznie. Zaznaczony tryb zapamiętamy. Propozycję zawsze wybierasz kliknięciem.</small>
-            <small class="title-combine-hint">„+ Dopisz nazwę części” łączy elementy w tytule. Dodawaj tylko elementy, które sprzedajesz razem.</small>
-            <p id="titleSuggestionStatus" role="status" aria-live="polite">Wpisz pełny numer części. Kliknięcie propozycji wpisze tytuł.</p>
+            <p id="titleSuggestionStatus" role="status" aria-live="polite"></p>
             <div id="titleSuggestionResults"></div>
           </section>
           <div class="field">
@@ -427,7 +425,7 @@
       </div>
     </div>
     <script src="web-auth.js"></script>
-    <script src="title-suggestions.js?v=allegro4-rich-names"></script>
+    <script src="title-suggestions.js?v=compact-plus"></script>
     <script src="title-editor.js"></script>
     <script src="app.js?v=compact-workspace3"></script>
     <script src="workspace-layout.js?v=compact1"></script>

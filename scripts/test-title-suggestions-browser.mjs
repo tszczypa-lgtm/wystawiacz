@@ -82,10 +82,17 @@ try {
   await page.locator("#titleModePart").check();
   await page.locator("#partNumber").fill("5NA803881F");
   await page.waitForFunction(() => document.querySelectorAll(".title-add").length === 2);
+  assert.deepEqual(await page.locator(".title-add").allTextContents(), ["+", "+"]);
   await page.locator(".title-choice").first().click();
   await page.locator(".title-add").nth(1).click();
   assert.equal(await page.evaluate(() => window.chosen), "Pompa ABS");
   assert.deepEqual(await page.evaluate(() => window.appended), ["Sterownik ABS"]);
+  assert.equal(await page.locator("#titleSuggestionStatus").textContent(), "");
+  await page.locator("#titleModeFull").check();
+  await page.waitForFunction(() => document.querySelector(".title-choice")?.textContent.includes("VW Golf"));
+  assert.equal(await page.locator(".title-add").count(), 0, "Plus buttons only appear in the second checkbox mode");
+  await page.locator("#titleModePart").check();
+  await page.waitForFunction(() => document.querySelectorAll(".title-add").length === 2);
   await page.evaluate(() => { window.product = "two"; });
   await page.locator(".title-add").nth(1).click();
   assert.deepEqual(await page.evaluate(() => window.appended), ["Sterownik ABS"], "Reject stale append after changing products");
@@ -110,8 +117,8 @@ try {
     const layout = await page.evaluate(() => {
       const row = document.querySelector(".title-candidate");
       const choice = row.querySelector(".title-choice");
-      const add = row.querySelector(".title-add");
-      return { row: row.getBoundingClientRect().width, title: choice.getBoundingClientRect().width, height: choice.getBoundingClientRect().height, controlsBelow: add.getBoundingClientRect().top >= choice.getBoundingClientRect().bottom, overflow: row.scrollWidth > row.clientWidth + 1 };
+      const link = row.querySelector("a");
+      return { row: row.getBoundingClientRect().width, title: choice.getBoundingClientRect().width, height: choice.getBoundingClientRect().height, controlsBelow: link.getBoundingClientRect().top >= choice.getBoundingClientRect().bottom, overflow: row.scrollWidth > row.clientWidth + 1 };
     });
     assert.ok(layout.title >= layout.row * 0.98, `Title must stay full width at ${width}px`);
     assert.ok(layout.height < 160, "Title must not become a vertical letter column");

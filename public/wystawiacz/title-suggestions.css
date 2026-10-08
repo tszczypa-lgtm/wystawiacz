@@ -19,5 +19,5 @@
 .title-editor-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
 .title-uppercase-label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .title-uppercase-label input { width: auto; accent-color: var(--orange); }
-.title-candidate .title-add { flex: 0 0 auto; max-width: 100%; box-sizing: border-box; font-size: 11px; color: var(--orange-dark); }
-.title-combine-hint { display: block; margin-top: 8px; }
+.title-candidate .title-add { flex: 0 0 34px; width: 34px; height: 34px; padding: 0; box-sizing: border-box; font-size: 22px; text-align: center; color: var(--orange-dark); }
+#titleSuggestionStatus:empty { display: none; }

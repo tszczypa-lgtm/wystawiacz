@@ -50,9 +50,6 @@
         const seen = new Set();
         const section = document.createElement("div");
         section.className = "title-source";
-        const heading = document.createElement("strong");
-        heading.textContent = "Allegro - katalog produktow";
-        section.appendChild(heading);
         let offered = 0;
         for (const item of (group.titles || []).slice(0, 4)) {
           const name = partName(item.title);
@@ -68,19 +65,20 @@
           button.addEventListener("click", () => {
             if (key(context()) !== key(snapshot)) { refresh(); return; }
             choose(candidate, snapshot.mode);
-            status.textContent = snapshot.mode === "part" ? "Nazwa wpisana. Teraz kliknij auto z Twojej listy. Sprawdz nazwe czesci." : "Tytul wpisany. Sprawdz, czy opisuje Twoja czesc.";
+            status.textContent = "";
           });
           row.appendChild(button);
-          if (name && append) {
+          if (snapshot.mode === "part" && name && append) {
             const add = document.createElement("button");
             add.type = "button";
             add.className = "title-add";
-            add.textContent = "+ Dopisz nazwe czesci";
+            add.textContent = "+";
+            add.title = `Dopisz do tytulu: ${name}`;
             add.setAttribute("aria-label", `Dopisz do tytulu: ${name}`);
             add.addEventListener("click", () => {
               if (key(context()) !== key(snapshot)) { refresh(); return; }
               append(name);
-              status.textContent = "Nazwa dopisana do tytulu. Sprawdz sklad zestawu i limit 75 znakow.";
+              status.textContent = "";
             });
             row.appendChild(add);
           }
@@ -102,14 +100,14 @@
           note.textContent = "Znaleziono wyniki, ale nie rozpoznano samej nazwy czesci. Zaznacz Pelny tytul, aby je obejrzec.";
           section.appendChild(note);
         }
-        if (group.message) {
+        if (group.message && !offered) {
           const note = document.createElement("p");
           note.textContent = group.message;
           section.appendChild(note);
         }
         list.appendChild(section);
       }
-      status.textContent = count ? "Kliknij pasujacy tytul. Wyniki nie zmieniaja zdjec ani numeru czesci." : "Nie znaleziono propozycji. Sprawdz numer lub wpisz tytul recznie.";
+      status.textContent = count ? "" : "Nie znaleziono propozycji. Sprawdz numer lub wpisz tytul recznie.";
     };
     async function run(snapshot, version) {
       const number = snapshot.number.toUpperCase().replace(/[ .\/-]/g, "");
@@ -136,8 +134,8 @@
       clearTimeout(timer);
       controller?.abort();
       list.replaceChildren();
-      if (mode === "off") { status.textContent = "Podpowiedzi wylaczone. Wpisz tytul recznie lub zaznacz jeden tryb."; return; }
-      if (!valid(snapshot.number)) { status.textContent = "Wpisz pelny numer czesci (takze koncowa litere)."; return; }
+      if (mode === "off") { status.textContent = ""; return; }
+      if (!valid(snapshot.number)) { status.textContent = ""; return; }
       const version = revision;
       status.textContent = "Czekam na zakonczenie wpisywania numeru...";
       timer = setTimeout(() => run(snapshot, version), immediate ? 0 : 1500);
