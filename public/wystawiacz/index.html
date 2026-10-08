@@ -6,7 +6,7 @@
     <title>Wystawiacz Allegro</title>
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="title-suggestions.css?v=counter-colors" />
-    <link rel="stylesheet" href="workspace-layout.css?v=gpsr-default" />
+    <link rel="stylesheet" href="workspace-layout.css?v=price-search" />
   </head>
   <body>
     <header class="topbar">
@@ -341,8 +341,19 @@
         </div>
         <div class="search-actions">
           <span>Sprawdź ceny i podobne oferty:</span>
-          <button id="searchAllegroPartButton" class="secondary-button" type="button">Allegro: numer części</button>
-          <button id="searchAllegroTitleButton" class="secondary-button" type="button">Allegro: tytuł bez numeru</button>
+          <div class="price-search-group">
+            <div class="price-search-buttons">
+              <button id="searchAllegroPartButton" class="secondary-button" type="button">Allegro: numer części</button>
+              <button id="searchAllegroTitleButton" class="secondary-button" type="button">Allegro: tytuł bez numeru</button>
+            </div>
+            <label class="price-search-sort"><input id="priceSortLowestInput" type="checkbox" /> Od najniższej ceny</label>
+          </div>
+          <div class="price-search-group">
+            <div class="price-search-buttons">
+              <button id="searchGooglePartButton" class="secondary-button" type="button">Google: numer części</button>
+              <button id="searchGoogleTitleButton" class="secondary-button" type="button">Google: tytuł bez numeru</button>
+            </div>
+          </div>
         </div>
         <div class="pricing-final-row">
           <label class="field">
@@ -431,7 +442,7 @@
     <script src="title-suggestions.js?v=no-source"></script>
     <script src="title-editor.js?v=counter-colors"></script>
     <script src="catalog-number-options.js?v=2"></script>
-    <script src="app.js?v=gpsr-default"></script>
+    <script src="app.js?v=price-search"></script>
     <script src="workspace-layout.js?v=compact1"></script>
   </body>
 </html>

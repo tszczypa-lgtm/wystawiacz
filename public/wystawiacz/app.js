@@ -96,6 +96,11 @@ const descriptionPreviewText = document.querySelector("#descriptionPreviewText")
 const descriptionTextInput = document.querySelector("#descriptionTextInput");
 const searchAllegroPartButton = document.querySelector("#searchAllegroPartButton");
 const searchAllegroTitleButton = document.querySelector("#searchAllegroTitleButton");
+const searchGooglePartButton = document.querySelector("#searchGooglePartButton");
+const searchGoogleTitleButton = document.querySelector("#searchGoogleTitleButton");
+const priceSortLowestInput = document.querySelector("#priceSortLowestInput");
+const priceSortStorageKey = "wystawiacz-price-sort-lowest";
+try { priceSortLowestInput.checked = localStorage.getItem(priceSortStorageKey) === "true"; } catch {}
 const productList = document.querySelector("#productList");
 const emptyState = document.querySelector("#emptyState");
 const toast = document.querySelector("#toast");
@@ -279,8 +284,20 @@ descriptionTextInput.addEventListener("input", () => {
   state.descriptionManuallyEdited = true;
   renderDescriptionPreview();
 });
-searchAllegroPartButton.addEventListener("click", () => openSearch("https://allegro.pl/listing?string=", partNumber.value.trim()));
-searchAllegroTitleButton.addEventListener("click", () => openSearch("https://allegro.pl/listing?string=", getTitleWithoutPartNumber()));
+searchAllegroPartButton.addEventListener("click", () => openAllegroSearch(partNumber.value.trim()));
+searchAllegroTitleButton.addEventListener("click", () => openAllegroSearch(getTitleWithoutPartNumber()));
+searchGooglePartButton.addEventListener("click", () => openSearch("https://www.google.com/search?q=", partNumber.value.trim()));
+searchGoogleTitleButton.addEventListener("click", () => openSearch("https://www.google.com/search?q=", getTitleWithoutPartNumber()));
+priceSortLowestInput.addEventListener("change", () => {
+  try { localStorage.setItem(priceSortStorageKey, String(priceSortLowestInput.checked)); } catch {}
+});
+
+function openAllegroSearch(query) {
+  const url = new URL("https://allegro.pl/listing");
+  if (priceSortLowestInput.checked) url.searchParams.set("order", "p");
+  url.searchParams.set("string", "");
+  openSearch(url.href, query);
+}
 
 locationSettingsButton.addEventListener("click", () => {
   fillLocationModal();

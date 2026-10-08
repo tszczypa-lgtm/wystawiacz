@@ -70,6 +70,12 @@
 #vehiclesDialog::backdrop { background: #14213d88; }
 #vehiclesDialog .vehicles-card { margin: 0; border: 0; padding: 24px; }
 .models-dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.search-actions { align-items: flex-start; gap: 12px; }
+.search-actions > span { flex-basis: 100%; }
+.price-search-group { display: grid; gap: 8px; min-width: 0; }
+.price-search-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.price-search-sort { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.price-search-sort input { width: auto; margin: 0; accent-color: var(--orange); }
 #vehiclesDialog .vehicle-form { grid-template-columns: 1fr 1fr; }
 #vehicleFullInput { grid-column: 1 / -1; }
 #vehiclesDialog .vehicle-list { display: grid; gap: 8px; margin-top: 20px; }
