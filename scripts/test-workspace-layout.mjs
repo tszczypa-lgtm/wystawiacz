@@ -34,6 +34,13 @@ try {
   assert.equal(await page.locator(".hero-copy, .step-indicator").count(), 0);
   assert.equal(await page.locator("#vehiclesDialog").isVisible(), false);
   assert.ok((await page.locator(".session-card").boundingBox()).height < 125);
+  const accountBox = await page.locator(".connection-card").boundingBox();
+  const sessionBox = await page.locator(".session-card").boundingBox();
+  assert.equal(accountBox.y, sessionBox.y, "Account and session sit side by side on desktop");
+  assert.ok(sessionBox.x > accountBox.x + accountBox.width);
+  await page.locator(".connection-details summary").click();
+  assert.equal(await page.locator("#connectionDescription").isVisible(), true);
+  await page.locator(".connection-details summary").click();
   await page.locator("#openVehiclesButton").click();
   assert.equal(await page.locator("#vehiclesDialog").isVisible(), true);
   await page.locator("#vehicleManufacturerInput").fill("Volkswagen");

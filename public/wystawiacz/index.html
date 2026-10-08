@@ -6,7 +6,7 @@
     <title>Wystawiacz Allegro</title>
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="title-suggestions.css?v=allegro4" />
-    <link rel="stylesheet" href="workspace-layout.css?v=compact1" />
+    <link rel="stylesheet" href="workspace-layout.css?v=compact2" />
   </head>
   <body>
     <header class="topbar">
@@ -21,20 +21,17 @@
     </header>
 
     <main class="page-shell">
-      <section class="hero">
-        <div>
-          <p class="eyebrow">PROSTE WYSTAWIANIE</p>
-          <h1>Dodaj produkt</h1>
-        </div>
-      </section>
-
+      <div class="workspace-utilities" aria-label="Konto i plik sesji">
       <section class="connection-card">
         <div>
           <p class="card-kicker">POŁĄCZENIE Z ALLEGRO</p>
           <h2 id="connectionTitle">Konto nie jest jeszcze połączone</h2>
+          <details class="connection-details">
+            <summary>Szczegóły konta</summary>
           <p id="connectionDescription">
             Bez połączenia możesz przygotować zdjęcia, tytuł, opis i listę produktów. Kategorie, parametry, wysyłka i publikacja wymagają konta Allegro.
           </p>
+          </details>
         </div>
         <div class="connection-actions">
           <button class="primary-button compact-button" id="connectButton" type="button">
@@ -64,6 +61,14 @@
           <button class="secondary-button" id="locationSettingsButton" type="button">Ustaw lokalizację</button>
         </div>
         <small id="sessionStatus">Folder zdjęć dla sesji nie jest jeszcze wskazany.</small>
+      </section>
+      </div>
+
+      <section class="hero creation-heading">
+        <div>
+          <p class="eyebrow">TWORZENIE AUKCJI</p>
+          <h1>Dodaj produkt</h1>
+        </div>
       </section>
 
       <dialog id="vehiclesDialog" aria-labelledby="vehiclesDialogTitle">
