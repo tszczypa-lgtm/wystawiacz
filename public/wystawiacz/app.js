@@ -101,6 +101,9 @@ const searchGoogleTitleButton = document.querySelector("#searchGoogleTitleButton
 const priceSortLowestInput = document.querySelector("#priceSortLowestInput");
 const priceSortStorageKey = "wystawiacz-price-sort-lowest";
 try { priceSortLowestInput.checked = localStorage.getItem(priceSortStorageKey) === "true"; } catch {}
+const priceShippingPolandInput = document.querySelector("#priceShippingPolandInput");
+const priceShippingStorageKey = "wystawiacz-price-shipping-poland";
+try { priceShippingPolandInput.checked = localStorage.getItem(priceShippingStorageKey) === "true"; } catch {}
 const productList = document.querySelector("#productList");
 const emptyState = document.querySelector("#emptyState");
 const toast = document.querySelector("#toast");
@@ -291,10 +294,14 @@ searchGoogleTitleButton.addEventListener("click", () => openSearch("https://www.
 priceSortLowestInput.addEventListener("change", () => {
   try { localStorage.setItem(priceSortStorageKey, String(priceSortLowestInput.checked)); } catch {}
 });
+priceShippingPolandInput.addEventListener("change", () => {
+  try { localStorage.setItem(priceShippingStorageKey, String(priceShippingPolandInput.checked)); } catch {}
+});
 
 function openAllegroSearch(query) {
   const url = new URL("https://allegro.pl/listing");
   if (priceSortLowestInput.checked) url.searchParams.set("order", "p");
+  if (priceShippingPolandInput.checked) url.searchParams.set("miejsce-wysylki", "polska");
   url.searchParams.set("string", "");
   openSearch(url.href, query);
 }

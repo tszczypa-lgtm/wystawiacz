@@ -65,7 +65,9 @@ try {
   assert.equal(new URL(searches[0][0]).hostname, "www.google.com");
   assert.equal(new URL(searches[1][0]).searchParams.get("q"), "Czujnik parktronik PDC VW Golf VII");
   assert.equal(new URL(searches[2][0]).searchParams.get("order"), null);
+  assert.equal(new URL(searches[2][0]).searchParams.get("miejsce-wysylki"), null);
   await page.locator("#priceSortLowestInput").check();
+  await page.locator("#priceShippingPolandInput").check();
   await page.locator("#searchAllegroPartButton").click();
   await page.locator("#searchAllegroTitleButton").click();
   searches = await page.evaluate(() => window.searchWindows);
@@ -73,8 +75,17 @@ try {
   assert.equal(new URL(searches[4][0]).searchParams.get("string"), "Czujnik parktronik PDC VW Golf VII");
   for (const search of searches.slice(3)) {
     assert.equal(new URL(search[0]).searchParams.get("order"), "p");
+    assert.equal(new URL(search[0]).searchParams.get("miejsce-wysylki"), "polska");
     assert.deepEqual(search.slice(1), ["_blank", "noopener,noreferrer"]);
   }
+  await page.locator("#priceShippingPolandInput").uncheck();
+  await page.locator("#searchAllegroPartButton").click();
+  await page.locator("#priceShippingPolandInput").check();
+  await page.locator("#searchGooglePartButton").click();
+  searches = await page.evaluate(() => window.searchWindows);
+  assert.equal(new URL(searches[5][0]).searchParams.get("miejsce-wysylki"), null);
+  assert.equal(new URL(searches[5][0]).searchParams.get("order"), "p");
+  assert.equal(new URL(searches[6][0]).searchParams.get("miejsce-wysylki"), null, "Shipping filter does not affect Google");
   await page.locator("#openVehiclesButton").click();
   await page.locator("[data-edit-vehicle-id]").click();
   await page.locator("#vehicleShortInput").fill("VW Golf VIII");
@@ -255,6 +266,7 @@ try {
   await page.locator(".description-panel").screenshot({ path: fileURLToPath(new URL("../outputs/layout-check/description.png", import.meta.url)) });
   await page.reload();
   assert.equal(await page.locator("#priceSortLowestInput").isChecked(), true, "Price sorting preference survives reload and form resets");
+  assert.equal(await page.locator("#priceShippingPolandInput").isChecked(), true, "Poland shipping preference survives reload and form resets");
   assert.equal(await page.locator("#catalogNumberWithSuffix").isChecked(), true);
   assert.equal(await page.locator("#catalogNumberSuffix").inputValue(), "X9");
   assert.equal(await page.evaluate(() => window.CatalogNumberOptions.value("1234567", "Full title")), "1234567 X9");
