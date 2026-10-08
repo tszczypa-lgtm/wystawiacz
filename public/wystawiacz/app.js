@@ -1030,12 +1030,16 @@ async function checkConnectionStatus() {
 async function refreshConnectedAccountInfo() {
   try {
     const account = await apiRequest("/api/me");
+    connectionTitle.textContent = typeof account.login === "string" && account.login
+      ? `Połączono z Allegro: ${account.login}`
+      : "Konto Allegro połączone";
     const companyName = account.company?.name;
     const accountLabel = companyName
       ? `${account.login} · firma: ${companyName}`
       : `${account.login} · konto prywatne`;
     connectionDescription.textContent = `Połączone konto: ${accountLabel}. ID sprzedawcy: ${account.id}. Kategorie i szablony pobieramy bezpośrednio z Allegro.`;
   } catch {
+    connectionTitle.textContent = "Konto Allegro połączone";
     connectionDescription.textContent = "Konto Allegro połączone, ale nie udało się pobrać loginu sprzedawcy.";
   }
 }

@@ -145,6 +145,14 @@ offline.state.descriptionManuallyEdited = true;
 offline.state.descriptionText = "Własny opis";
 vm.runInContext("updateAutomaticDescriptionText();", offline);
 assert.equal(offline.state.descriptionText, "Własny opis");
+offline.connectionTitle = { textContent: "" };
+offline.connectionDescription = { textContent: "" };
+offline.apiRequest = async () => ({ id: "seller", login: "TymoGarage", company: { name: "Tymo Garage" } });
+await vm.runInContext("refreshConnectedAccountInfo()", offline);
+assert.equal(offline.connectionTitle.textContent, "Połączono z Allegro: TymoGarage");
+offline.apiRequest = async () => { throw new Error("Disconnected"); };
+await vm.runInContext("refreshConnectedAccountInfo()", offline);
+assert.equal(offline.connectionTitle.textContent, "Konto Allegro połączone", "Do not show a stale seller name when account lookup fails");
 offline.state.requiredParameters = [{ id: "condition", name: "Stan", type: "dictionary", dictionary: [{ id: "used", value: "Używany" }] }];
 vm.runInContext('applyAutomaticParameterValues("Volkswagen");', offline);
 assert.equal(offline.state.parameterValues.condition, "used");
@@ -167,7 +175,7 @@ try {
   };
   const portFunctions = functions(app);
   for (const [name, implementation] of functions(originalApp)) {
-    if (!["apiRequest", "checkConnectionStatus", "checkLoginStatus", "closeConnectionModal", "prefillAllegroCredentials", "renderPhotos", "saveSession", "loadSession", "uploadProductImages", "publishProduct", "updateSummary", "validateProductBeforePublish", "resetForm", "addVehicle", "renderVehicles"].includes(name)) assert.equal(portFunctions.get(name), implementation, `Original function changed: ${name}`);
+    if (!["apiRequest", "checkConnectionStatus", "checkLoginStatus", "refreshConnectedAccountInfo", "closeConnectionModal", "prefillAllegroCredentials", "renderPhotos", "saveSession", "loadSession", "uploadProductImages", "publishProduct", "updateSummary", "validateProductBeforePublish", "resetForm", "addVehicle", "renderVehicles"].includes(name)) assert.equal(portFunctions.get(name), implementation, `Original function changed: ${name}`);
   }
   const originalCss = await readFile(new URL("styles.css", originalDirectory), "utf8");
   const portCss = await readFile(new URL("../public/wystawiacz/styles.css", import.meta.url), "utf8");

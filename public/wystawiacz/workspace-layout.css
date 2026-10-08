@@ -34,8 +34,8 @@
 .creation-heading { margin-bottom: 12px; }
 .creation-heading .eyebrow { display: block; margin-bottom: 5px; font-size: 10px; letter-spacing: 1px; }
 .creation-heading h1 { font-size: 26px; }
-.workspace-grid { padding: 12px; border: 1px solid #f0dccf; border-radius: 20px; background: #fff8f3; }
-.workspace-grid > .card { min-width: 0; border-color: #eadfd7; box-shadow: 0 3px 12px #18223004; }
+.workspace-grid { padding: 12px; border: 1px solid #dce4ed; border-radius: 20px; background: #f0f4f8; }
+.workspace-grid > .card { min-width: 0; border-color: #dce4ed; box-shadow: 0 3px 12px #18223004; }
 .photo-navigation { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: stretch; }
 .photo-navigation button { min-height: 40px; }
 .photo-navigation .primary-button { width: 100%; padding: 11px 8px; font-size: 13px; }
