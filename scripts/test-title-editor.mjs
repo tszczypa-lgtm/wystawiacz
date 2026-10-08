@@ -35,6 +35,13 @@ try {
   const page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   const input = page.locator("#titleInput");
+  assert.ok(await page.locator("#titleCharacterCount").evaluate(node => node.classList.contains("title-invalid")));
+  await input.fill("Hak");
+  assert.ok(await page.locator("#titleCharacterCount").evaluate(node => node.classList.contains("title-invalid")));
+  await input.fill("a".repeat(12));
+  assert.ok(await page.locator("#titleCharacterCount").evaluate(node => node.classList.contains("title-invalid")), "Too few words remains invalid");
+  await input.fill("Abcd efgh ij");
+  assert.ok(await page.locator("#titleCharacterCount").evaluate(node => node.classList.contains("title-valid")), "12 characters and 3 words is valid");
   await input.fill("Hak holowniczy VW Tiguan 5na803881f");
   assert.equal(await page.locator("#titleCharacterCount").textContent(), `${editor.length(await input.inputValue())} / 75 znakow`);
   await page.locator("#titleUppercase").check();
@@ -53,6 +60,10 @@ try {
   assert.equal(await page.locator("#titleCharacterCount").textContent(), "76 / 75 znakow");
   assert.ok((await input.inputValue()).endsWith("5NA803881F"), "Never truncate the part-number suffix");
   assert.equal(await input.getAttribute("aria-invalid"), "true");
+  assert.ok(await page.locator("#titleCharacterCount").evaluate(node => node.classList.contains("title-invalid") && !node.classList.contains("title-valid")));
+  await input.fill("a".repeat(62) + " b 5na803881f");
+  assert.equal(await page.locator("#titleCharacterCount").textContent(), "75 / 75 znakow");
+  assert.ok(await page.locator("#titleCharacterCount").evaluate(node => node.classList.contains("title-valid") && !node.classList.contains("title-invalid")));
   await page.locator("#titleUppercase").uncheck();
   await input.fill("Hak holowniczy Volkswagen Tiguan");
   assert.equal(await input.inputValue(), "Hak holowniczy Volkswagen Tiguan");

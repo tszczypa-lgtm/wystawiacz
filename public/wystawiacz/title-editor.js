@@ -11,7 +11,6 @@
     const input = document.getElementById("titleInput");
     const checkbox = document.getElementById("titleUppercase");
     const counter = document.getElementById("titleCharacterCount");
-    const hint = document.getElementById("titleLengthHint");
     let composing = false;
     try { checkbox.checked = localStorage.getItem("wystawiacz-title-uppercase") === "true"; } catch {}
     function refresh() {
@@ -29,9 +28,10 @@
       }
       const count = length(input.value);
       counter.textContent = `${count} / 75 znakow`;
-      counter.classList.toggle("title-over-limit", count > 75);
-      const problem = input.value.trim() ? error(input.value) : "";
-      hint.textContent = problem || "Limit Allegro: 75 znakow ze spacjami. Minimum: 12 znakow i 3 slowa.";
+      const problem = count > 75 ? "Tytul przekracza 75 znakow." : error(input.value);
+      counter.classList.toggle("title-invalid", Boolean(problem));
+      counter.classList.toggle("title-valid", !problem);
+      counter.title = problem || "Poprawna dlugosc tytulu.";
       input.setAttribute("aria-invalid", problem ? "true" : "false");
     }
     input.addEventListener("input", event => { if (!event.isComposing) refresh(); });

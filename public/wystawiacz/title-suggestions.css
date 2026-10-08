@@ -14,8 +14,8 @@
 .title-editor-options label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .title-editor-options input { width: auto; accent-color: var(--orange); }
 .title-editor-options output { font-weight: 700; }
-.title-over-limit { color: #b42318; }
-#titleLengthHint { display: block; margin-bottom: 16px; color: var(--muted); }
+.title-invalid { color: #b42318; }
+.title-valid { color: #16875f; }
 .title-editor-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
 .title-uppercase-label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .title-uppercase-label input { width: auto; accent-color: var(--orange); }
