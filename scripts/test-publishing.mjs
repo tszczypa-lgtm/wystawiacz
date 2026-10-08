@@ -24,6 +24,7 @@ const definitions = [
 ];
 const complete = {
   title: "Pompa ABS BMW F40", stock: 3, stockUnit: "PAIR", price: "120,50", categoryId: "cat",
+  marketedBeforeGPSRObligation: false,
   responsibleProducerId: "producer", responsiblePersonId: "person", safetyInformation: "Informacje producenta dla tej czesci.",
   parameterValues: { count: "2", brand: "bmw", state: "used" }, descriptionText: "Moj opis\n<script>nie wykonuj</script>"
 };
@@ -46,14 +47,22 @@ assert.equal(payload.stock.available, 3);
 assert.equal(payload.productSet[0].safetyInformation.type, "TEXT");
 assert.equal(payload.productSet[0].responsibleProducer.id, "producer");
 assert.equal(payload.productSet[0].responsiblePerson.id, "person");
-assert.equal(payload.productSet[0].marketedBeforeGPSRObligation, undefined, "No blanket GPSR date declaration");
+assert.equal(payload.productSet[0].marketedBeforeGPSRObligation, false, "Unchecked choice is sent as false");
 assert.equal(payload.productSet[0].product.parameters.find(item => item.id === "count").values[0], "2", "Package count is independent of available stock");
 assert.ok(payload.parameters.some(item => item.id === "state"));
 assert.ok(payload.description.sections[0].items[1].content.includes("&lt;script&gt;"));
 for (const unit of ["UNIT", "SET"]) assert.equal(context.buildAllegroOfferPayload({ ...complete, stockUnit: unit }, [], definitions, {}).stock.unit, unit);
 const oldSessionPayload = context.buildAllegroOfferPayload({ ...complete, parameterValues: { ...complete.parameterValues, before: "yes" } }, [], definitions, {});
-assert.equal(oldSessionPayload.productSet[0].marketedBeforeGPSRObligation, undefined, "Legacy automatically selected GPSR flag must not be carried forward");
+assert.equal(oldSessionPayload.productSet[0].marketedBeforeGPSRObligation, false, "Explicit unchecked choice overrides obsolete parameter");
 assert.ok(!oldSessionPayload.parameters.some(item => item.id === "before"));
+const preGPSR = { ...complete, marketedBeforeGPSRObligation: true, responsibleProducerId: "", responsiblePersonId: "", safetyInformation: "" };
+assert.equal(context.validateListingParameters(preGPSR, definitions), "", "Used pre-GPSR product is not blocked by empty GPSR fields");
+const prePayload = context.buildAllegroOfferPayload(preGPSR, [], definitions, {});
+assert.equal(prePayload.productSet[0].marketedBeforeGPSRObligation, true);
+assert.equal(prePayload.productSet[0].safetyInformation, undefined, "Do not invent safety text");
+assert.equal(prePayload.productSet[0].responsibleProducer, undefined, "Do not invent producer details");
+assert.match(context.validateListingParameters(preGPSR, definitions.map(parameter => parameter.id === "state" ? { ...parameter, dictionary: [{ id: "used", value: "Nowy" }] } : parameter)), /odznacz ptaszek/);
+assert.equal(context.buildAllegroOfferPayload({ ...preGPSR, marketedBeforeGPSRObligation: undefined }, [], definitions, {}).productSet[0].marketedBeforeGPSRObligation, true, "Old sessions default to user's chosen pre-GPSR flow");
 response = new Response("<html>Error code: 1102</html>", { status: 500, headers: { "CF-Ray": "123abc-WAW" } });
 await assert.rejects(context.apiRequest("/api/upload-image"), /limit zasobow.*1102.*HTTP 500.*123abc-WAW/);
 response = Response.json({ message: "Limit Allegro" }, { status: 429 });

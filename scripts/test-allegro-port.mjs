@@ -156,6 +156,9 @@ assert.equal(offline.connectionTitle.textContent, "Konto Allegro połączone", "
 offline.state.requiredParameters = [{ id: "condition", name: "Stan", type: "dictionary", dictionary: [{ id: "used", value: "Używany" }] }];
 vm.runInContext('applyAutomaticParameterValues("Volkswagen");', offline);
 assert.equal(offline.state.parameterValues.condition, "used");
+offline.state.parameterValues.condition = "new";
+vm.runInContext('applyAutomaticParameterValues("Volkswagen");', offline);
+assert.equal(offline.state.parameterValues.condition, "new", "Never turn a manually selected new product into used to allow a pre-GPSR flag");
 const dashboard = await readFile(new URL("../app/panel/page.tsx", import.meta.url), "utf8");
 const offers = await readFile(new URL("../app/panel/offers/page.tsx", import.meta.url), "utf8");
 assert.ok(dashboard.includes('href="/panel/offers"'));

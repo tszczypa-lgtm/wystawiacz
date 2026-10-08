@@ -71,6 +71,8 @@ const categoryStatus = document.querySelector("#categoryStatus");
 const priceInput = document.querySelector("#priceInput");
 const stockInput = document.querySelector("#stockInput");
 const stockUnitInput = document.querySelector("#stockUnitInput");
+const marketedBeforeGpsrInput = document.querySelector("#marketedBeforeGpsrInput");
+const gpsrDetails = document.querySelector("#gpsrDetails");
 const responsibleProducerInput = document.querySelector("#responsibleProducerInput");
 const responsiblePersonInput = document.querySelector("#responsiblePersonInput");
 const safetyInformationInput = document.querySelector("#safetyInformationInput");
@@ -380,6 +382,7 @@ categoryInput.addEventListener("change", () => {
 });
 
 addButton.addEventListener("click", () => addCurrentProductToList());
+marketedBeforeGpsrInput.addEventListener("change", () => { gpsrDetails.open = !marketedBeforeGpsrInput.checked; });
 publishCurrentButton.addEventListener("click", async () => {
   if (publishCurrentButton.disabled) return;
   publishCurrentButton.disabled = true;
@@ -425,6 +428,7 @@ function addCurrentProductToList() {
     price,
     stock,
     stockUnit: stockUnitInput.value,
+    marketedBeforeGPSRObligation: marketedBeforeGpsrInput.checked,
     responsibleProducerId: responsibleProducerInput.value,
     responsiblePersonId: responsiblePersonInput.value,
     safetyInformation: safetyInformationInput.value.trim(),
@@ -591,6 +595,8 @@ function resetForm() {
   priceInput.value = "";
   stockInput.value = "1";
   stockUnitInput.value = "UNIT";
+  marketedBeforeGpsrInput.checked = true;
+  gpsrDetails.open = false;
   responsibleProducerInput.value = "";
   responsiblePersonInput.value = "";
   safetyInformationInput.value = "";
@@ -849,7 +855,7 @@ function applyAutomaticParameterValues(detectedBrand = getPreferredManufacturer(
         : window.CatalogNumberOptions ? window.CatalogNumberOptions.value(partNumber.value, titleInput.value) : titleInput.value.trim();
       if (value !== null) state.parameterValues[parameter.id] = value;
     }
-    if (isConditionParameter(normalizedName)) {
+    if (isConditionParameter(normalizedName) && !state.parameterValues[parameter.id]) {
       state.parameterValues[parameter.id] = findDictionaryValueId(parameter, "Używany") || "Używany";
     }
     if (isCarTypeParameter(normalizedName)) {
@@ -1821,8 +1827,10 @@ function buildAllegroOfferPayload(product, imageUrls, parameterDefinitions, loca
       images: imageUrls,
       parameters: productParameters
     },
-    safetyInformation: { type: "TEXT", description: product.safetyInformation.trim() }
+    marketedBeforeGPSRObligation: product.marketedBeforeGPSRObligation !== false
   };
+  const safetyText = String(product.safetyInformation || "").trim();
+  if (safetyText) productSetElement.safetyInformation = { type: "TEXT", description: safetyText };
   const responsibleProducer = findResponsibleProducerForProduct(product);
   if (responsibleProducer) productSetElement.responsibleProducer = responsibleProducer;
   if (product.responsiblePersonId) productSetElement.responsiblePerson = { id: product.responsiblePersonId };
@@ -1899,10 +1907,18 @@ function validateListingParameters(product, definitions) {
   }
   if (!Number.isInteger(Number(product.stock)) || Number(product.stock) < 1) return "Liczba dostepnych jednostek musi byc dodatnia liczba calkowita.";
   if (product.stockUnit && !["UNIT", "PAIR", "SET"].includes(product.stockUnit)) return "Wybierz jednostke: sztuki, pary albo komplety.";
-  if (!findResponsibleProducerForProduct(product)) return "Wybierz producenta odpowiedzialnego (GPSR) z danych tego konta Allegro.";
+  const beforeGPSR = product.marketedBeforeGPSRObligation !== false;
+  if (beforeGPSR) {
+    const condition = definitions.find((parameter) => isConditionParameter(normalizeText(parameter.name)));
+    const selected = product.parameterValues?.[condition?.id];
+    const selectedIds = Array.isArray(selected) ? selected : [selected];
+    const allowedConditions = ["uzywany", "bieznikowany", "na czesci", "regenerowany", "uszkodzony", "odnowiony przez producenta", "odnowiony przez sprzedawce", "do renowacji", "po renowacji", "nie wymaga renowacji", "po demontazu"];
+    if (!(condition?.dictionary || []).some((item) => selectedIds.includes(item.id) && allowedConditions.includes(normalizeText(item.value)))) return "Opcja przed 13.12.2024 wymaga odpowiedniego stanu, np. Uzywany. Dla nowej czesci odznacz ptaszek.";
+  }
+  if ((!beforeGPSR || product.responsibleProducerId) && !findResponsibleProducerForProduct(product)) return "Wybierz producenta odpowiedzialnego (GPSR) z danych tego konta Allegro.";
   if (product.responsiblePersonId && !state.compliance.responsiblePersons.some((person) => person.id === product.responsiblePersonId)) return "Wybierz osobe odpowiedzialna z danych tego konta Allegro.";
   const safety = String(product.safetyInformation || "").trim();
-  if (!safety || safety.length > 5000) return "Uzupelnij informacje o bezpieczenstwie produktu (1-5000 znakow).";
+  if ((!beforeGPSR && !safety) || safety.length > 5000) return "Uzupelnij informacje o bezpieczenstwie produktu (1-5000 znakow).";
   if (/<\/?[a-z][^>]*>/i.test(safety)) return "Informacje o bezpieczenstwie wpisz jako tekst, bez HTML.";
   return "";
 }
@@ -2033,6 +2049,8 @@ function editProduct(id) {
   priceInput.value = product.price || "";
   stockInput.value = product.stock || "1";
   stockUnitInput.value = product.stockUnit || "UNIT";
+  marketedBeforeGpsrInput.checked = product.marketedBeforeGPSRObligation !== false;
+  gpsrDetails.open = !marketedBeforeGpsrInput.checked;
   renderComplianceInputs(product);
   safetyInformationInput.value = product.safetyInformation || "";
   state.selectedPhotoNames = [...(product.photoNames || [])];
@@ -2078,6 +2096,7 @@ function saveActiveProductDraft() {
   product.price = priceInput.value.trim();
   product.stock = Number(stockInput.value);
   product.stockUnit = stockUnitInput.value;
+  product.marketedBeforeGPSRObligation = marketedBeforeGpsrInput.checked;
   product.responsibleProducerId = responsibleProducerInput.value;
   product.responsiblePersonId = responsiblePersonInput.value;
   product.safetyInformation = safetyInformationInput.value.trim();

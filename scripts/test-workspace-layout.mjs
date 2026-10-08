@@ -160,6 +160,8 @@ try {
   assert.equal(await catalog.inputValue(), "5Q0919275B X9");
   assert.equal(await page.locator(".description-preview #descriptionTextInput").count(), 1, "Description is edited inside preview");
   assert.equal(await page.locator(".description-editor").count(), 0);
+  assert.equal(await page.locator("#marketedBeforeGpsrInput").isChecked(), true, "Pre-GPSR option checked by default");
+  assert.equal(await page.locator("#gpsrDetails").getAttribute("open"), null, "Optional GPSR fields collapsed by default");
   await page.evaluate(() => {
     state.allegroConnected = true;
     state.categoryId = "cat";
@@ -190,6 +192,7 @@ try {
     window.confirm = () => { throw new Error("Unexpected confirmation"); };
   });
   await page.locator("#stockUnitInput").selectOption("PAIR");
+  await page.locator("#marketedBeforeGpsrInput").uncheck();
   await page.locator("#stockInput").fill("3");
   await page.locator("#responsibleProducerInput").selectOption("producer");
   await page.locator("#responsiblePersonInput").selectOption("person");
@@ -199,11 +202,13 @@ try {
   await page.locator("#publishCurrentButton").click();
   await page.waitForFunction(() => window.sentOffers.length === 1);
   assert.equal(await page.locator("#publishCurrentButton").isDisabled(), true);
+  assert.equal(await page.locator("#marketedBeforeGpsrInput").isChecked(), true, "A fresh form resets the pre-GPSR checkbox to checked");
   await page.evaluate(() => document.getElementById("publishCurrentButton").click());
   assert.equal(await page.evaluate(() => state.products.length), 1, "Direct publication adds exactly one product");
   const directOffer = await page.evaluate(() => window.sentOffers[0]);
   assert.equal(directOffer.stock.available, 3);
   assert.equal(directOffer.stock.unit, "PAIR");
+  assert.equal(directOffer.productSet[0].marketedBeforeGPSRObligation, false);
   assert.equal(directOffer.productSet[0].product.parameters[0].values[0], "2");
   assert.equal(directOffer.productSet[0].responsibleProducer.id, "producer");
   assert.equal(directOffer.productSet[0].responsiblePerson.id, "person");
@@ -218,6 +223,7 @@ try {
   await page.locator("#saveSessionButton").click();
   const listingSession = JSON.parse(await page.evaluate(() => window.savedSessionBlob.text()));
   assert.equal(listingSession.products[0].stockUnit, "PAIR");
+  assert.equal(listingSession.products[0].marketedBeforeGPSRObligation, false, "Unchecked choice survives session save");
   assert.equal(listingSession.products[0].responsibleProducerId, "producer");
   assert.equal(listingSession.products[0].safetyInformation, "Informacje producenta dla tego produktu.");
   await page.locator("#publishCurrentButton").click();

@@ -6,7 +6,7 @@
     <title>Wystawiacz Allegro</title>
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="title-suggestions.css?v=counter-colors" />
-    <link rel="stylesheet" href="workspace-layout.css?v=listing-details" />
+    <link rel="stylesheet" href="workspace-layout.css?v=gpsr-default" />
   </head>
   <body>
     <header class="topbar">
@@ -277,11 +277,14 @@
           </div>
           <div class="parameters-grid" id="parametersGrid"></div>
           <div class="parameters-grid listing-details">
+            <label class="parameter-field safety-field gpsr-date"><span><input id="marketedBeforeGpsrInput" type="checkbox" checked /> Produkt wprowadzony do obrotu w UE przed 13.12.2024</span><small>Odznacz, jesli nie dotyczy tej czesci. Rok produkcji sam w sobie nie potwierdza daty wejscia na rynek UE.</small></label>
             <label class="parameter-field"><span>Liczba dostepnych jednostek</span><input id="stockInput" type="number" min="1" step="1" value="1" /></label>
             <label class="parameter-field"><span>Jednostka sprzedazy</span><select id="stockUnitInput"><option value="UNIT">Sztuki</option><option value="PAIR">Pary</option><option value="SET">Komplety</option></select></label>
-            <label class="parameter-field"><span>Producent odpowiedzialny (GPSR)</span><select id="responsibleProducerInput"><option value="">Wybierz producenta z konta Allegro</option></select><small id="complianceStatus"></small></label>
-            <label class="parameter-field"><span>Osoba odpowiedzialna w UE (jesli wymagana)</span><select id="responsiblePersonInput"><option value="">Nie dotyczy</option></select></label>
-            <label class="parameter-field safety-field"><span>Informacje o bezpieczenstwie produktu (GPSR)</span><textarea id="safetyInformationInput" rows="3" maxlength="5000" placeholder="Wpisz informacje odpowiednie dla tej czesci, zgodne z dokumentacja producenta."></textarea></label>
+            <details class="safety-field" id="gpsrDetails"><summary>Dane producenta i bezpieczenstwa (GPSR)</summary><div class="parameters-grid listing-details">
+              <label class="parameter-field"><span>Producent odpowiedzialny (GPSR)</span><select id="responsibleProducerInput"><option value="">Wybierz producenta z konta Allegro</option></select><small id="complianceStatus"></small></label>
+              <label class="parameter-field"><span>Osoba odpowiedzialna w UE (jesli wymagana)</span><select id="responsiblePersonInput"><option value="">Nie dotyczy</option></select></label>
+              <label class="parameter-field safety-field"><span>Informacje o bezpieczenstwie produktu (GPSR)</span><textarea id="safetyInformationInput" rows="3" maxlength="5000" placeholder="Wpisz informacje odpowiednie dla tej czesci, zgodne z dokumentacja producenta."></textarea></label>
+            </div></details>
           </div>
           <div class="catalog-number-options" aria-label="Uzupełnianie numeru części w parametrach">
             <strong>Numer części w parametrach</strong>
@@ -428,7 +431,7 @@
     <script src="title-suggestions.js?v=no-source"></script>
     <script src="title-editor.js?v=counter-colors"></script>
     <script src="catalog-number-options.js?v=2"></script>
-    <script src="app.js?v=listing-details"></script>
+    <script src="app.js?v=gpsr-default"></script>
     <script src="workspace-layout.js?v=compact1"></script>
   </body>
 </html>

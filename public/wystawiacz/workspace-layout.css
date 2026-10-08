@@ -52,6 +52,9 @@
 .catalog-number-custom { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .listing-details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .listing-details .safety-field { grid-column: 1 / -1; }
+.gpsr-date span { display: flex; align-items: center; gap: 8px; }
+.gpsr-date input { width: auto; accent-color: var(--orange); }
+#gpsrDetails summary { cursor: pointer; font-size: 12px; color: var(--muted); }
 .listing-details textarea { width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; resize: vertical; }
 .description-copy { min-width: 0; }
 #descriptionTextInput { display: block; width: 100%; min-height: 130px; padding: 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; font: inherit; line-height: 1.5; color: var(--ink); resize: vertical; }
