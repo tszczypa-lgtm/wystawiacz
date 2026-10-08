@@ -32,6 +32,9 @@ try {
     nav.append(back, logout);
   });
   assert.equal(await page.locator(".hero-copy, .step-indicator").count(), 0);
+  assert.equal(await page.locator(".gallery-hint, .photo-tools").count(), 0);
+  assert.equal(await page.locator(".photo-preview .photo-rotate").count(), 2);
+  assert.equal(await page.locator(".photo-navigation #mainPhotoButton").count(), 1);
   assert.equal(await page.locator("#vehiclesDialog").isVisible(), false);
   assert.ok((await page.locator(".session-card").boundingBox()).height < 125);
   const accountBox = await page.locator(".connection-card").boundingBox();
@@ -86,6 +89,10 @@ try {
   await page.locator("#rotatePhotoRightButton").click();
   await page.waitForFunction(() => state.photoRotations.get("two.jpg") === 1);
   assert.deepEqual(await page.evaluate(() => state.selectedPhotoNames), ["one.jpg", "two.jpg"]);
+  await page.locator("#rotatePhotoLeftButton").click();
+  await page.waitForFunction(() => state.photoRotations.get("two.jpg") === 0);
+  await page.locator("#rotatePhotoRightButton").click();
+  await page.waitForFunction(() => state.photoRotations.get("two.jpg") === 1);
   await page.locator("#mainPhotoButton").click();
   assert.deepEqual(await page.evaluate(() => state.selectedPhotoNames), ["two.jpg", "one.jpg"]);
   await page.locator("#sessionNameInput").fill("Layout test");

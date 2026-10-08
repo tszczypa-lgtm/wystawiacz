@@ -6,7 +6,7 @@
     <title>Wystawiacz Allegro</title>
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="title-suggestions.css?v=counter-colors" />
-    <link rel="stylesheet" href="workspace-layout.css?v=compact3" />
+    <link rel="stylesheet" href="workspace-layout.css?v=photo-compact" />
   </head>
   <body>
     <header class="topbar">
@@ -160,26 +160,19 @@
           <div class="photo-browser hidden" id="photoBrowser">
             <div class="photo-preview">
               <img id="photoPreview" alt="Powiększony podgląd zdjęcia" />
+              <button id="rotatePhotoLeftButton" class="photo-rotate photo-rotate-left" type="button" title="Obróć zdjęcie o 90 stopni w lewo" aria-label="Obróć zdjęcie w lewo">&#8630;</button>
+              <button id="rotatePhotoRightButton" class="photo-rotate photo-rotate-right" type="button" title="Obróć zdjęcie o 90 stopni w prawo" aria-label="Obróć zdjęcie w prawo">&#8631;</button>
               <div class="photo-preview-caption">
                 <span id="photoPreviewName"></span>
                 <strong id="mainPhotoStatus"></strong>
               </div>
             </div>
             <div class="photo-controls photo-navigation" aria-label="Przeglądanie i wybór zdjęć">
-              <button id="previousPhotoButton" class="secondary-button" type="button" title="Poprzednie zdjęcie">&larr; Poprzednie</button>
+              <button id="previousPhotoButton" class="secondary-button" type="button" title="Poprzednie zdjęcie" aria-label="Poprzednie zdjęcie">&larr;<span class="photo-nav-label"> Poprzednie</span></button>
               <button id="togglePhotoButton" class="primary-button compact-button" type="button">Zaznacz zdjęcie</button>
-              <button id="nextPhotoButton" class="secondary-button" type="button" title="Następne zdjęcie">Następne &rarr;</button>
+              <button id="mainPhotoButton" class="secondary-button" type="button" title="Ustaw bieżące zdjęcie jako główne" aria-label="Ustaw jako główne">Główne</button>
+              <button id="nextPhotoButton" class="secondary-button" type="button" title="Następne zdjęcie" aria-label="Następne zdjęcie"><span class="photo-nav-label">Następne </span>&rarr;</button>
             </div>
-            <div class="photo-tools" aria-label="Obracanie i zdjęcie główne">
-              <div class="photo-rotation">
-                <button id="rotatePhotoLeftButton" class="secondary-button" type="button" title="Obróć zdjęcie o 90 stopni w lewo">&#8630; W lewo</button>
-                <button id="rotatePhotoRightButton" class="secondary-button" type="button" title="Obróć zdjęcie o 90 stopni w prawo">&#8631; W prawo</button>
-              </div>
-              <button id="mainPhotoButton" class="secondary-button" type="button">Ustaw jako główne</button>
-            </div>
-            <p class="gallery-hint">
-              Klikaj miniatury, aby dodać lub usunąć zdjęcia bieżącej aukcji. Pierwsze zaznaczone zdjęcie będzie główne.
-            </p>
             <div class="photo-grid" id="photoGrid"></div>
           </div>
           <div class="folder-summary hidden" id="folderSummary">
