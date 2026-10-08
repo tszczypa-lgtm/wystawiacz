@@ -179,6 +179,10 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
       const payload = await response.json().catch(() => ({})) as RemotePayload;
       if (!response.ok) {
         const message = payload.errors?.map((error: { userMessage?: string; message?: string }) => error.userMessage || error.message).join("; ") || payload.error_description || payload.error || "Allegro odrzuciło żądanie.";
+        if (response.status === 429) {
+          const wait = response.headers.get("Retry-After");
+          throw new ApiError(429, `${message} Limit Allegro (HTTP 429).${wait && /^\d+$/.test(wait) ? ` Sprobuj po ${wait} sekundach.` : " Poczekaj przed kolejna proba."}`);
+        }
         throw new ApiError(response.status >= 500 ? 502 : 400, message);
       }
       return payload;
@@ -258,10 +262,21 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
         return response;
       }
       if (path === "/upload-image") {
-        const input = await body();
-        if (!input.image?.base64 || !["image/jpeg", "image/png", "image/webp"].includes(input.image.contentType || "image/jpeg")) throw new ApiError(400, "Nieprawidłowe zdjęcie.");
-        const image = bytes(input.image.base64);
-        return json(await readRemote(await fetch("https://upload.allegro.pl/sale/images", { method: "POST", headers: { Authorization: `Bearer ${await accessToken()}`, Accept: accept, "Content-Type": input.image.contentType || "image/jpeg" }, body: image })));
+        let contentType = request.headers.get("Content-Type")?.split(";")[0].trim() || "";
+        let image: Uint8Array | ArrayBuffer;
+        if (["image/jpeg", "image/png", "image/webp"].includes(contentType)) {
+          // Native binary transfer avoids parsing and decoding megabytes of base64 on the Worker.
+          if (Number(request.headers.get("Content-Length")) > 20 * 1024 * 1024) throw new ApiError(413, "Zdjecie jest zbyt duze (maksimum 20 MB).");
+          image = await request.arrayBuffer();
+        } else {
+          // Support older tabs during deployment; new clients send the image itself.
+          const input = await body();
+          contentType = input.image?.contentType || "image/jpeg";
+          if (!input.image?.base64 || !["image/jpeg", "image/png", "image/webp"].includes(contentType)) throw new ApiError(400, "Nieprawidłowe zdjęcie.");
+          image = bytes(input.image.base64);
+        }
+        if (!image.byteLength || image.byteLength > 20 * 1024 * 1024) throw new ApiError(413, "Nieprawidlowy rozmiar zdjecia (maksimum 20 MB).");
+        return json(await readRemote(await fetch("https://upload.allegro.pl/sale/images", { method: "POST", headers: { Authorization: `Bearer ${await accessToken()}`, Accept: accept, "Content-Type": contentType }, body: image })));
       }
       if (path === "/product-offers") {
         const input = await body();

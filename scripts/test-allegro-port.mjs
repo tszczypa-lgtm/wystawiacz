@@ -24,6 +24,7 @@ let saved = sealed;
 let deleted = false;
 let remoteCalls = [];
 let tokenCalls = [];
+let imageStatus = 200;
 globalThis.fetch = async (url, options = {}) => {
   url = String(url);
   const headers = new Headers(options.headers);
@@ -51,6 +52,7 @@ globalThis.fetch = async (url, options = {}) => {
   assert.ok(headers.get("Authorization").startsWith("Bearer "));
   assert.notEqual(headers.get("Authorization"), "Bearer user-session");
   remoteCalls.push({ url, options });
+  if (url.startsWith("https://upload.allegro.pl/") && imageStatus !== 200) return Response.json({ errors: [{ userMessage: "Za duzo zapytan" }] }, { status: imageStatus, headers: { "Retry-After": "60" } });
   if (url.endsWith("/me")) return Response.json({ id: "seller" });
   if (url.endsWith("/sale/categories/123")) return Response.json({ id: "123", name: "Parts", parent: null });
   return Response.json({ ok: true, id: "test-offer" });
@@ -65,6 +67,18 @@ try {
   assert.equal((await handleAllegroApi(request("/unknown"), env)).status, 404);
   const post = (path, data) => handleAllegroApi(request(path, { method: "POST", body: JSON.stringify(data) }), env);
   assert.equal((await post("/upload-image", { image: { base64: Buffer.from("image").toString("base64"), contentType: "image/jpeg" } })).status, 200);
+  const binary = Uint8Array.from([0, 1, 127, 128, 255]);
+  const binaryPost = (body, headers = {}) => handleAllegroApi(request("/upload-image", { method: "POST", body, headers: { "Content-Type": "image/jpeg", ...headers } }), env);
+  assert.equal((await binaryPost(binary)).status, 200);
+  assert.deepEqual(new Uint8Array(remoteCalls.at(-1).options.body), binary, "Binary image bytes stay unchanged");
+  assert.equal(new Headers(remoteCalls.at(-1).options.headers).get("Content-Type"), "image/jpeg");
+  assert.equal((await binaryPost(binary, { "Content-Length": String(21 * 1024 * 1024) })).status, 413);
+  assert.equal((await binaryPost(new Uint8Array())).status, 413);
+  imageStatus = 429;
+  const limited = await binaryPost(binary);
+  assert.equal(limited.status, 429);
+  assert.match((await limited.json()).message, /60 sekundach/);
+  imageStatus = 200;
   assert.equal((await post("/product-offers", { offerBase64: Buffer.from(JSON.stringify({ name: "Test" })).toString("base64") })).status, 200);
   assert.equal((await post("/auth/device", { clientId: "app", clientSecret: "secret" })).status, 404);
   const start = await post("/auth/start", {});
@@ -153,7 +167,7 @@ try {
   };
   const portFunctions = functions(app);
   for (const [name, implementation] of functions(originalApp)) {
-    if (!["apiRequest", "checkConnectionStatus", "checkLoginStatus", "closeConnectionModal", "prefillAllegroCredentials", "renderPhotos", "saveSession", "loadSession", "uploadProductImages", "updateSummary", "validateProductBeforePublish", "resetForm"].includes(name)) assert.equal(portFunctions.get(name), implementation, `Original function changed: ${name}`);
+    if (!["apiRequest", "checkConnectionStatus", "checkLoginStatus", "closeConnectionModal", "prefillAllegroCredentials", "renderPhotos", "saveSession", "loadSession", "uploadProductImages", "publishProduct", "updateSummary", "validateProductBeforePublish", "resetForm"].includes(name)) assert.equal(portFunctions.get(name), implementation, `Original function changed: ${name}`);
   }
   const originalCss = await readFile(new URL("styles.css", originalDirectory), "utf8");
   const portCss = await readFile(new URL("../public/wystawiacz/styles.css", import.meta.url), "utf8");

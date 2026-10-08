@@ -219,12 +219,24 @@ disconnectButton.addEventListener("click", async () => {
 
 async function apiRequest(path, options = {}) {
   const token = await window.getWystawiaczToken();
-  const response = await fetch(path.replace(/^\/api\//, "/api/allegro/"), {
+  let response;
+  try { response = await fetch(path.replace(/^\/api\//, "/api/allegro/"), {
     ...options,
     headers: { "Content-Type": "application/json", ...(options.headers || {}), Authorization: `Bearer ${token}` }
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.message || "Nie udało się połączyć z serwerem Wystawiacza.");
+  }); } catch { throw new Error("Przerwane polaczenie z Wystawiaczem (brak odpowiedzi HTTP). Sprawdz internet."); }
+  const raw = await response.text();
+  let payload;
+  try { payload = JSON.parse(raw); } catch { payload = null; }
+  if (!response.ok || !payload || typeof payload !== "object") {
+    const cloudflareCode = raw.match(/(?:error\s*(?:code)?\s*[:=]?\s*|\b)(1101|1102|1027)\b/i)?.[1];
+    const reason = cloudflareCode === "1102" ? "Cloudflare przerwal prace serwera: limit zasobow (1102)."
+      : cloudflareCode === "1027" ? "Wyczerpany dzienny limit serwera Cloudflare (1027)."
+      : cloudflareCode === "1101" ? "Blad wykonania serwera Cloudflare (1101)."
+      : "Serwer Wystawiacza zwrocil nieprawidlowa odpowiedz.";
+    const ray = response.headers.get("CF-Ray");
+    const reference = ray && /^[a-z0-9-]{1,80}$/i.test(ray) ? ` ID: ${ray}.` : "";
+    throw new Error(`${typeof payload?.message === "string" ? payload.message : reason} [HTTP ${response.status}]${reference}`);
+  }
   return payload;
 }
 
@@ -1531,10 +1543,16 @@ function openSearch(baseUrl, query) {
   window.open(`${baseUrl}${encodeURIComponent(query)}`, "_blank", "noopener,noreferrer");
 }
 
+const publishingProducts = new Set();
 async function publishProduct(id) {
+  if (publishingProducts.has(id)) return;
   if (activeProductId === id) saveActiveProductDraft();
   const product = state.products.find((item) => item.id === id);
   if (!product) return;
+  if (product.allegroOfferId || product.publishStatus === "WYSTAWIONO") {
+    showToast("Ta aukcja jest juz wystawiona. Nie wysylamy jej ponownie.");
+    return;
+  }
   applyDefaultAfterSalesToProduct(product);
   const validationError = validateProductBeforePublish(product);
   if (validationError) {
@@ -1546,14 +1564,19 @@ async function publishProduct(id) {
   const location = getPublishLocation();
   if (!location) return;
 
+  publishingProducts.add(id);
+  product.publishError = "";
+  let stage = "Wysylanie zdjec";
   product.publishStatus = "Wysyłanie zdjęć...";
   renderProducts();
   try {
     const imageUrls = await uploadProductImages(product);
+    stage = "Pobieranie parametrow kategorii";
     product.publishStatus = "Tworzenie oferty...";
     renderProducts();
     const parameterDefinitions = await loadCategoryParameterDefinitions(product.categoryId);
     const offer = buildAllegroOfferPayload(product, imageUrls, parameterDefinitions, location);
+    stage = "Tworzenie oferty";
     const result = await apiRequest("/api/product-offers", {
       method: "POST",
       body: JSON.stringify({ offerBase64: toBase64Utf8(JSON.stringify(offer)) })
@@ -1564,9 +1587,10 @@ async function publishProduct(id) {
     showToast(`Wystawiono aukcję${product.allegroOfferId ? ` ID: ${product.allegroOfferId}` : ""}.`);
   } catch (error) {
     product.publishStatus = "BŁĄD";
-    product.publishError = error.message;
-    showToast(`Nie wystawiono: ${error.message}`);
+    product.publishError = `${stage}: ${error.message}${stage === "Tworzenie oferty" ? " Przed ponowna proba sprawdz Moje oferty w Allegro: przy przerwanym polaczeniu oferta mogla powstac." : ""}`;
+    showToast(product.publishError);
   } finally {
+    publishingProducts.delete(id);
     renderProducts();
   }
 }
@@ -1639,17 +1663,13 @@ async function uploadProductImages(product) {
     const photo = state.localPhotosByName.get(photoName);
     if (!photo?.file) throw new Error(`Brakuje lokalnego pliku zdjęcia: ${photoName}`);
     if (photo.rotating) throw new Error("Poczekaj na zakonczenie obracania zdjecia.");
-    const base64 = await fileToBase64(photo.file);
-    const result = await apiRequest("/api/upload-image", {
+    if (photo.file.size > 20 * 1024 * 1024) throw new Error(`Zdjecie ${photoName} przekracza 20 MB.`);
+    let result;
+    try { result = await apiRequest("/api/upload-image", {
       method: "POST",
-      body: JSON.stringify({
-        image: {
-          name: photo.file.name,
-          contentType: photo.file.type || "image/jpeg",
-          base64
-        }
-      })
-    });
+      headers: { "Content-Type": photo.file.type || "image/jpeg" },
+      body: photo.file
+    }); } catch (error) { throw new Error(`Zdjecie ${urls.length + 1}/${product.photoNames.length} (${photoName}): ${error.message}`); }
     const url = result.location || result.url || result.imageUrl;
     if (!url) throw new Error("Allegro nie zwróciło adresu przesłanego zdjęcia.");
     urls.push(url);
