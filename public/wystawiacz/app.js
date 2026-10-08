@@ -70,6 +70,12 @@ const categoryBrowserList = document.querySelector("#categoryBrowserList");
 const categoryStatus = document.querySelector("#categoryStatus");
 const priceInput = document.querySelector("#priceInput");
 const stockInput = document.querySelector("#stockInput");
+const stockUnitInput = document.querySelector("#stockUnitInput");
+const responsibleProducerInput = document.querySelector("#responsibleProducerInput");
+const responsiblePersonInput = document.querySelector("#responsiblePersonInput");
+const safetyInformationInput = document.querySelector("#safetyInformationInput");
+const complianceStatus = document.querySelector("#complianceStatus");
+const publishCurrentButton = document.querySelector("#publishCurrentButton");
 const shippingRateInput = document.querySelector("#shippingRateInput");
 const returnPolicyInput = document.querySelector("#returnPolicyInput");
 const impliedWarrantyInput = document.querySelector("#impliedWarrantyInput");
@@ -373,13 +379,31 @@ categoryInput.addEventListener("change", () => {
   }
 });
 
-addButton.addEventListener("click", () => {
+addButton.addEventListener("click", () => addCurrentProductToList());
+publishCurrentButton.addEventListener("click", async () => {
+  if (publishCurrentButton.disabled) return;
+  publishCurrentButton.disabled = true;
+  addButton.disabled = true;
+  try {
+    const product = addCurrentProductToList();
+    if (product) await publishProduct(product.id);
+  } finally {
+    publishCurrentButton.disabled = false;
+    addButton.disabled = false;
+  }
+});
+
+function addCurrentProductToList() {
+  if (activeProductId && publishingProducts.has(activeProductId)) {
+    showToast("Ta aukcja jest w trakcie wystawiania. Poczekaj na wynik.");
+    return;
+  }
   titleEditor.refresh();
   const title = titleInput.value.trim();
   const price = priceInput.value.trim();
   const stock = Number(stockInput.value);
 
-  if (!title || stock < 1) {
+  if (!title || !Number.isInteger(stock) || stock < 1) {
     showToast("Uzupełnij tytuł i liczbę sztuk. Cenę można dopisać później.");
     return;
   }
@@ -400,6 +424,10 @@ addButton.addEventListener("click", () => {
     parameterValues: { ...state.parameterValues },
     price,
     stock,
+    stockUnit: stockUnitInput.value,
+    responsibleProducerId: responsibleProducerInput.value,
+    responsiblePersonId: responsiblePersonInput.value,
+    safetyInformation: safetyInformationInput.value.trim(),
     shippingRateId: shippingRateInput.value,
     shippingRateName: shippingRateInput.options[shippingRateInput.selectedIndex]?.textContent || "",
     returnPolicyId: returnPolicyInput.value,
@@ -418,6 +446,11 @@ addButton.addEventListener("click", () => {
   if (activeProductId) {
     const existingIndex = state.products.findIndex((item) => item.id === activeProductId);
     product.id = activeProductId;
+    Object.assign(product, {
+      allegroOfferId: state.products[existingIndex]?.allegroOfferId,
+      publishStatus: state.products[existingIndex]?.publishStatus,
+      allegroResponse: state.products[existingIndex]?.allegroResponse
+    });
     state.products[existingIndex] = product;
     showToast("Zapisano zmiany aukcji.");
   } else {
@@ -427,7 +460,8 @@ addButton.addEventListener("click", () => {
 
   resetForm();
   renderProducts();
-});
+  return product;
+}
 
 function renderPhotos() {
   titleSuggestions.refresh();
@@ -486,7 +520,7 @@ function renderProducts() {
           : `<div class="product-image"></div>`}
         <div>
           <h3>${escapeHtml(product.title)}</h3>
-          <p>${escapeHtml(product.brand || "Marka do uzupełnienia")} · Numer wpisany: ${escapeHtml(product.enteredPartNumber)} · ${product.stock} szt. · ${product.photoNames?.length || 0} zdjęć</p>
+          <p>${escapeHtml(product.brand || "Marka do uzupełnienia")} · Numer wpisany: ${escapeHtml(product.enteredPartNumber)} · ${product.stock} ${{ UNIT: "szt.", PAIR: "par", SET: "kpl." }[product.stockUnit] || "szt."} · ${product.photoNames?.length || 0} zdjęć</p>
           <p>Wysyłka: ${escapeHtml(product.shippingRateName || "profil do wybrania")}</p>
           <p>Zwrot: ${escapeHtml(product.returnPolicyName || "brak")} · Reklamacja: ${escapeHtml(product.impliedWarrantyName || "brak")}</p>
           ${product.publishError ? `<p class="publish-error">Błąd Allegro: ${escapeHtml(product.publishError)}</p>` : ""}
@@ -543,6 +577,7 @@ function resetForm() {
   state.categoryId = "";
   state.requiredParameters = [];
   state.parameterValues = {};
+  state.automaticManufacturerValues = {};
   parametersPanel.classList.add("hidden");
   parametersStatus.textContent = "";
   parametersGrid.innerHTML = "";
@@ -555,6 +590,10 @@ function resetForm() {
   delete categoryInput.dataset.edited;
   priceInput.value = "";
   stockInput.value = "1";
+  stockUnitInput.value = "UNIT";
+  responsibleProducerInput.value = "";
+  responsiblePersonInput.value = "";
+  safetyInformationInput.value = "";
   if (state.shippingRates.length) shippingRateInput.value = state.shippingRates[0].id;
   renderAfterSalesInputs();
   suggestionPanel.classList.add("hidden");
@@ -693,13 +732,27 @@ async function loadCategoryDetails(id) {
       const name = normalizeText(parameter.name);
       return parameter.required
         || parameter.requiredForProduct
+        || parameter.requiredIf
         || isManufacturerParameter(name)
         || isCatalogNumberParameter(name)
         || isConditionParameter(name)
-        || isPreGsprParameter(name)
         || isCarTypeParameter(name)
-        || isInstallationSideParameter(name);
+        || isInstallationSideParameter(name)
+        || name.includes("liczba sztuk")
+        || name.includes("liczba elementow");
     });
+    const includedIds = new Set(state.requiredParameters.map((parameter) => parameter.id));
+    for (let index = 0; index < state.requiredParameters.length; index++) {
+      const parameter = state.requiredParameters[index];
+      const dependencyIds = [parameter.options?.dependsOnParameterId, ...[parameter.requiredIf, parameter.displayedIf].flatMap((condition) => [...(condition?.parametersWithValue || []), ...(condition?.parametersWithoutValue || [])].map((item) => item.id))];
+      dependencyIds.filter(Boolean).forEach((id) => {
+        const dependency = (parameterResult.parameters || []).find((item) => item.id === id);
+        if (dependency && !includedIds.has(id)) {
+          includedIds.add(id);
+          state.requiredParameters.push(dependency);
+        }
+      });
+    }
     addManufacturerOptionsFromParameters();
     applyAutomaticParameterValues(getPreferredManufacturer());
     renderRequiredParameters();
@@ -721,8 +774,8 @@ function renderRequiredParameters() {
     ? `${state.requiredParameters.length} pól obowiązkowych i automatycznie uzupełnianych`
     : "";
   parametersGrid.innerHTML = state.requiredParameters.map((parameter) => {
-    const value = state.parameterValues[parameter.id] || "";
-    const dependency = parameter.options?.dependsOnParameterId ? " · zależny" : "";
+    const value = state.parameterValues[parameter.id] ?? "";
+    const dependency = parameter.requiredIf ? " · warunkowo wymagany" : parameter.options?.dependsOnParameterId ? " · zależny" : "";
     const normalizedName = normalizeText(parameter.name);
     const detectedBrand = getPreferredManufacturer();
     const selectedValues = Array.isArray(value) ? value : value ? [value] : [];
@@ -757,6 +810,7 @@ function renderRequiredParameters() {
   }).join("");
   parametersGrid.querySelectorAll("[data-parameter-id]").forEach((input) => {
     input.addEventListener("change", () => {
+      delete state.automaticManufacturerValues?.[input.dataset.parameterId];
       state.parameterValues[input.dataset.parameterId] = input.multiple
         ? [...input.selectedOptions].map((option) => option.value).filter(Boolean)
         : input.dataset.compactMultiple === "true" ? (input.value ? [input.value] : []) : input.value;
@@ -780,12 +834,14 @@ function syncRenderedParameterValues() {
 }
 
 function applyAutomaticParameterValues(detectedBrand = getPreferredManufacturer()) {
+  state.automaticManufacturerValues ||= {};
   state.requiredParameters.forEach((parameter) => {
     const normalizedName = normalizeText(parameter.name);
-    if (isManufacturerParameter(normalizedName) && detectedBrand) {
+    if (isManufacturerParameter(normalizedName) && detectedBrand && (!state.parameterValues[parameter.id] || state.parameterValues[parameter.id] === state.automaticManufacturerValues[parameter.id])) {
       const manufacturerValue = findDictionaryValueId(parameter, detectedBrand)
         || (parameter.type === "dictionary" ? "" : detectedBrand);
       state.parameterValues[parameter.id] = manufacturerValue;
+      state.automaticManufacturerValues[parameter.id] = manufacturerValue;
     }
     if (isCatalogNumberParameter(normalizedName)) {
       const value = isOriginalCatalogNumberParameter(normalizedName)
@@ -795,9 +851,6 @@ function applyAutomaticParameterValues(detectedBrand = getPreferredManufacturer(
     }
     if (isConditionParameter(normalizedName)) {
       state.parameterValues[parameter.id] = findDictionaryValueId(parameter, "Używany") || "Używany";
-    }
-    if (isPreGsprParameter(normalizedName)) {
-      state.parameterValues[parameter.id] = findPositiveParameterValue(parameter);
     }
     if (isCarTypeParameter(normalizedName)) {
       const carTypeValue = findDictionaryValueId(parameter, "Samochody osobowe")
@@ -1100,14 +1153,24 @@ async function loadComplianceData() {
     ]);
     state.compliance.responsibleProducers = producers.responsibleProducers || producers.items || [];
     state.compliance.responsiblePersons = persons.responsiblePersons || persons.items || [];
-    if (!state.compliance.responsibleProducers.length) {
-      showToast("Allegro zwraca 0 producentów odpowiedzialnych. Ptaszek GPSR ustawimy automatycznie.");
-    }
+    renderComplianceInputs();
   } catch (error) {
     state.compliance.responsibleProducers = [];
     state.compliance.responsiblePersons = [];
+    renderComplianceInputs();
+    complianceStatus.textContent = `Nie udalo sie pobrac danych GPSR: ${error.message}`;
     showToast(`GPSR/producent odpowiedzialny: ${error.message}`);
   }
+}
+
+function renderComplianceInputs(product = null) {
+  const producerId = product ? product.responsibleProducerId || "" : responsibleProducerInput.value;
+  const personId = product ? product.responsiblePersonId || "" : responsiblePersonInput.value;
+  responsibleProducerInput.innerHTML = '<option value="">Wybierz producenta z konta Allegro</option>' + state.compliance.responsibleProducers.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name || item.producerData?.tradeName || item.id)}</option>`).join("");
+  responsiblePersonInput.innerHTML = '<option value="">Nie dotyczy</option>' + state.compliance.responsiblePersons.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name || item.id)}</option>`).join("");
+  responsibleProducerInput.value = producerId;
+  responsiblePersonInput.value = personId;
+  complianceStatus.textContent = state.compliance.responsibleProducers.length ? "" : "Dodaj dane producenta na swoim koncie Allegro, potem odswiez aplikacje. Najpierw zapisz sesje, aby nie stracic pracy.";
 }
 
 function renderAfterSalesInputs(product = null) {
@@ -1425,7 +1488,6 @@ function renderDescriptionPreview() {
   descriptionMissingImage.classList.toggle("hidden", Boolean(mainPhotoUrl));
   descriptionPreviewTitle.textContent = titleInput.value.trim() || "Tytuł aukcji pojawi się tutaj";
   updateAutomaticDescriptionText();
-  descriptionPreviewText.textContent = state.descriptionText;
   if (descriptionTextInput.value !== state.descriptionText) descriptionTextInput.value = state.descriptionText;
 }
 
@@ -1614,22 +1676,24 @@ async function publishProduct(id) {
     showToast(validationError);
     return;
   }
-  const accepted = confirm(`Wystawić tę jedną aukcję na Allegro?\n\n${product.title}\nCena: ${product.price} PLN`);
-  if (!accepted) return;
   const location = getPublishLocation();
   if (!location) return;
 
   publishingProducts.add(id);
   product.publishError = "";
-  let stage = "Wysylanie zdjec";
-  product.publishStatus = "Wysyłanie zdjęć...";
+  let stage = "Sprawdzanie parametrow";
+  product.publishStatus = "Sprawdzanie parametrow...";
   renderProducts();
   try {
+    const parameterDefinitions = await loadCategoryParameterDefinitions(product.categoryId);
+    const parameterError = validateListingParameters(product, parameterDefinitions);
+    if (parameterError) throw new Error(parameterError);
+    stage = "Wysylanie zdjec";
+    product.publishStatus = "Wysyłanie zdjęć...";
+    renderProducts();
     const imageUrls = await uploadProductImages(product);
-    stage = "Pobieranie parametrow kategorii";
     product.publishStatus = "Tworzenie oferty...";
     renderProducts();
-    const parameterDefinitions = await loadCategoryParameterDefinitions(product.categoryId);
     const offer = buildAllegroOfferPayload(product, imageUrls, parameterDefinitions, location);
     stage = "Tworzenie oferty";
     const result = await apiRequest("/api/product-offers", {
@@ -1757,10 +1821,11 @@ function buildAllegroOfferPayload(product, imageUrls, parameterDefinitions, loca
       images: imageUrls,
       parameters: productParameters
     },
-    marketedBeforeGPSRObligation: true
+    safetyInformation: { type: "TEXT", description: product.safetyInformation.trim() }
   };
   const responsibleProducer = findResponsibleProducerForProduct(product);
   if (responsibleProducer) productSetElement.responsibleProducer = responsibleProducer;
+  if (product.responsiblePersonId) productSetElement.responsiblePerson = { id: product.responsiblePersonId };
   return {
     name: product.title,
     category: { id: product.categoryId },
@@ -1777,7 +1842,7 @@ function buildAllegroOfferPayload(product, imageUrls, parameterDefinitions, loca
     },
     stock: {
       available: quantity,
-      unit: "UNIT"
+      unit: ["UNIT", "PAIR", "SET"].includes(product.stockUnit) ? product.stockUnit : "UNIT"
     },
     delivery: {
       shippingRates: {
@@ -1796,18 +1861,61 @@ function buildAllegroOfferPayload(product, imageUrls, parameterDefinitions, loca
 }
 
 function findResponsibleProducerForProduct(product) {
-  const producerName = normalizeText(product.brand || product.manufacturer || "");
-  if (!producerName) return null;
-  const match = state.compliance.responsibleProducers.find((producer) => {
-    const names = [
-      producer.name,
-      producer.producerData?.tradeName,
-      producer.producerData?.name,
-      producer.producerData?.companyName
-    ].filter(Boolean).map(normalizeText);
-    return names.some((name) => name === producerName || name.includes(producerName) || producerName.includes(name));
-  });
+  const match = state.compliance.responsibleProducers.find((producer) => producer.id === product.responsibleProducerId);
   return match?.id ? { type: "ID", id: match.id } : null;
+}
+
+function validateListingParameters(product, definitions) {
+  const missing = definitions.filter((parameter) => {
+    if (isPreGsprParameter(normalizeText(parameter.name))) return false;
+    const condition = parameter.requiredIf;
+    return condition && ((condition.parametersWithValue?.length || 0) + (condition.parametersWithoutValue?.length || 0))
+      ? parameterConditionMatches(condition, product.parameterValues || {})
+      : parameter.required || parameter.requiredForProduct;
+  }).filter((parameter) => {
+    const value = product.parameterValues?.[parameter.id];
+    return value == null || String(value).trim() === "" || (Array.isArray(value) && !value.length);
+  });
+  if (missing.length) return `Uzupelnij parametry Allegro: ${missing.map((parameter) => parameter.name).join(", ")}.`;
+  for (const parameter of definitions) {
+    if (isPreGsprParameter(normalizeText(parameter.name))) continue;
+    const value = product.parameterValues?.[parameter.id];
+    if (value == null || value === "") continue;
+    const values = Array.isArray(value) ? value : [value];
+    if (parameter.type === "dictionary" && values.some((id) => !(parameter.dictionary || []).some((item) => item.id === id))) return `Wybierz poprawna wartosc parametru: ${parameter.name}.`;
+    if (parameter.type === "dictionary" && parameter.options?.dependsOnParameterId) {
+      const parent = product.parameterValues?.[parameter.options.dependsOnParameterId];
+      const parentValues = Array.isArray(parent) ? parent : [parent];
+      if (values.some((id) => {
+        const item = parameter.dictionary.find((item) => item.id === id);
+        return item?.dependsOnValueIds?.length && !item.dependsOnValueIds.some((id) => parentValues.includes(id));
+      })) return `Wartosc parametru ${parameter.name} nie pasuje do wybranych parametrow nadrzednych.`;
+    }
+    if (parameter.type === "string" && values.some((value) => (parameter.restrictions?.minLength != null && String(value).length < parameter.restrictions.minLength) || (parameter.restrictions?.maxLength != null && String(value).length > parameter.restrictions.maxLength))) return `Sprawdz dlugosc parametru: ${parameter.name}.`;
+    if (["integer", "float"].includes(parameter.type) && values.some((value) => {
+      const number = Number(String(value).replace(",", "."));
+      return !Number.isFinite(number) || (parameter.type === "integer" && !Number.isInteger(number)) || (parameter.restrictions?.min != null && number < parameter.restrictions.min) || (parameter.restrictions?.max != null && number > parameter.restrictions.max);
+    })) return `Wpisz poprawna liczbe w parametrze: ${parameter.name}.`;
+  }
+  if (!Number.isInteger(Number(product.stock)) || Number(product.stock) < 1) return "Liczba dostepnych jednostek musi byc dodatnia liczba calkowita.";
+  if (product.stockUnit && !["UNIT", "PAIR", "SET"].includes(product.stockUnit)) return "Wybierz jednostke: sztuki, pary albo komplety.";
+  if (!findResponsibleProducerForProduct(product)) return "Wybierz producenta odpowiedzialnego (GPSR) z danych tego konta Allegro.";
+  if (product.responsiblePersonId && !state.compliance.responsiblePersons.some((person) => person.id === product.responsiblePersonId)) return "Wybierz osobe odpowiedzialna z danych tego konta Allegro.";
+  const safety = String(product.safetyInformation || "").trim();
+  if (!safety || safety.length > 5000) return "Uzupelnij informacje o bezpieczenstwie produktu (1-5000 znakow).";
+  if (/<\/?[a-z][^>]*>/i.test(safety)) return "Informacje o bezpieczenstwie wpisz jako tekst, bez HTML.";
+  return "";
+}
+
+function parameterConditionMatches(condition, values) {
+  if (!condition) return false;
+  const withValue = condition.parametersWithValue || [];
+  const withoutValue = condition.parametersWithoutValue || [];
+  if (!withValue.length && !withoutValue.length) return false;
+  return withValue.every((item) => {
+    const selected = Array.isArray(values[item.id]) ? values[item.id] : [values[item.id]];
+    return (item.oneOfValueIds || []).some((id) => selected.includes(id));
+  }) && withoutValue.every((item) => values[item.id] == null || String(values[item.id]).trim() === "");
 }
 
 function buildAfterSalesServices(product) {
@@ -1849,11 +1957,13 @@ function splitOfferParameters(parameterValues, parameterDefinitions) {
   const productParameters = [];
   const offerParameters = [];
   parameterDefinitions.forEach((parameter) => {
+    // Do not carry old automatic pre-GPSR declarations into new offers.
+    if (isPreGsprParameter(normalizeText(parameter.name))) return;
     const value = parameterValues[parameter.id];
     if (value === undefined || value === "" || (Array.isArray(value) && !value.length)) return;
     const converted = convertParameterValue(parameter, value);
     if (!converted) return;
-    const describesProduct = parameter.options?.describesProduct !== false || parameter.requiredForProduct === true;
+    const describesProduct = parameter.options?.describesProduct === true || parameter.requiredForProduct === true;
     if (describesProduct && !isConditionParameter(normalizeText(parameter.name))) productParameters.push(converted);
     else offerParameters.push(converted);
   });
@@ -1922,6 +2032,9 @@ function editProduct(id) {
   categoryStatus.textContent = product.categoryId ? `Wybrana kategoria Allegro · ID: ${product.categoryId}` : "Wybierz kategorię Allegro";
   priceInput.value = product.price || "";
   stockInput.value = product.stock || "1";
+  stockUnitInput.value = product.stockUnit || "UNIT";
+  renderComplianceInputs(product);
+  safetyInformationInput.value = product.safetyInformation || "";
   state.selectedPhotoNames = [...(product.photoNames || [])];
   previewPhotoName = state.selectedPhotoNames[0] || previewPhotoName;
   if (product.shippingRateId) shippingRateInput.value = product.shippingRateId;
@@ -1964,6 +2077,10 @@ function saveActiveProductDraft() {
   product.parameterValues = { ...state.parameterValues };
   product.price = priceInput.value.trim();
   product.stock = Number(stockInput.value);
+  product.stockUnit = stockUnitInput.value;
+  product.responsibleProducerId = responsibleProducerInput.value;
+  product.responsiblePersonId = responsiblePersonInput.value;
+  product.safetyInformation = safetyInformationInput.value.trim();
   product.shippingRateId = shippingRateInput.value;
   product.shippingRateName = shippingRateInput.options[shippingRateInput.selectedIndex]?.textContent || "";
   product.returnPolicyId = returnPolicyInput.value;

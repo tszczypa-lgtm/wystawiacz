@@ -163,7 +163,7 @@ assert.ok(!dashboard.includes("<OriginalWystawiacz"));
 assert.ok(offers.includes("<OriginalWystawiacz"));
 console.log("Offline automatics: number/title, description, manual edits and condition passed; account and offers routes separated.");
 for (const match of app.matchAll(/document\.querySelector\("#([^\"]+)"\)/g)) assert.ok(html.includes(`id="${match[1]}"`), match[1]);
-assert.ok(app.includes('confirm(`Wystawić tę jedną aukcję'));
+assert.ok(!app.includes('confirm(`Wystawić tę jedną aukcję'), "Publication does not ask for confirmation");
 assert.ok(!html.includes("clientSecretInput"));
 assert.ok(!app.includes("/api/auth/device"));
 const originalDirectory = new URL("../../outputs/allegro-assistant/", import.meta.url);
@@ -174,8 +174,9 @@ try {
     return new Map(ast.statements.filter(ts.isFunctionDeclaration).map(fn => [fn.name.text, fn.getText(ast).replace(/\r\n/g, "\n")]));
   };
   const portFunctions = functions(app);
+  const listingFunctions = ["renderProducts", "splitOfferParameters"];
   for (const [name, implementation] of functions(originalApp)) {
-    if (!["apiRequest", "checkConnectionStatus", "checkLoginStatus", "refreshConnectedAccountInfo", "closeConnectionModal", "prefillAllegroCredentials", "renderPhotos", "saveSession", "loadSession", "uploadProductImages", "publishProduct", "updateSummary", "validateProductBeforePublish", "resetForm", "addVehicle", "renderVehicles", "applyAutomaticParameterValues"].includes(name)) assert.equal(portFunctions.get(name), implementation, `Original function changed: ${name}`);
+    if (![...listingFunctions, "apiRequest", "checkConnectionStatus", "checkLoginStatus", "refreshConnectedAccountInfo", "closeConnectionModal", "prefillAllegroCredentials", "renderPhotos", "saveSession", "loadSession", "uploadProductImages", "publishProduct", "updateSummary", "validateProductBeforePublish", "resetForm", "addVehicle", "renderVehicles", "applyAutomaticParameterValues", "loadCategoryDetails", "renderRequiredParameters", "loadComplianceData", "renderDescriptionPreview", "buildAllegroOfferPayload", "findResponsibleProducerForProduct", "editProduct", "saveActiveProductDraft"].includes(name)) assert.equal(portFunctions.get(name), implementation, `Original function changed: ${name}`);
   }
   const originalCss = await readFile(new URL("styles.css", originalDirectory), "utf8");
   const portCss = await readFile(new URL("../public/wystawiacz/styles.css", import.meta.url), "utf8");

@@ -109,7 +109,7 @@ try {
   await page.waitForFunction(() => document.querySelectorAll(".title-choice").length === 4);
   await page.locator(".title-choice").first().click();
   assert.equal(await page.evaluate(() => window.chosen), "Pompa ABS");
-  assert.equal(await page.locator(".title-candidate a").count(), 4);
+  assert.equal(await page.locator(".title-candidate a").count(), 0, "Source links removed");
   await page.locator("#titleModeFull").check();
   await page.waitForFunction(() => document.querySelector(".title-choice")?.textContent.startsWith("Pompa ABS"));
   for (const width of [350, 260, 200]) {
@@ -117,12 +117,10 @@ try {
     const layout = await page.evaluate(() => {
       const row = document.querySelector(".title-candidate");
       const choice = row.querySelector(".title-choice");
-      const link = row.querySelector("a");
-      return { row: row.getBoundingClientRect().width, title: choice.getBoundingClientRect().width, height: choice.getBoundingClientRect().height, controlsBelow: link.getBoundingClientRect().top >= choice.getBoundingClientRect().bottom, overflow: row.scrollWidth > row.clientWidth + 1 };
+      return { row: row.getBoundingClientRect().width, title: choice.getBoundingClientRect().width, height: choice.getBoundingClientRect().height, overflow: row.scrollWidth > row.clientWidth + 1 };
     });
     assert.ok(layout.title >= layout.row * 0.98, `Title must stay full width at ${width}px`);
     assert.ok(layout.height < 160, "Title must not become a vertical letter column");
-    assert.ok(layout.controlsBelow, "Append button and source links sit below the title");
     assert.equal(layout.overflow, false, "Controls wrap without horizontal overflow");
   }
   assert.deepEqual(errors, []);

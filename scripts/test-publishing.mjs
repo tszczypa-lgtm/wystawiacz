@@ -14,6 +14,46 @@ const context = vm.createContext({
   state: { localPhotosByName: new Map() },
 });
 vm.runInContext(functions + "\nconst publishingProducts = new Set();", context);
+context.state.compliance = { responsibleProducers: [{ id: "producer", name: "BMW" }], responsiblePersons: [{ id: "person" }] };
+context.escapeHtml = value => String(value).replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+const definitions = [
+  { id: "count", name: "Liczba sztuk w zestawie", type: "integer", required: true, options: { describesProduct: true }, restrictions: { min: 1 } },
+  { id: "brand", name: "Producent", type: "dictionary", requiredForProduct: true, dictionary: [{ id: "bmw", value: "BMW" }], options: { describesProduct: true } },
+  { id: "state", name: "Stan", type: "dictionary", required: true, dictionary: [{ id: "used", value: "Uzywany" }], options: { describesProduct: false } },
+  { id: "before", name: "Produkt wprowadzony do obrotu na terenie UE przed 13.12.2024", type: "dictionary", dictionary: [{ id: "yes", value: "Tak" }], options: { describesProduct: false } },
+];
+const complete = {
+  title: "Pompa ABS BMW F40", stock: 3, stockUnit: "PAIR", price: "120,50", categoryId: "cat",
+  responsibleProducerId: "producer", responsiblePersonId: "person", safetyInformation: "Informacje producenta dla tej czesci.",
+  parameterValues: { count: "2", brand: "bmw", state: "used" }, descriptionText: "Moj opis\n<script>nie wykonuj</script>"
+};
+assert.equal(context.validateListingParameters(complete, definitions), "");
+assert.match(context.validateListingParameters({ ...complete, parameterValues: {} }, definitions), /Liczba sztuk.*Producent.*Stan/);
+assert.match(context.validateListingParameters({ ...complete, parameterValues: { ...complete.parameterValues, brand: "invalid" } }, definitions), /Producent/);
+assert.match(context.validateListingParameters({ ...complete, parameterValues: { ...complete.parameterValues, count: "0" } }, definitions), /Liczba sztuk/);
+assert.match(context.validateListingParameters({ ...complete, responsibleProducerId: "other-account" }, definitions), /producenta/);
+assert.match(context.validateListingParameters({ ...complete, safetyInformation: "" }, definitions), /bezpieczenstwie/);
+assert.match(context.validateListingParameters({ ...complete, safetyInformation: "<p>test</p>" }, definitions), /HTML/);
+assert.match(context.validateListingParameters({ ...complete, stock: 1.5 }, definitions), /calkowita/);
+assert.equal(context.parameterConditionMatches({ parametersWithValue: [{ id: "state", oneOfValueIds: ["used"] }] }, complete.parameterValues), true);
+assert.equal(context.parameterConditionMatches({ parametersWithValue: [{ id: "state", oneOfValueIds: ["new"] }] }, complete.parameterValues), false);
+const conditional = { id: "gtin", name: "EAN", required: true, requiredIf: { parametersWithValue: [{ id: "state", oneOfValueIds: ["new"] }] }, type: "string" };
+assert.equal(context.validateListingParameters(complete, [...definitions, conditional]), "", "A conditional requirement must not apply when its condition is false");
+assert.match(context.validateListingParameters(complete, [...definitions, { ...conditional, requiredIf: { parametersWithoutValue: [{ id: "mpn" }] } }]), /EAN/);
+const payload = context.buildAllegroOfferPayload(complete, ["https://images.test/main"], definitions, { city: "Znin" });
+assert.equal(payload.stock.unit, "PAIR");
+assert.equal(payload.stock.available, 3);
+assert.equal(payload.productSet[0].safetyInformation.type, "TEXT");
+assert.equal(payload.productSet[0].responsibleProducer.id, "producer");
+assert.equal(payload.productSet[0].responsiblePerson.id, "person");
+assert.equal(payload.productSet[0].marketedBeforeGPSRObligation, undefined, "No blanket GPSR date declaration");
+assert.equal(payload.productSet[0].product.parameters.find(item => item.id === "count").values[0], "2", "Package count is independent of available stock");
+assert.ok(payload.parameters.some(item => item.id === "state"));
+assert.ok(payload.description.sections[0].items[1].content.includes("&lt;script&gt;"));
+for (const unit of ["UNIT", "SET"]) assert.equal(context.buildAllegroOfferPayload({ ...complete, stockUnit: unit }, [], definitions, {}).stock.unit, unit);
+const oldSessionPayload = context.buildAllegroOfferPayload({ ...complete, parameterValues: { ...complete.parameterValues, before: "yes" } }, [], definitions, {});
+assert.equal(oldSessionPayload.productSet[0].marketedBeforeGPSRObligation, undefined, "Legacy automatically selected GPSR flag must not be carried forward");
+assert.ok(!oldSessionPayload.parameters.some(item => item.id === "before"));
 response = new Response("<html>Error code: 1102</html>", { status: 500, headers: { "CF-Ray": "123abc-WAW" } });
 await assert.rejects(context.apiRequest("/api/upload-image"), /limit zasobow.*1102.*HTTP 500.*123abc-WAW/);
 response = Response.json({ message: "Limit Allegro" }, { status: 429 });
@@ -43,14 +83,16 @@ let uploads = 0;
 let offers = 0;
 const product = { id: "one", title: "Test", price: 10, categoryId: "123" };
 Object.assign(context, {
-  activeProductId: null, confirm: () => true, showToast: () => {}, renderProducts: () => {},
+  activeProductId: null, confirm: () => { throw new Error("Unexpected confirmation"); }, showToast: () => {}, renderProducts: () => {},
   applyDefaultAfterSalesToProduct: () => {}, validateProductBeforePublish: () => "", getPublishLocation: () => ({}),
   loadCategoryParameterDefinitions: async () => [], buildAllegroOfferPayload: () => ({}), toBase64Utf8: () => "offer",
+  validateListingParameters: () => "",
   uploadProductImages: async () => { uploads++; return new Promise(resolve => { release = resolve; }); },
   apiRequest: async () => { offers++; return { id: "published" }; },
 });
 context.state.products = [product];
 const pending = context.publishProduct("one");
+await new Promise(resolve => setImmediate(resolve));
 await context.publishProduct("one");
 assert.equal(uploads, 1, "Double click does not start another upload/publish");
 release([]);
@@ -71,4 +113,10 @@ context.uploadProductImages = async () => { throw new Error("image failed"); };
 await context.publishProduct("one");
 assert.match(product.publishError, /Wysylanie zdjec: image failed/);
 assert.equal(offers, 2);
+context.validateListingParameters = () => "Missing producer";
+const beforeValidation = uploads;
+context.uploadProductImages = async () => { uploads++; return []; };
+await context.publishProduct("one");
+assert.equal(uploads, beforeValidation, "Validation fails before any image upload");
+assert.match(product.publishError, /Sprawdzanie parametrow: Missing producer/);
 console.log("Publishing: binary order/bytes, HTTP/Cloudflare errors, stage, double-click lock and no blind POST retries passed. No live offers created.");

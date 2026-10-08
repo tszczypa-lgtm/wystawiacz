@@ -6,7 +6,7 @@
     <title>Wystawiacz Allegro</title>
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="title-suggestions.css?v=counter-colors" />
-    <link rel="stylesheet" href="workspace-layout.css?v=catalog-options" />
+    <link rel="stylesheet" href="workspace-layout.css?v=listing-details" />
   </head>
   <body>
     <header class="topbar">
@@ -276,6 +276,13 @@
             <small id="parametersStatus"></small>
           </div>
           <div class="parameters-grid" id="parametersGrid"></div>
+          <div class="parameters-grid listing-details">
+            <label class="parameter-field"><span>Liczba dostepnych jednostek</span><input id="stockInput" type="number" min="1" step="1" value="1" /></label>
+            <label class="parameter-field"><span>Jednostka sprzedazy</span><select id="stockUnitInput"><option value="UNIT">Sztuki</option><option value="PAIR">Pary</option><option value="SET">Komplety</option></select></label>
+            <label class="parameter-field"><span>Producent odpowiedzialny (GPSR)</span><select id="responsibleProducerInput"><option value="">Wybierz producenta z konta Allegro</option></select><small id="complianceStatus"></small></label>
+            <label class="parameter-field"><span>Osoba odpowiedzialna w UE (jesli wymagana)</span><select id="responsiblePersonInput"><option value="">Nie dotyczy</option></select></label>
+            <label class="parameter-field safety-field"><span>Informacje o bezpieczenstwie produktu (GPSR)</span><textarea id="safetyInformationInput" rows="3" maxlength="5000" placeholder="Wpisz informacje odpowiednie dla tej czesci, zgodne z dokumentacja producenta."></textarea></label>
+          </div>
           <div class="catalog-number-options" aria-label="Uzupełnianie numeru części w parametrach">
             <strong>Numer części w parametrach</strong>
             <label><input id="catalogNumberFullTitle" type="checkbox" /> Kopiuj cały tytuł</label>
@@ -297,19 +304,11 @@
             </div>
             <div class="description-copy">
               <p id="descriptionPreviewTitle">Tytuł aukcji pojawi się tutaj</p>
-              <div id="descriptionPreviewText"></div>
+              <div id="descriptionPreviewText"><textarea id="descriptionTextInput" rows="5" aria-label="Edytuj opis aukcji" placeholder="Kliknij tutaj i edytuj opis"></textarea></div>
             </div>
           </div>
-          <label class="field description-editor">
-            <span>Edytuj tekst opisu</span>
-            <textarea id="descriptionTextInput" rows="5"></textarea>
-          </label>
         </div>
         <div class="price-row">
-          <label class="field">
-            <span>Liczba sztuk</span>
-            <input id="stockInput" type="number" min="1" step="1" value="1" />
-          </label>
           <label class="field shipping-field">
             <span>Profil wysyłki Allegro</span>
             <select id="shippingRateInput">
@@ -353,11 +352,12 @@
         </div>
         <div class="summary-actions">
           <p>
-            Techniczne dane Allegro uzupełnimy automatycznie w tle.
+            Wystaw dodaje produkt do listy i publikuje go na Allegro.
           </p>
           <button class="primary-button" id="addButton" type="button">
             Dodaj do listy
           </button>
+          <button class="primary-button" id="publishCurrentButton" type="button">Wystaw</button>
         </div>
       </section>
 
@@ -425,10 +425,10 @@
       </div>
     </div>
     <script src="web-auth.js"></script>
-    <script src="title-suggestions.js?v=compact-plus"></script>
+    <script src="title-suggestions.js?v=no-source"></script>
     <script src="title-editor.js?v=counter-colors"></script>
     <script src="catalog-number-options.js?v=2"></script>
-    <script src="app.js?v=catalog-options"></script>
+    <script src="app.js?v=listing-details"></script>
     <script src="workspace-layout.js?v=compact1"></script>
   </body>
 </html>

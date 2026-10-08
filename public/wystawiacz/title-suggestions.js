@@ -82,15 +82,6 @@
             });
             row.appendChild(add);
           }
-          try {
-            const url = new URL(item.url);
-            if (url.protocol === "https:") {
-              const link = document.createElement("a");
-              link.href = url.href; link.target = "_blank"; link.rel = "noopener noreferrer";
-              link.textContent = "Zrodlo";
-              row.appendChild(link);
-            }
-          } catch {}
           section.appendChild(row);
           count++;
           offered++;
