@@ -129,6 +129,10 @@ let categoryLocked = false;
 let allegroManufacturerOptions = [];
 
 const titleEditor = window.TitleEditor.mount();
+const catalogLink = window.CatalogLink.mount({
+  getContext: () => ({ number: partNumber.value.trim(), categoryId: state.categoryId, productId: activeProductId }),
+  request: (path) => apiRequest(path)
+});
 const titleSuggestions = window.TitleSuggestions.mount({
   getContext: () => ({ number: partNumber.value.trim(), productId: activeProductId }),
   search: (number, signal) => apiRequest(`/api/title-suggestions?number=${encodeURIComponent(number)}`, { signal }),
@@ -443,6 +447,7 @@ function addCurrentProductToList() {
     id: crypto.randomUUID(),
     title,
     enteredPartNumber: partNumber.value.trim(),
+    catalogProduct: catalogLink.get(),
     allegroPartNumber: title,
     brand: getPreferredManufacturer(),
     category: categoryInput.options[categoryInput.selectedIndex]?.textContent || "",
@@ -594,6 +599,7 @@ function renderProducts() {
 }
 
 function resetForm() {
+  catalogLink.restore(null);
   state.selectedPhotos = [];
   state.selectedPhotoNames = [];
   partNumber.value = "";
@@ -1716,7 +1722,18 @@ async function publishProduct(id) {
   renderProducts();
   try {
     const parameterDefinitions = await loadCategoryParameterDefinitions(product.categoryId);
-    const parameterError = validateListingParameters(product, parameterDefinitions);
+    if (product.catalogProduct) {
+      if (window.CatalogLink.numberKey(product.enteredPartNumber) !== product.catalogProduct.number) throw new Error("Numer czesci zmienil sie. Wybierz ponownie produkt z katalogu.");
+      const detail = await apiRequest(`/api/catalog-products/${encodeURIComponent(product.catalogProduct.id)}`);
+      if (detail.category?.id !== product.categoryId) throw new Error("Produkt katalogowy ma inna kategorie niz aukcja. Wybierz ponownie produkt.");
+      product.catalogProduct = { ...product.catalogProduct, parameters: detail.parameters || [] };
+    }
+    const validationValues = { ...product.parameterValues };
+    for (const parameter of product.catalogProduct?.parameters || []) {
+      const values = parameter.valuesIds?.length ? parameter.valuesIds : parameter.values;
+      if (values?.length && (parameter.options?.identifiesProduct !== false || !validationValues[parameter.id])) validationValues[parameter.id] = values;
+    }
+    const parameterError = validateListingParameters({ ...product, parameterValues: validationValues }, parameterDefinitions);
     if (parameterError) throw new Error(parameterError);
     stage = "Wysylanie zdjec";
     product.publishStatus = "Wysyłanie zdjęć...";
@@ -1845,7 +1862,11 @@ function buildAllegroOfferPayload(product, imageUrls, parameterDefinitions, loca
   const quantity = Math.max(Number(product.stock) || 1, 1);
   const afterSalesServices = buildAfterSalesServices(product);
   const productSetElement = {
-    product: {
+    product: product.catalogProduct ? {
+      id: product.catalogProduct.id,
+      images: [],
+      parameters: productParameters.filter((parameter) => product.catalogProduct.parameters?.some((item) => item.id === parameter.id && item.options?.identifiesProduct === false))
+    } : {
       name: product.title,
       category: { id: product.categoryId },
       images: imageUrls,
@@ -2067,6 +2088,7 @@ function editProduct(id) {
   categoryInput.innerHTML = `<option value="${escapeHtml(product.categoryId || "")}">${escapeHtml(product.category || "Wybierz kategorię")}</option>`;
   categoryInput.value = product.categoryId || "";
   state.categoryId = product.categoryId || "";
+  catalogLink.restore(product.catalogProduct);
   categoryLocked = Boolean(state.categoryId);
   state.parameterValues = { ...(product.parameterValues || {}) };
   categoryStatus.textContent = product.categoryId ? `Wybrana kategoria Allegro · ID: ${product.categoryId}` : "Wybierz kategorię Allegro";
@@ -2111,6 +2133,7 @@ function saveActiveProductDraft() {
   if (!product) return;
   product.title = titleInput.value.trim();
   product.enteredPartNumber = partNumber.value.trim();
+  product.catalogProduct = catalogLink.get();
   product.allegroPartNumber = product.title;
   product.brand = getPreferredManufacturer();
   product.category = categoryInput.options[categoryInput.selectedIndex]?.textContent || "";

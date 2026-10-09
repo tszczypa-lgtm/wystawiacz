@@ -43,6 +43,19 @@ assert.equal(context.validateListingParameters(complete, [...definitions, condit
 assert.match(context.validateListingParameters(complete, [...definitions, { ...conditional, requiredIf: { parametersWithoutValue: [{ id: "mpn" }] } }]), /EAN/);
 const payload = context.buildAllegroOfferPayload(complete, ["https://images.test/main"], definitions, { city: "Znin" });
 assert.equal(payload.stock.unit, "PAIR");
+const linked = context.buildAllegroOfferPayload({ ...complete, catalogProduct: {
+  id: "f748fdc9-4e44-4bf1-ad39-6fab2d588e5f", parameters: [
+    { id: "brand", options: { identifiesProduct: true } }, { id: "count", options: { identifiesProduct: false } }
+  ]
+} }, ["https://images.test/main"], definitions, { city: "Znin" });
+assert.equal(linked.productSet[0].product.id, "f748fdc9-4e44-4bf1-ad39-6fab2d588e5f");
+assert.equal(linked.productSet[0].product.name, undefined, "No new catalog product name");
+assert.equal(linked.productSet[0].product.images.length, 0, "Do not import catalog photos");
+assert.equal(linked.images[0], "https://images.test/main");
+assert.equal(linked.name, complete.title);
+assert.equal(linked.description.sections[0].items[1].content, payload.description.sections[0].items[1].content);
+assert.equal(linked.productSet[0].product.parameters.length, 1);
+assert.equal(linked.productSet[0].product.parameters[0].id, "count", "Do not override catalog identifying parameters");
 assert.equal(payload.stock.available, 3);
 assert.equal(payload.productSet[0].safetyInformation.type, "TEXT");
 assert.equal(payload.productSet[0].responsibleProducer.id, "producer");

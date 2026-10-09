@@ -212,6 +212,16 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
     const url = new URL(request.url);
     const path = url.pathname.slice("/api/allegro".length);
     if (request.method === "GET") {
+      if (path === "/catalog-products") {
+        const number = url.searchParams.get("number") || "";
+        if (!/^[A-Z0-9 .\/-]{6,40}$/i.test(number) || !/\d/.test(number)) throw new ApiError(400, "Wpisz pelny numer czesci.");
+        return json(await remote(`/sale/products?phrase=${encodeURIComponent(number)}&mode=MPN&language=pl-PL`));
+      }
+      if (path.startsWith("/catalog-products/")) {
+        const id = path.slice("/catalog-products/".length);
+        if (!/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(id)) throw new ApiError(400, "Nieprawidlowy produkt katalogowy.");
+        return json(await remote(`/sale/products/${id}?language=pl-PL`));
+      }
       if (path === "/title-suggestions") return json(await searchTitleSuggestions(url.searchParams.get("number") || "", user.id, env, remote));
       if (path === "/health") return json({ ok: true, connected: Boolean(connection?.accessToken), build: "2026-06-02.35", mode: "web" });
       const routes: Record<string, string> = { "/me": "/me", "/shipping-rates": "/sale/shipping-rates", "/responsible-producers": "/sale/responsible-producers", "/responsible-persons": "/sale/responsible-persons" };

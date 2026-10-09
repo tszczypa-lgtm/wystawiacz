@@ -64,6 +64,12 @@ try {
     assert.equal((await handleAllegroApi(request(path), env)).status, 200, path);
   }
   assert.equal((await handleAllegroApi(request("/category-parameters/../../me"), env)).status, 404);
+  assert.equal((await handleAllegroApi(request("/catalog-products?number=5G6919605A"), env)).status, 200);
+  assert.ok(remoteCalls.at(-1).url.includes("/sale/products?phrase=5G6919605A&mode=MPN"));
+  assert.equal((await handleAllegroApi(request("/catalog-products/f748fdc9-4e44-4bf1-ad39-6fab2d588e5f"), env)).status, 200);
+  assert.ok(remoteCalls.at(-1).url.includes("/sale/products/f748fdc9-4e44-4bf1-ad39-6fab2d588e5f"));
+  assert.equal((await handleAllegroApi(request("/catalog-products/not-an-id"), env)).status, 400);
+  assert.equal((await handleAllegroApi(request("/catalog-products?number=x"), env)).status, 400);
   assert.equal((await handleAllegroApi(request("/unknown"), env)).status, 404);
   const post = (path, data) => handleAllegroApi(request(path, { method: "POST", body: JSON.stringify(data) }), env);
   assert.equal((await post("/upload-image", { image: { base64: Buffer.from("image").toString("base64"), contentType: "image/jpeg" } })).status, 200);

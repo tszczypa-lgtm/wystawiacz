@@ -274,6 +274,33 @@ try {
   assert.equal(await page.evaluate(() => window.CatalogNumberOptions.value("   ", "  Czujnik   parktronik PDC VW Golf  ")), "Czujnik parktronik X9");
   assert.equal(await page.evaluate(() => window.CatalogNumberOptions.value("", "Pompa")), "Pompa X9");
   assert.equal(await page.evaluate(() => window.CatalogNumberOptions.value("", "   ")), "", "Do not use the suffix alone as a part number");
+  await page.evaluate(() => {
+    window.catalogFixture = { id: "f748fdc9-4e44-4bf1-ad39-6fab2d588e5f", name: "Ekran 5G6919605A", category: { id: "123" }, parameters: [] };
+    apiRequest = async path => path.includes("/catalog-products/") ? window.catalogFixture : { products: [window.catalogFixture] };
+    state.categoryId = "123";
+    partNumber.value = "5g6 919 605 a";
+    titleInput.value = "Moj wlasny tytul ekranu";
+    summaryCard.classList.remove("hidden");
+  });
+  await page.locator(".catalog-link-panel summary").click();
+  await page.locator("#catalogSearchButton").click();
+  await page.locator("#catalogResults button").click();
+  await page.waitForFunction(() => catalogLink.get()?.id === window.catalogFixture.id);
+  assert.equal(await page.locator("#titleInput").inputValue(), "Moj wlasny tytul ekranu");
+  const selectedCatalog = await page.evaluate(() => catalogLink.get());
+  assert.equal(selectedCatalog.number, "5G6919605A");
+  await page.locator("#partNumber").fill("5G6919605B");
+  assert.equal(await page.evaluate(() => catalogLink.get()), null, "Changing part number clears catalog link");
+  await page.evaluate(selection => { partNumber.value = "5G6919605A"; catalogLink.restore(selection); }, selectedCatalog);
+  assert.ok((await page.locator("#catalogStatus").textContent()).includes("Polaczono"));
+  await page.evaluate(() => { state.categoryId = "456"; });
+  assert.equal(await page.evaluate(() => catalogLink.get()), null, "Cannot keep product from a different category");
+  await page.locator("#catalogSearchButton").click();
+  await page.locator("#catalogResults button").click();
+  await page.waitForFunction(() => document.getElementById("catalogStatus").textContent.includes("inna kategorie"));
+  assert.equal(await page.evaluate(() => catalogLink.get()), null);
+  await page.evaluate(() => { resetForm(); });
+  assert.equal(await page.evaluate(() => catalogLink.get()), null);
   assert.deepEqual(errors, []);
   console.log("Workspace: actual app scripts, modal add/edit/cancel, selected model/title, photo order/rotation/main, session save/load and responsive layout passed. No live API calls.");
 } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }

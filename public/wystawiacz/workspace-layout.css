@@ -71,6 +71,10 @@
 #vehiclesDialog .vehicles-card { margin: 0; border: 0; padding: 24px; }
 .models-dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .search-actions { align-items: flex-start; gap: 12px; }
+.catalog-link-panel { margin-bottom: 18px; padding: 12px; border: 1px solid #dce2eb; border-radius: 10px; }
+.catalog-link-panel summary { cursor: pointer; font-weight: 600; margin-bottom: 10px; }
+#catalogResults { display: grid; gap: 8px; }
+#catalogResults button { text-align: left; white-space: normal; }
 .search-actions > span { flex-basis: 100%; }
 .price-search-group { display: grid; gap: 8px; min-width: 0; }
 .price-search-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
