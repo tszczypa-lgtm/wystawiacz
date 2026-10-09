@@ -448,6 +448,7 @@ function addCurrentProductToList() {
     title,
     enteredPartNumber: partNumber.value.trim(),
     catalogProduct: catalogLink.get(),
+    catalogLinkRequested: catalogLink.requested(),
     allegroPartNumber: title,
     brand: getPreferredManufacturer(),
     category: categoryInput.options[categoryInput.selectedIndex]?.textContent || "",
@@ -476,6 +477,10 @@ function addCurrentProductToList() {
     selectedVehicleId: state.selectedVehicleId
   };
 
+  if (product.catalogLinkRequested && !product.catalogProduct) {
+    showToast("Wybierz produkt z katalogu albo odznacz Lacz z katalogiem.");
+    return;
+  }
   if (activeProductId) {
     const existingIndex = state.products.findIndex((item) => item.id === activeProductId);
     product.id = activeProductId;
@@ -1777,6 +1782,7 @@ function applyDefaultAfterSalesToProduct(product) {
 }
 
 function validateProductBeforePublish(product) {
+  if (product.catalogLinkRequested && !product.catalogProduct) return "Wybierz produkt z katalogu albo odznacz Lacz z katalogiem.";
   if (!state.allegroConnected) return "Najpierw połącz konto Allegro na świeżej wersji programu.";
   if (!product.title) return "Brakuje tytułu.";
   const titleError = window.TitleEditor.error(product.title);
@@ -2088,7 +2094,7 @@ function editProduct(id) {
   categoryInput.innerHTML = `<option value="${escapeHtml(product.categoryId || "")}">${escapeHtml(product.category || "Wybierz kategorię")}</option>`;
   categoryInput.value = product.categoryId || "";
   state.categoryId = product.categoryId || "";
-  catalogLink.restore(product.catalogProduct);
+  catalogLink.restore(product.catalogProduct, product.catalogLinkRequested ?? Boolean(product.catalogProduct));
   categoryLocked = Boolean(state.categoryId);
   state.parameterValues = { ...(product.parameterValues || {}) };
   categoryStatus.textContent = product.categoryId ? `Wybrana kategoria Allegro · ID: ${product.categoryId}` : "Wybierz kategorię Allegro";
@@ -2134,6 +2140,7 @@ function saveActiveProductDraft() {
   product.title = titleInput.value.trim();
   product.enteredPartNumber = partNumber.value.trim();
   product.catalogProduct = catalogLink.get();
+  product.catalogLinkRequested = catalogLink.requested();
   product.allegroPartNumber = product.title;
   product.brand = getPreferredManufacturer();
   product.category = categoryInput.options[categoryInput.selectedIndex]?.textContent || "";

@@ -5,16 +5,24 @@
     const status = document.getElementById("catalogStatus");
     const results = document.getElementById("catalogResults");
     const search = document.getElementById("catalogSearchButton");
+    const enabled = document.getElementById("catalogLinkInput");
+    const options = document.getElementById("catalogLinkOptions");
     let selected = null;
     let revision = 0;
     const key = () => JSON.stringify(getContext());
-    const current = () => selected && selected.number === numberKey(getContext().number) && selected.categoryId === getContext().categoryId ? selected : null;
+    const current = () => enabled.checked && selected && selected.number === numberKey(getContext().number) && selected.categoryId === getContext().categoryId ? selected : null;
     const render = () => { status.textContent = current() ? `Polaczono: ${selected.name}` : "Nie wybrano produktu. Wybor zachowuje Twoj tytul, zdjecia, opis i cene."; };
     const clear = () => { revision++; selected = null; results.replaceChildren(); render(); search.disabled = false; };
     document.getElementById("catalogClearButton").addEventListener("click", clear);
     document.getElementById("partNumber").addEventListener("input", clear);
     document.getElementById("categoryInput").addEventListener("change", clear);
+    enabled.addEventListener("change", () => {
+      clear();
+      options.classList.toggle("hidden", !enabled.checked);
+      if (enabled.checked) search.click();
+    });
     search.addEventListener("click", async () => {
+      if (!enabled.checked) return;
       const snapshot = key();
       const run = ++revision;
       search.disabled = true;
@@ -49,6 +57,9 @@
       } catch (error) { if (run === revision) status.textContent = error.message; }
       finally { if (run === revision) search.disabled = false; }
     });
-    return { get: current, restore(value) { clear(); selected = value || null; render(); } };
+    return { get: current, requested: () => enabled.checked, restore(value, requested = Boolean(value)) {
+      clear(); selected = value || null; enabled.checked = requested;
+      options.classList.toggle("hidden", !enabled.checked); render();
+    } };
   } };
 })();

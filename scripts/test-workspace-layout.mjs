@@ -282,12 +282,18 @@ try {
     titleInput.value = "Moj wlasny tytul ekranu";
     summaryCard.classList.remove("hidden");
   });
-  await page.locator(".catalog-link-panel summary").click();
-  await page.locator("#catalogSearchButton").click();
+  assert.equal(await page.locator("#catalogLinkInput").isChecked(), false);
+  assert.equal(await page.locator("#catalogLinkOptions").isVisible(), false);
+  await page.locator("#catalogLinkInput").check();
   await page.locator("#catalogResults button").click();
   await page.waitForFunction(() => catalogLink.get()?.id === window.catalogFixture.id);
   assert.equal(await page.locator("#titleInput").inputValue(), "Moj wlasny tytul ekranu");
   const selectedCatalog = await page.evaluate(() => catalogLink.get());
+  assert.equal(await page.evaluate(() => catalogLink.requested()), true);
+  await page.locator("#catalogLinkInput").uncheck();
+  assert.equal(await page.evaluate(() => catalogLink.get()), null);
+  assert.equal(await page.locator("#catalogLinkOptions").isVisible(), false);
+  await page.evaluate(selection => catalogLink.restore(selection), selectedCatalog);
   assert.equal(selectedCatalog.number, "5G6919605A");
   await page.locator("#partNumber").fill("5G6919605B");
   assert.equal(await page.evaluate(() => catalogLink.get()), null, "Changing part number clears catalog link");
@@ -301,6 +307,7 @@ try {
   assert.equal(await page.evaluate(() => catalogLink.get()), null);
   await page.evaluate(() => { resetForm(); });
   assert.equal(await page.evaluate(() => catalogLink.get()), null);
+  assert.equal(await page.locator("#catalogLinkInput").isChecked(), false);
   assert.deepEqual(errors, []);
   console.log("Workspace: actual app scripts, modal add/edit/cancel, selected model/title, photo order/rotation/main, session save/load and responsive layout passed. No live API calls.");
 } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }

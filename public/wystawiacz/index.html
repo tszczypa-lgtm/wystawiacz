@@ -6,7 +6,7 @@
     <title>Wystawiacz Allegro</title>
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="title-suggestions.css?v=counter-colors" />
-    <link rel="stylesheet" href="workspace-layout.css?v=catalog-link" />
+    <link rel="stylesheet" href="workspace-layout.css?v=catalog-checkbox" />
   </head>
   <body>
     <header class="topbar">
@@ -241,13 +241,6 @@
       </section>
 
       <section class="card hidden" id="summaryCard">
-        <details class="catalog-link-panel">
-          <summary>Połącz z produktem z katalogu Allegro</summary>
-          <button id="catalogSearchButton" class="secondary-button" type="button">Szukaj po numerze części</button>
-          <button id="catalogClearButton" class="text-button" type="button">Bez wybranego produktu</button>
-          <p id="catalogStatus" class="helper-text" aria-live="polite">Nie wybrano produktu. Wybór nie zmienia Twojego tytułu, zdjęć, opisu ani ceny.</p>
-          <div id="catalogResults"></div>
-        </details>
         <div class="card-heading">
           <div>
             <p class="card-kicker">KROK 3</p>
@@ -372,6 +365,15 @@
             </div>
           </label>
         </div>
+        <div class="catalog-link-panel">
+          <label class="price-search-sort"><input id="catalogLinkInput" type="checkbox" /> Łącz z katalogiem</label>
+          <div id="catalogLinkOptions" class="hidden">
+            <button id="catalogSearchButton" class="secondary-button" type="button">Szukaj po numerze części</button>
+            <button id="catalogClearButton" class="text-button" type="button">Zmień produkt</button>
+            <p id="catalogStatus" class="helper-text" aria-live="polite">Wybierz produkt. Twoje zdjęcia, tytuł, opis i cena zostają.</p>
+            <div id="catalogResults"></div>
+          </div>
+        </div>
         <div class="summary-actions">
           <p>
             Wystaw dodaje produkt do listy i publikuje go na Allegro.
@@ -450,8 +452,8 @@
     <script src="title-suggestions.js?v=no-source"></script>
     <script src="title-editor.js?v=counter-colors"></script>
     <script src="catalog-number-options.js?v=2"></script>
-    <script src="catalog-link.js?v=1"></script>
-    <script src="app.js?v=catalog-link"></script>
+    <script src="catalog-link.js?v=checkbox"></script>
+    <script src="app.js?v=catalog-checkbox"></script>
     <script src="workspace-layout.js?v=compact1"></script>
   </body>
 </html>

@@ -15,6 +15,7 @@ const context = vm.createContext({
 });
 vm.runInContext(functions + "\nconst publishingProducts = new Set();", context);
 context.state.compliance = { responsibleProducers: [{ id: "producer", name: "BMW" }], responsiblePersons: [{ id: "person" }] };
+assert.match(context.validateProductBeforePublish({ catalogLinkRequested: true }), /Wybierz produkt z katalogu/, "Never silently create a new product when catalog selection is requested but missing");
 context.escapeHtml = value => String(value).replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 const definitions = [
   { id: "count", name: "Liczba sztuk w zestawie", type: "integer", required: true, options: { describesProduct: true }, restrictions: { min: 1 } },
