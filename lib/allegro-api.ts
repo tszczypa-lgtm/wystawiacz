@@ -6,6 +6,8 @@ type Env = {
   ALLEGRO_REDIRECT_URI?: string;
   NEXT_PUBLIC_SUPABASE_URL?: string;
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?: string;
+  ALLEGRO_PAIRING_ENFORCED?: string;
+  PUBLICATION_DEDUP_ENABLED?: string;
 };
 type Connection = {
   clientId: string;
@@ -102,14 +104,15 @@ function appConfig(env: Env, origin: string) {
   if (env.ALLEGRO_REDIRECT_URI !== `${origin}/api/allegro/auth/callback` || !origin.startsWith("https://")) throw new ApiError(503, "Nieprawidłowy adres powrotu Allegro w ustawieniach serwera.");
   return { clientId: env.ALLEGRO_CLIENT_ID, clientSecret: env.ALLEGRO_CLIENT_SECRET, redirectUri: env.ALLEGRO_REDIRECT_URI };
 }
-function callbackPage(origin: string, ok: boolean) {
+function callbackPage(origin: string, ok: boolean, code = "") {
   const nonce = crypto.randomUUID();
-  const message = ok ? "Konto Allegro połączone. Możesz wrócić do Wystawiacza." : "Nie udało się połączyć konta Allegro lub zgoda została anulowana. Wróć do Wystawiacza i spróbuj ponownie.";
-  return new Response(`<!doctype html><html lang="pl"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Połączenie Allegro</title><body><h1>${message}</h1><a href="/panel">Wróć do Wystawiacza</a><script nonce="${nonce}">if(window.opener){window.opener.postMessage({type:"wystawiacz-allegro-complete",ok:${ok}},${JSON.stringify(origin)});}window.close();</script></body></html>`, { status: ok ? 200 : 400, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "Set-Cookie": cookie("", 0), "Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'` } });
+  const message = ok ? "Konto Allegro połączone. Możesz wrócić do Wystawiacza." : code === "seller_not_allowed" ? "To konto Allegro nie jest dozwolone dla tej firmy. Administrator musi zatwierdzic drugie konto lub zmiane. Dotychczasowe polaczenie pozostalo bez zmian." : "Nie udało się połączyć konta Allegro lub zgoda została anulowana. Wróć do Wystawiacza i spróbuj ponownie.";
+  return new Response(`<!doctype html><html lang="pl"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Połączenie Allegro</title><body><h1>${message}</h1><a href="/panel">Wróć do Wystawiacza</a><script nonce="${nonce}">if(window.opener){window.opener.postMessage({type:"wystawiacz-allegro-complete",ok:${ok},code:${JSON.stringify(code)}},${JSON.stringify(origin)});}window.close();</script></body></html>`, { status: ok ? 200 : 400, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "Set-Cookie": cookie("", 0), "Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'` } });
 }
 
 async function completeOAuth(request: Request, env: Env) {
   const url = new URL(request.url);
+  let failureCode = "";
   try {
     const config = appConfig(env, url.origin);
     if (!env.SUPABASE_SERVICE_ROLE_KEY) throw new Error("Missing database configuration");
@@ -127,11 +130,20 @@ async function completeOAuth(request: Request, env: Env) {
     if (!tokens.access_token || !tokens.refresh_token || !Number.isFinite(tokens.expires_in)) throw new Error("Invalid token response");
     const sealed = await sealConnection({ clientId: config.clientId, clientSecret: "", accessToken: tokens.access_token, refreshToken: tokens.refresh_token, expiresAt: Date.now() + (tokens.expires_in - 60) * 1000 }, key, pending.owner);
     const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL || "https://wgshalvkjfefavnbccil.supabase.co";
+    if (env.ALLEGRO_PAIRING_ENFORCED === "true") {
+      const sellerResponse = await fetch(`${apiBase}/me`, { headers: { Authorization: `Bearer ${tokens.access_token}`, Accept: accept } });
+      if (!sellerResponse.ok) throw new Error("Seller verification failed");
+      const seller = await sellerResponse.json() as { id: string };
+      if (!/^\d+$/.test(seller.id)) throw new Error("Invalid seller");
+      const claim = await fetch(`${supabaseUrl}/rest/v1/rpc/claim_allegro_seller`, { method: "POST", headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ p_owner: pending.owner, p_seller: seller.id }) });
+      if (!claim.ok) throw new Error("Binding database unavailable");
+      if (await claim.json() !== true) { failureCode = "seller_not_allowed"; throw new Error("Seller not permitted"); }
+    }
     const saved = await fetch(`${supabaseUrl}/rest/v1/allegro_connections?on_conflict=owner_id`, { method: "POST", headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates" }, body: JSON.stringify({ owner_id: pending.owner, sealed, updated_at: new Date().toISOString() }) });
     if (!saved.ok) throw new Error("Connection save failed");
     return callbackPage(url.origin, true);
   } catch {
-    return callbackPage(url.origin, false);
+    return callbackPage(url.origin, false, failureCode);
   }
 }
 
@@ -203,6 +215,11 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
     async function remote(path: string, options: RequestInit = {}) {
       return readRemote(await fetch(apiBase + path, { ...options, headers: { Authorization: `Bearer ${await accessToken()}`, Accept: accept, "Accept-Language": "pl-PL", ...options.headers } }));
     }
+    async function workspaceDb(path: string, options: RequestInit = {}) {
+      const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, { ...options, headers: { ...dbHeaders, ...options.headers } });
+      if (!response.ok) throw new ApiError(503, "Nie udalo sie odczytac rejestru publikacji. Sprawdz migracje 004.");
+      return response.status === 204 ? null : response.json();
+    }
     async function body() {
       if (Number(request.headers.get("Content-Length")) > 20 * 1024 * 1024) throw new ApiError(413, "Plik jest zbyt duży (maksimum 20 MB).");
       const text = await request.text();
@@ -212,6 +229,19 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
     const url = new URL(request.url);
     const path = url.pathname.slice("/api/allegro".length);
     if (request.method === "GET") {
+      if (path === "/own-offers") {
+        const number = url.searchParams.get("number") || "";
+        if (!/^[A-Z0-9 .\/-]{3,40}$/i.test(number) || !/\d/.test(number)) throw new ApiError(400, "Wpisz numer czesci.");
+        return json(await remote(`/sale/offers?name=${encodeURIComponent(number)}&publication.status=ACTIVE&limit=100`));
+      }
+      if (path.startsWith("/own-offers/")) {
+        const id = path.slice("/own-offers/".length);
+        if (!/^\d+$/.test(id)) throw new ApiError(400, "Nieprawidlowa oferta.");
+        // /sale/offers is restricted to the authenticated seller's assortment.
+        const owned = await remote(`/sale/offers?offer.id=${id}&limit=1`);
+        if (!Array.isArray(owned.offers) || !owned.offers.some((item: { id: string }) => item.id === id)) throw new ApiError(404, "Oferta nie nalezy do polaczonego konta.");
+        return json(await remote(`/sale/product-offers/${id}`));
+      }
       if (path === "/catalog-products") {
         const number = url.searchParams.get("number") || "";
         if (!/^[A-Z0-9 .\/-]{6,40}$/i.test(number) || !/\d/.test(number)) throw new ApiError(400, "Wpisz pelny numer czesci.");
@@ -261,6 +291,11 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
       }
       if (path === "/auth/start") {
         const config = appConfig(env, url.origin);
+        if (env.ALLEGRO_PAIRING_ENFORCED === "true" && connection?.accessToken) {
+          const currentSeller = await remote("/me");
+          const allowed = await workspaceDb("rpc/claim_allegro_seller", { method: "POST", body: JSON.stringify({ p_owner: user.id, p_seller: currentSeller.id }) });
+          if (allowed !== true) throw new ApiError(409, "Obecne konto Allegro wymaga zatwierdzenia przez administratora.");
+        }
         const state = base64url(crypto.getRandomValues(new Uint8Array(32)));
         const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));
         const challenge = base64url(new Uint8Array(await crypto.subtle.digest("SHA-256", utf8.encode(verifier))));
@@ -283,7 +318,7 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
           const input = await body();
           contentType = input.image?.contentType || "image/jpeg";
           if (!input.image?.base64 || !["image/jpeg", "image/png", "image/webp"].includes(contentType)) throw new ApiError(400, "Nieprawidłowe zdjęcie.");
-          image = bytes(input.image.base64);
+          image = bytes(input.image.base64).buffer as ArrayBuffer;
         }
         if (!image.byteLength || image.byteLength > 20 * 1024 * 1024) throw new ApiError(413, "Nieprawidlowy rozmiar zdjecia (maksimum 20 MB).");
         return json(await readRemote(await fetch("https://upload.allegro.pl/sale/images", { method: "POST", headers: { Authorization: `Bearer ${await accessToken()}`, Accept: accept, "Content-Type": contentType }, body: image })));
@@ -292,7 +327,35 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
         const input = await body();
         const offer = input.offerBase64 ? JSON.parse(new TextDecoder().decode(bytes(input.offerBase64))) : input.offer;
         if (!offer || typeof offer !== "object" || Array.isArray(offer)) throw new ApiError(400, "Brakuje danych oferty.");
-        return json(await remote("/sale/product-offers", { method: "POST", headers: { "Content-Type": accept }, body: JSON.stringify(offer) }));
+        if (env.PUBLICATION_DEDUP_ENABLED !== "true") return json(await remote("/sale/product-offers", { method: "POST", headers: { "Content-Type": accept }, body: JSON.stringify(offer) }));
+        if (!/^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(input.productId || "")) throw new ApiError(400, "Brakuje identyfikatora publikacji. Odswiez strone.");
+        const seller = await remote("/me");
+        const ledgerPath = `listing_publications?owner_id=eq.${user.id}&product_id=eq.${input.productId}`;
+        const claim = await workspaceDb("rpc/claim_listing_publication", { method: "POST", body: JSON.stringify({ p_owner: user.id, p_product: input.productId, p_seller: seller.id }) }) as { claimed: boolean; id?: string; seller?: string };
+        const publicationReference = `wystawiacz-${input.productId}`;
+        if (!claim.claimed) {
+          if (claim.id) return json({ id: claim.id, alreadyPublished: true });
+          if (claim.seller === seller.id) {
+            const found = await remote(`/sale/offers?external.id=${publicationReference}&limit=2`);
+            if (Array.isArray(found.offers) && found.offers.length === 1 && /^\d+$/.test(found.offers[0].id)) {
+              await workspaceDb(ledgerPath, { method: "PATCH", body: JSON.stringify({ status: "done", offer_id: found.offers[0].id }) });
+              return json({ id: found.offers[0].id, alreadyPublished: true });
+            }
+          }
+          throw new ApiError(409, "Publikacja trwa lub jej wynik jest niepewny. Sprawdz asortyment Allegro; nie ponawiamy tworzenia oferty.");
+        }
+        offer.external = { id: publicationReference };
+        try {
+          const result = await remote("/sale/product-offers", { method: "POST", headers: { "Content-Type": accept }, body: JSON.stringify(offer) });
+          if (!result.id) throw new Error("Missing offer id");
+          await workspaceDb(ledgerPath, { method: "PATCH", body: JSON.stringify({ status: "done", offer_id: result.id }) });
+          return json(result);
+        } catch (error) {
+          // Only a definite client-side rejection permits another attempt. Network/5xx
+          // failures retain the claim because Allegro might have accepted the offer.
+          if (error instanceof ApiError && [400, 429].includes(error.status)) await workspaceDb(ledgerPath, { method: "DELETE" });
+          throw error;
+        }
       }
     }
     return json({ message: "Nieznana trasa API." }, 404);

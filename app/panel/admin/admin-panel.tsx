@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { accountDate, accountRequest } from "@/lib/account-client";
 import type { CompanyDetails } from "@/lib/account-validation";
+import { AllegroAccess } from "./allegro-access";
 
 type Customer = { owner_id: string; email: string; company: Partial<CompanyDetails>; isAdmin: boolean; suspended: boolean; access_mode: string; free_until: string | null; subscription_status: string; paid_until: string | null };
 type Audit = { id: number; actor_id: string; target_id: string; action: string; reason: string; created_at: string };
@@ -52,6 +53,7 @@ export function AdminPanel() {
           <div><h2 className="break-all font-bold">{customer.email}</h2><p className="mt-1 text-sm text-white/60">{customer.company.name || "Brak danych firmy"}{customer.company.nip && ` · NIP ${customer.company.nip}`}</p><p className="mt-2 text-sm text-white/60">{customer.suspended ? "Zawieszone" : "Niezawieszone"} · {customer.isAdmin ? "Administrator" : customer.access_mode === "free" ? `Darmowe do: ${accountDate(customer.free_until)}` : "Dostęp standardowy"} · Abonament: {customer.subscription_status}</p></div>
           {!customer.isAdmin && <button disabled={busy} onClick={() => { setSelected(customer); setReason(""); setExpiry(""); setAction(customer.suspended ? "resume" : "grant_free"); }} className="rounded-xl border border-[#ff8a3d]/40 px-4 py-2 text-[#ff8a3d] disabled:opacity-50">Zarządzaj</button>}
         </div>
+        <AllegroAccess owner={customer.owner_id} />
       </article>)}</div>
       <div className="flex items-center gap-3">
         <button disabled={busy || offset === 0} className="rounded-xl border border-white/20 px-4 py-2 disabled:opacity-40" onClick={async () => { setBusy(true); try { await load(offset - 25); } catch (error) { setMessage((error as Error).message); } finally { setBusy(false); } }}>Poprzednia</button>

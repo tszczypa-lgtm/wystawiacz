@@ -1,11 +1,13 @@
 import handler from "vinext/server/fetch-handler";
 import { handleAllegroApi } from "../lib/allegro-api";
+import { handleWorkspaceApi } from "../lib/workspace-api";
 import { handleAccountApi, protectAllegroRequest, type AccountEnv } from "../lib/account-api";
 import { runWithConnectorBinding } from "../lib/connector-context";
 import type { ConnectorBinding } from "../lib/connector-contract.mjs";
 
 export default {
-  fetch(request: Request, env: Cloudflare.Env, ctx: ExecutionContext<{ CONNECTORS?: ConnectorBinding }>) {
+  async fetch(request: Request, env: Cloudflare.Env, ctx: ExecutionContext<{ CONNECTORS?: ConnectorBinding }>) {
+    if (new URL(request.url).pathname.startsWith("/api/workspace/")) return handleWorkspaceApi(request, env as AccountEnv);
     if (new URL(request.url).pathname.startsWith("/api/account/")) return handleAccountApi(request, env as AccountEnv);
     if (new URL(request.url).pathname.startsWith("/api/allegro/")) {
       return protectAllegroRequest(request, env as AccountEnv, () => handleAllegroApi(request, env as Cloudflare.Env & Parameters<typeof handleAllegroApi>[1]));
@@ -29,6 +31,12 @@ export default {
         },
       };
     }
-    return runWithConnectorBinding(binding, () => handler.fetch(request, env, ctx));
+    const response = await runWithConnectorBinding(binding, () => handler.fetch(request, env, ctx));
+    const secured = new Response(response.body, response);
+    secured.headers.set("X-Content-Type-Options", "nosniff");
+    secured.headers.set("X-Frame-Options", "SAMEORIGIN");
+    secured.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+    secured.headers.set("Content-Security-Policy", "frame-ancestors 'self'; object-src 'none'; base-uri 'self'");
+    return secured;
   },
 };

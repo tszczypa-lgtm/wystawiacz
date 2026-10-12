@@ -47,10 +47,13 @@ export function BillingPanel() {
         <dl className="mt-5 grid gap-3 text-white/70">
           <div><dt>Stan abonamentu</dt><dd className="font-bold text-white">{({ none: "Brak abonamentu", active: "Aktywny", past_due: "Zaległa płatność", canceled: "Anulowany", incomplete: "Płatność niedokończona", unpaid: "Nieopłacony", trialing: "Okres próbny", paused: "Wstrzymany", incomplete_expired: "Płatność wygasła" } as Record<string, string>)[info.account.subscription_status] || info.account.subscription_status}</dd></div>
           {info.account.paid_until && <div><dt>Opłacony dostęp do</dt><dd>{accountDate(info.account.paid_until)}</dd></div>}
+          {info.account.trial_until && <div><dt>Okres probny do</dt><dd>{accountDate(info.account.trial_until)}</dd></div>}
           {info.account.access_mode === "free" && <div><dt>Darmowy dostęp do</dt><dd>{accountDate(info.account.free_until)}</dd></div>}
         </dl>
         {info.account.cancel_at_period_end && <p className="mt-4 text-amber-200">Abonament nie odnowi się po końcu opłaconego okresu.</p>}
         {info.price && <p className="mt-5 text-2xl font-bold">{new Intl.NumberFormat("pl-PL", { style: "currency", currency: info.price.currency }).format(info.price.amount / 100)} / miesiąc</p>}
+        {!info.price && info.plannedPrice && <p className="mt-5 text-xl font-bold">Planowany abonament: 500 zl brutto / miesiac. BLIK zostanie uruchomiony po konfiguracji Tpay.</p>}
+        {info.account.trial_until && Date.parse(info.account.trial_until) > Date.now() && Date.parse(info.account.trial_until) - Date.now() <= 3 * 86400000 && <p className="mt-4 text-amber-200">Okres probny konczy sie w ciagu 3 dni. Sesje i wystawione aukcje nie zostana usuniete.</p>}
         {!info.billingEnabled && <p className="mt-4 text-white/60">{info.billingIssue ? "Zakup chwilowo niedostępny. Administrator musi sprawdzić konfigurację płatności." : "Zakup abonamentu nie jest jeszcze uruchomiony. Nie pobieramy opłaty za rejestrację."}</p>}
         <div className="mt-5 flex flex-wrap gap-3">
           {info.billingEnabled && !info.account.suspended && !info.isAdmin && info.account.access_mode !== "free" && info.account.subscription_status === "none" && <button disabled={busy} onClick={() => payment("/checkout")} className="rounded-xl bg-[#ff5a00] px-5 py-3 font-bold disabled:opacity-50">Kup abonament</button>}

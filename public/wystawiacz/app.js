@@ -127,8 +127,51 @@ let activeProductId = "";
 let previewPhotoName = "";
 let categoryLocked = false;
 let allegroManufacturerOptions = [];
+const selectedProductIds = new Set();
+let batchPublishing = false;
+
+function openPublishedOffer(product) {
+  if (!/^\d+$/.test(String(product?.allegroOfferId || ""))) return;
+  window.open(`https://allegro.pl/offer/${product.allegroOfferId}/edit`, "_blank", "noopener,noreferrer");
+}
+
+function renderBatchToolbar() {
+  let toolbar = document.getElementById("batchToolbar");
+  if (!toolbar) {
+    toolbar = document.createElement("div");
+    toolbar.id = "batchToolbar";
+    toolbar.className = "batch-toolbar";
+    toolbar.innerHTML = '<button type="button" id="selectReadyProducts">Zaznacz gotowe</button><button type="button" id="clearProductSelection">Odznacz wszystkie</button><button type="button" id="publishSelectedProducts">Wystaw zaznaczone</button><span id="batchProgress" role="status"></span>';
+    productList.before(toolbar);
+    toolbar.querySelector("#selectReadyProducts").onclick = () => {
+      state.products.filter(p => !p.allegroOfferId && p.publishStatus !== "WYSTAWIONO").forEach(p => selectedProductIds.add(p.id));
+      renderProducts();
+    };
+    toolbar.querySelector("#clearProductSelection").onclick = () => { selectedProductIds.clear(); renderProducts(); };
+    toolbar.querySelector("#publishSelectedProducts").onclick = async () => {
+      if (batchPublishing) return;
+      const ids = state.products.filter(p => selectedProductIds.has(p.id) && !p.allegroOfferId && p.publishStatus !== "WYSTAWIONO").map(p => p.id);
+      if (!ids.length) return;
+      batchPublishing = true;
+      renderProducts();
+      try {
+        for (let i = 0; i < ids.length; i++) {
+          toolbar.querySelector("#batchProgress").textContent = `Wystawianie ${i + 1} / ${ids.length}`;
+          await publishProduct(ids[i]);
+          if (state.products.find(p => p.id === ids[i])?.allegroOfferId) selectedProductIds.delete(ids[i]);
+        }
+        toolbar.querySelector("#batchProgress").textContent = "Zakonczono. Sprawdz statusy pozycji na liscie.";
+      } finally { batchPublishing = false; renderProducts(); }
+    };
+  }
+  toolbar.querySelector("#publishSelectedProducts").disabled = batchPublishing || !state.products.some(p => selectedProductIds.has(p.id) && !p.allegroOfferId && p.publishStatus !== "WYSTAWIONO");
+  toolbar.querySelector("#selectReadyProducts").disabled = batchPublishing;
+  toolbar.querySelector("#clearProductSelection").disabled = batchPublishing;
+}
 
 const titleEditor = window.TitleEditor.mount();
+const cloudSessions = window.CloudSessions.mount({ snapshot: sessionSnapshot, restore: restoreSessionPayload, status: sessionStatus });
+const descriptionEditor = window.DescriptionEditor.mount({ state, input: descriptionTextInput, vehicleInput: vehicleFullInput, selectedVehicle: getSelectedVehicle, notify: showToast });
 const catalogLink = window.CatalogLink.mount({
   getContext: () => ({ number: partNumber.value.trim(), categoryId: state.categoryId, productId: activeProductId }),
   request: (path) => apiRequest(path)
@@ -161,6 +204,50 @@ const titleSuggestions = window.TitleSuggestions.mount({
     detectProductDetails();
   }
 });
+const ownOffers = window.OwnOffers.mount({ numberInput: partNumber, connected: () => state.allegroConnected, request: apiRequest, apply: applyOwnOffer, notify: showToast });
+window.PriceSearch.mount({ number: () => partNumber.value, title: getTitleWithoutPartNumber, notify: showToast });
+
+async function applyOwnOffer(offer, number) {
+  const selectedPhotos = [...state.selectedPhotoNames];
+  const vehicleId = state.selectedVehicleId;
+  const item = offer.productSet?.[0];
+  const producer = item?.responsibleProducer;
+  const paragraphs = (offer.description?.sections || []).flatMap(s => s.items || []).filter(i => i.type === "TEXT").flatMap(i => {
+    const parsed = new DOMParser().parseFromString(i.content || "", "text/html");
+    parsed.querySelectorAll("script,style,iframe").forEach(node => node.remove());
+    return [...parsed.body.children].map(node => node.textContent);
+  });
+  if (normalizeText(paragraphs[0] || "") === normalizeText(offer.name || "")) paragraphs.shift();
+  const description = paragraphs.join("\n");
+  const matchingVehicle = state.vehicles.find(vehicle => vehicle.full && description.includes(vehicle.full) && description.indexOf(vehicle.full) === description.lastIndexOf(vehicle.full));
+  const blockStart = matchingVehicle ? description.indexOf(matchingVehicle.full) : -1;
+  const values = {};
+  for (const parameter of [...(item?.product?.parameters || []), ...(offer.parameters || [])]) values[parameter.id] = parameter.valuesIds?.length ? parameter.valuesIds : parameter.values || [];
+  const product = {
+    id: crypto.randomUUID(), title: offer.name || "", enteredPartNumber: number,
+    categoryId: offer.category?.id || "", category: offer.category?.id || "",
+    parameterValues: values, price: offer.sellingMode?.price?.amount || "",
+    stock: offer.stock?.available || 1, stockUnit: offer.stock?.unit || "UNIT",
+    marketedBeforeGPSRObligation: item?.marketedBeforeGPSRObligation !== false,
+    responsibleProducerId: producer?.id || "", responsiblePersonId: item?.responsiblePerson?.id || "",
+    safetyInformation: item?.safetyInformation?.type === "TEXT" ? item.safetyInformation.description : "",
+    shippingRateId: offer.delivery?.shippingRates?.id || "",
+    returnPolicyId: offer.afterSalesServices?.returnPolicy?.id || "",
+    impliedWarrantyId: offer.afterSalesServices?.impliedWarranty?.id || "",
+    warrantyId: offer.afterSalesServices?.warranty?.id || "",
+    photoNames: selectedPhotos, descriptionText: description, catalogLinkRequested: false,
+    sourceVehicleTitle: offer.name || "",
+    selectedVehicleId: matchingVehicle?.id || "",
+    vehicleDescriptionBlock: matchingVehicle ? { start: blockStart, end: blockStart + matchingVehicle.full.length, text: matchingVehicle.full } : null
+  };
+  if (activeProductId) saveActiveProductDraft();
+  state.products.push(product); editProduct(product.id); state.products.pop();
+  activeProductId = ""; addButton.textContent = "Dodaj do listy";
+  state.sourceVehicleTitle = offer.name || "";
+  renderProducts();
+  if (vehicleId) useVehicle(vehicleId);
+  showToast("Pobrano dane, cene i ustawienia sprzedazy. Twoje zdjecia pozostaly bez zmian. Sprawdz parametry przed publikacja.");
+}
 
 const OE_MANUFACTURERS = [
   "Abarth", "AC", "Acura", "Aiways", "Aixam", "Alfa Romeo", "Alpine", "Aro", "Asia", "Aston Martin", "Audi", "Austin",
@@ -221,7 +308,7 @@ window.addEventListener("message", (event) => {
   if (event.data.ok) {
     void checkConnectionStatus();
     showToast("Konto Allegro połączone.");
-  } else showToast("Połączenie anulowane lub nieudane. Możesz spróbować ponownie.");
+  } else showToast(event.data.code === "seller_not_allowed" ? "To konto Allegro nie jest dozwolone dla firmy. Administrator musi zatwierdzic drugie konto lub zmiane; poprzednie polaczenie zostaje." : "Połączenie anulowane lub nieudane. Możesz spróbować ponownie.");
 });
 
 disconnectButton.addEventListener("click", async () => {
@@ -268,7 +355,7 @@ clearSelectionButton.addEventListener("click", () => {
 
 relinkFolderInput.addEventListener("change", async () => {
   [...relinkFolderInput.files]
-    .filter((file) => file.type.startsWith("image/"))
+    .filter((file) => file.type.startsWith("image/") || /\.(heic|heif|jpe?g|png|webp)$/i.test(file.name))
     .forEach((file) => {
       const previous = state.localPhotosByName.get(file.name);
       if (previous?.url) URL.revokeObjectURL(previous.url);
@@ -474,6 +561,8 @@ function addCurrentProductToList() {
     image: findPhotoUrl(state.selectedPhotoNames[0]),
     description: buildDescriptionModel(),
     descriptionText: state.descriptionText,
+    vehicleDescriptionBlock: state.vehicleDescriptionBlock || null,
+    sourceVehicleTitle: state.sourceVehicleTitle || "",
     selectedVehicleId: state.selectedVehicleId
   };
 
@@ -502,6 +591,13 @@ function addCurrentProductToList() {
 }
 
 function renderPhotos() {
+  for (const name of state.selectedPhotoNames) {
+    const photo = state.localPhotosByName.get(name);
+    if (photo?.file && window.PhotoUpload?.needsConversion(photo.file) && photo.preparingFile !== photo.file) {
+      photo.preparingFile = photo.file;
+      void window.PhotoUpload.prepare(photo.file).catch(() => {});
+    }
+  }
   titleSuggestions.refresh();
   const selectedCount = state.selectedPhotoNames.length;
   photoCounter.textContent = `${selectedCount} ${selectedCount === 1 ? "zdjęcie" : "zdjęć"}`;
@@ -549,30 +645,32 @@ function updateSummary() {
 }
 
 function renderProducts() {
+  renderBatchToolbar();
   emptyState.classList.toggle("hidden", state.products.length > 0);
   productList.innerHTML = state.products
     .map((product) => `
       <article class="product-card ${product.id === activeProductId ? "active" : ""}" data-product-id="${escapeHtml(product.id)}">
-        ${findPhotoUrl(product.photoNames?.[0]) || product.image
-          ? `<img class="product-image" src="${findPhotoUrl(product.photoNames?.[0]) || product.image}" alt="" />`
+        <label class="product-select"><input type="checkbox" data-select-product-id="${escapeHtml(product.id)}" aria-label="Zaznacz aukcje" ${selectedProductIds.has(product.id) ? "checked" : ""} ${product.allegroOfferId || batchPublishing ? "disabled" : ""} /></label>
+        ${findPhotoUrl(product.photoNames?.[0])
+          ? `<img class="product-image" src="${escapeHtml(findPhotoUrl(product.photoNames?.[0]))}" alt="" />`
           : `<div class="product-image"></div>`}
         <div>
           <h3>${escapeHtml(product.title)}</h3>
-          <p>${escapeHtml(product.brand || "Marka do uzupełnienia")} · Numer wpisany: ${escapeHtml(product.enteredPartNumber)} · ${product.stock} ${{ UNIT: "szt.", PAIR: "par", SET: "kpl." }[product.stockUnit] || "szt."} · ${product.photoNames?.length || 0} zdjęć</p>
+          <p>${escapeHtml(product.brand || "Marka do uzupełnienia")} · Numer wpisany: ${escapeHtml(product.enteredPartNumber)} · ${escapeHtml(product.stock)} ${{ UNIT: "szt.", PAIR: "par", SET: "kpl." }[product.stockUnit] || "szt."} · ${product.photoNames?.length || 0} zdjęć</p>
           <p>Wysyłka: ${escapeHtml(product.shippingRateName || "profil do wybrania")}</p>
           <p>Zwrot: ${escapeHtml(product.returnPolicyName || "brak")} · Reklamacja: ${escapeHtml(product.impliedWarrantyName || "brak")}</p>
           ${product.publishError ? `<p class="publish-error">Błąd Allegro: ${escapeHtml(product.publishError)}</p>` : ""}
         </div>
         <div class="product-price">
           <label>
-            <input class="product-price-input" type="number" min="0" step="0.01" value="${escapeHtml(product.price)}" data-product-id="${escapeHtml(product.id)}" aria-label="Cena produktu" />
+            <input class="product-price-input" type="number" min="0" step="0.01" value="${escapeHtml(product.price)}" data-product-id="${escapeHtml(product.id)}" aria-label="Cena produktu" ${product.allegroOfferId || publishingProducts.has(product.id) ? "disabled" : ""} />
           </label>
           <span>${escapeHtml(product.publishStatus || (product.allegroOfferId ? "WYSTAWIONO" : "GOTOWE"))}</span>
         </div>
         <button class="publish-button" type="button" data-publish-product-id="${escapeHtml(product.id)}" ${product.allegroOfferId ? "disabled" : ""}>
           ${product.allegroOfferId ? "Wystawiona" : "Wystaw"}
         </button>
-        <button class="edit-button" type="button" data-product-id="${escapeHtml(product.id)}">Edytuj</button>
+        <button class="edit-button" type="button" data-product-id="${escapeHtml(product.id)}" ${publishingProducts.has(product.id) ? "disabled" : ""}>${product.allegroOfferId ? "Edytuj w Allegro" : "Edytuj"}</button>
       </article>
     `)
     .join("");
@@ -580,6 +678,14 @@ function renderProducts() {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
       publishProduct(button.dataset.publishProductId);
+    });
+  });
+  productList.querySelectorAll("[data-select-product-id]").forEach(input => {
+    input.closest("label").addEventListener("click", event => event.stopPropagation());
+    input.addEventListener("change", () => {
+      if (input.checked) selectedProductIds.add(input.dataset.selectProductId);
+      else selectedProductIds.delete(input.dataset.selectProductId);
+      renderBatchToolbar();
     });
   });
   productList.querySelectorAll(".edit-button").forEach((button) => {
@@ -604,6 +710,7 @@ function renderProducts() {
 }
 
 function resetForm() {
+  ownOffers.clear();
   catalogLink.restore(null);
   state.selectedPhotos = [];
   state.selectedPhotoNames = [];
@@ -623,6 +730,8 @@ function resetForm() {
   state.appendedPartNumber = "";
   state.selectedVehicleId = "";
   state.descriptionText = "";
+  state.vehicleDescriptionBlock = null;
+  state.sourceVehicleTitle = "";
   state.descriptionManuallyEdited = false;
   descriptionTextInput.value = "";
   categoryLocked = false;
@@ -1230,11 +1339,11 @@ function renderAfterSalesSelect(input, items, emptyLabel, allowEmpty = false) {
   input.innerHTML = options.join("");
 }
 
-function saveSession() {
+function sessionSnapshot() {
   if (activeProductId) saveActiveProductDraft();
   const sessionName = sessionNameInput.value.trim() || "sesja-produktow";
   const folderLabel = localStorage.getItem("allegroAssistantPhotoFolder") || "";
-  const payload = {
+  return {
     format: "wystawiacz-allegro-session",
     version: 1,
     name: sessionName,
@@ -1242,12 +1351,18 @@ function saveSession() {
     photoRotations: [...state.photoRotations],
     savedAt: new Date().toISOString(),
     vehicles: state.vehicles,
-    products: state.products.map(({ image, ...product }) => product)
+    products: state.products.map(({ image, ...product }) => product),
+    draft: (() => { const { image, ...draft } = getFormProduct(activeProductId || "draft"); return draft; })(),
+    activeProductId
   };
+}
+
+function saveSession() {
+  const payload = sessionSnapshot();
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
-  link.download = `${toFileName(sessionName)}.wystawiacz.json`;
+  link.download = `${toFileName(payload.name)}.wystawiacz.json`;
   link.click();
   URL.revokeObjectURL(link.href);
   showToast("Sesja zapisana do pliku.");
@@ -1257,10 +1372,26 @@ async function loadSession() {
   const file = loadSessionInput.files[0];
   if (!file) return;
   try {
-    const payload = JSON.parse(await file.text());
+    if (file.size > 5 * 1024 * 1024) throw new Error("Sesja przekracza 5 MB.");
+    const payload = window.SessionSafety.validate(JSON.parse(await file.text()));
     if (payload.format !== "wystawiacz-allegro-session" || !Array.isArray(payload.products)) {
       throw new Error("To nie jest plik sesji programu.");
     }
+    await restoreSessionPayload(payload);
+    cloudSessions.newSession();
+    showToast(`Otworzono sesję: ${payload.name || file.name}`);
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    loadSessionInput.value = "";
+  }
+}
+
+async function restoreSessionPayload(raw) {
+    if (publishingProducts.size || batchPublishing) throw new Error("Poczekaj na zakonczenie publikacji przed otwarciem innej sesji.");
+    const payload = window.SessionSafety.validate(raw);
+    resetForm();
+    selectedProductIds.clear();
     state.products = payload.products;
     state.photoRotations = new Map((Array.isArray(payload.photoRotations) ? payload.photoRotations : [])
       .filter((entry) => Array.isArray(entry) && typeof entry[0] === "string" && Number.isInteger(entry[1]) && entry[1] >= 0 && entry[1] < 4));
@@ -1269,19 +1400,22 @@ async function loadSession() {
     state.products.forEach((product) => {
       if (!product.id) product.id = crypto.randomUUID();
     });
-    sessionNameInput.value = payload.name || file.name.replace(/\.wystawiacz\.json$/i, "");
+    sessionNameInput.value = payload.name || "Sesja";
     renderProducts();
     renderVehicles();
     const folderLabel = localStorage.getItem("allegroAssistantPhotoFolder");
     sessionStatus.textContent = folderLabel
       ? `Sesja otwarta. Lokalny folder zdjęć: ${folderLabel}. W razie potrzeby wskaż go ponownie.`
       : "Sesja otwarta. Wskaż folder zdjęć na tym komputerze, aby połączyć miniatury po nazwach.";
-    showToast(`Otworzono sesję: ${payload.name || file.name}`);
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    loadSessionInput.value = "";
-  }
+    if (payload.draft && typeof payload.draft.title === "string" && payload.draft.title) {
+      const draft = { ...payload.draft, id: crypto.randomUUID(), stock: payload.draft.stock || 1, photoNames: payload.draft.photoNames || [] };
+      delete draft.allegroOfferId;
+      window.SessionSafety.validate({ format: payload.format, products: [draft] });
+      state.products.push(draft); editProduct(draft.id); state.products.pop();
+      activeProductId = state.products.some(p => p.id === payload.activeProductId && !p.allegroOfferId) ? payload.activeProductId : "";
+      addButton.textContent = activeProductId ? "Zapisz zmiany" : "Dodaj do listy";
+      renderProducts();
+    }
 }
 
 function toFileName(value) {
@@ -1530,6 +1664,7 @@ function renderDescriptionPreview() {
   descriptionPreviewTitle.textContent = titleInput.value.trim() || "Tytuł aukcji pojawi się tutaj";
   updateAutomaticDescriptionText();
   if (descriptionTextInput.value !== state.descriptionText) descriptionTextInput.value = state.descriptionText;
+  descriptionEditor.refresh();
 }
 
 function buildDescriptionModel() {
@@ -1567,6 +1702,7 @@ function buildAllegroDescription(imageUrls) {
 function updateAutomaticDescriptionText() {
   if (state.descriptionManuallyEdited) return;
   const vehicle = state.vehicles.find((item) => item.id === state.selectedVehicleId);
+  if (typeof descriptionEditor !== "undefined") { descriptionEditor.automatic(vehicle); return; }
   state.descriptionText = [
     "Część używana 100% sprawna",
     vehicle?.full ? `Pasuje do: ${vehicle.full}` : ""
@@ -1664,13 +1800,15 @@ function useVehicle(id) {
   if (!vehicle) return;
   const previousVehicle = state.vehicles.find((item) => item.id === state.selectedVehicleId);
   let title = titleInput.value.trim();
+  if (state.sourceVehicleTitle && !previousVehicle) title = window.TitleSuggestions.partName(title);
   if (previousVehicle?.short) title = title.replace(new RegExp(`\\s*${escapeRegExp(previousVehicle.short)}\\s*`, "i"), " ").trim();
   const part = partNumber.value.trim();
   if (part) title = title.replace(new RegExp(`\\s*${escapeRegExp(part)}\\s*$`, "i"), "").trim();
   titleInput.value = `${title}${title ? " " : ""}${vehicle.short}${part ? ` ${part}` : ""}`.trim();
   state.selectedVehicleId = id;
   state.appendedPartNumber = part;
-  state.descriptionManuallyEdited = false;
+  const replacedBlock = descriptionEditor.replaceVehicle(vehicle);
+  if (!replacedBlock && state.sourceVehicleTitle && state.descriptionManuallyEdited) showToast("Model w tytule zmieniony. W skopiowanym opisie zaznacz stare dane auta i kliknij Wstaw dane auta tutaj; nie zgadujemy, ktore akapity usunac.");
   updateSummary();
   renderVehicleButtons();
   scheduleAllegroCategoryLookup();
@@ -1714,6 +1852,9 @@ async function publishProduct(id) {
   applyDefaultAfterSalesToProduct(product);
   const validationError = validateProductBeforePublish(product);
   if (validationError) {
+    product.publishStatus = "BŁĄD";
+    product.publishError = validationError;
+    renderProducts();
     showToast(validationError);
     return;
   }
@@ -1750,7 +1891,7 @@ async function publishProduct(id) {
     stage = "Tworzenie oferty";
     const result = await apiRequest("/api/product-offers", {
       method: "POST",
-      body: JSON.stringify({ offerBase64: toBase64Utf8(JSON.stringify(offer)) })
+      body: JSON.stringify({ productId: product.id, offerBase64: toBase64Utf8(JSON.stringify(offer)) })
     });
     product.allegroOfferId = result.id || result.offer?.id || "";
     product.publishStatus = "WYSTAWIONO";
@@ -1835,13 +1976,21 @@ async function uploadProductImages(product) {
     const photo = state.localPhotosByName.get(photoName);
     if (!photo?.file) throw new Error(`Brakuje lokalnego pliku zdjęcia: ${photoName}`);
     if (photo.rotating) throw new Error("Poczekaj na zakonczenie obracania zdjecia.");
-    if (photo.file.size > 20 * 1024 * 1024) throw new Error(`Zdjecie ${photoName} przekracza 20 MB.`);
     let result;
-    try { result = await apiRequest("/api/upload-image", {
+    const upload = async file => apiRequest("/api/upload-image", {
       method: "POST",
-      headers: { "Content-Type": photo.file.type || "image/jpeg" },
-      body: photo.file
-    }); } catch (error) { throw new Error(`Zdjecie ${urls.length + 1}/${product.photoNames.length} (${photoName}): ${error.message}`); }
+      headers: { "Content-Type": file.type || "image/jpeg" }, body: file
+    });
+    try {
+      const file = window.PhotoUpload ? await window.PhotoUpload.prepare(photo.file) : photo.file;
+      if (file.size > 20 * 1024 * 1024) throw new Error(`Zdjecie ${photoName} przekracza 20 MB.`);
+      try { result = await upload(file); }
+      catch (error) {
+        if (!window.PhotoUpload || file !== photo.file || !/HTTP 400/.test(error.message)) throw error;
+        // Only retry the image upload, never offer creation; strip problematic metadata.
+        result = await upload(await window.PhotoUpload.prepare(photo.file, true));
+      }
+    } catch (error) { throw new Error(`Zdjecie ${urls.length + 1}/${product.photoNames.length} (${photoName}): ${error.message}`); }
     const url = result.location || result.url || result.imageUrl;
     if (!url) throw new Error("Allegro nie zwróciło adresu przesłanego zdjęcia.");
     urls.push(url);
@@ -2012,6 +2161,7 @@ function buildProductDescriptionForPublish(product, imageUrls) {
 }
 
 function buildDescriptionParagraphs(text) {
+  if (window.DescriptionEditor) return window.DescriptionEditor.paragraphs(text, escapeHtml);
   return String(text || "")
     .split(/\n+/)
     .map((line) => line.trim())
@@ -2088,6 +2238,9 @@ function findPhotoUrl(name) {
 function editProduct(id) {
   const product = state.products.find((item) => item.id === id);
   if (!product) return;
+  if (publishingProducts.has(id)) return;
+  if (product.allegroOfferId) { openPublishedOffer(product); return; }
+  ownOffers.clear();
   activeProductId = id;
   partNumber.value = product.enteredPartNumber || "";
   titleInput.value = product.title || "";
@@ -2112,6 +2265,8 @@ function editProduct(id) {
   state.appendedPartNumber = product.enteredPartNumber || "";
   state.selectedVehicleId = product.selectedVehicleId || "";
   state.descriptionText = product.descriptionText || "Część używana 100% sprawna";
+  state.vehicleDescriptionBlock = product.vehicleDescriptionBlock || null;
+  state.sourceVehicleTitle = product.sourceVehicleTitle || "";
   state.descriptionManuallyEdited = Boolean(product.descriptionText);
   descriptionTextInput.value = state.descriptionText;
   suggestionPanel.classList.remove("hidden");
@@ -2137,6 +2292,12 @@ function navigateProduct(direction) {
 function saveActiveProductDraft() {
   const product = state.products.find((item) => item.id === activeProductId);
   if (!product) return;
+  Object.assign(product, getFormProduct(product.id));
+  renderProducts();
+}
+
+function getFormProduct(id) {
+  const product = { id };
   product.title = titleInput.value.trim();
   product.enteredPartNumber = partNumber.value.trim();
   product.catalogProduct = catalogLink.get();
@@ -2166,8 +2327,10 @@ function saveActiveProductDraft() {
   product.image = findPhotoUrl(product.photoNames[0]);
   product.description = buildDescriptionModel();
   product.descriptionText = state.descriptionText;
+  product.vehicleDescriptionBlock = state.vehicleDescriptionBlock || null;
+  product.sourceVehicleTitle = state.sourceVehicleTitle || "";
   product.selectedVehicleId = state.selectedVehicleId;
-  renderProducts();
+  return product;
 }
 
 function updateProductNavigation() {

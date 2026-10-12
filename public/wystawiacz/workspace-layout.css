@@ -87,6 +87,35 @@
 #vehiclesDialog .vehicle-chip { border-radius: 10px; padding: 12px; font-size: 12px; }
 .vehicle-description { display: block; margin-top: 6px; color: var(--muted); font-weight: 400; overflow-wrap: anywhere; }
 .vehicle-row-actions { float: right; }
+.batch-toolbar, .cloud-session-controls, .description-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
+.batch-toolbar button, .cloud-session-controls button, .description-toolbar button, .own-offers-panel button, .cloud-session-list button { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: #fff; color: var(--ink); cursor: pointer; font: inherit; font-size: 12px; }
+.cloud-session-controls label { font-size: 12px; }
+.cloud-session-controls { position: relative; display: block; margin: 0; }
+.cloud-session-controls summary { padding: 8px 9px; font-size: 11px; border: 1px solid var(--line); border-radius: 8px; background: #fff; cursor: pointer; }
+.cloud-session-controls > div { position: absolute; z-index: 5; top: 100%; right: 0; width: 240px; padding: 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px #14213d22; }
+.cloud-session-controls button { margin-top: 8px; }
+.cloud-session-controls input, .product-select input { width: auto; accent-color: var(--orange); }
+.product-card { position: relative; padding-left: 40px; }
+.product-select { position: absolute; top: 18px; left: 12px; }
+.own-offers-panel { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
+.own-offers-panel.hidden { display: none; }
+.own-offers-panel button { text-align: left; }
+.price-search-table { width: 100%; display: grid; gap: 6px; }
+.price-search-row { display: grid; grid-template-columns: minmax(65px,.6fr) 1fr 1fr; gap: 8px; align-items: center; font-size: 12px; }
+.price-search-row button { padding: 8px; }
+.after-sales-row { gap: 8px; }
+.after-sales-row .field span { font-size: 11px; }
+.after-sales-row select { padding: 8px; font-size: 12px; }
+.shipping-field a { font-size: 12px; color: var(--orange-dark); }
+.formatted-description { padding: 10px; border-top: 1px solid var(--line); font-size: 13px; }
+.formatted-description:empty { display: none; }
+.formatted-description p { margin: 0 0 8px; }
+.description-copy .formatted-description p, .description-copy .formatted-description li { text-transform: none; font-weight: 400; }
+.formatted-description ul { padding-left: 22px; }
+#vehicleFullInput { padding: 10px; font: inherit; border: 1px solid var(--line); border-radius: 8px; resize: vertical; }
+.cloud-session-list { display: grid; gap: 12px; margin: 16px 0; }
+.cloud-session-list > div { display: flex; flex-wrap: wrap; gap: 8px; }
+dialog:has(.cloud-session-list) { width: min(720px,calc(100% - 32px)); max-height: 80vh; padding: 20px; border: 1px solid var(--line); border-radius: 14px; }
 #vehiclesDialog .vehicle-chip button { margin-left: 10px; font-size: 12px; }
 @media (max-width: 700px) {
   .listing-details { grid-template-columns: 1fr; }

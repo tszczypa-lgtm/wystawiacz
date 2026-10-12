@@ -215,7 +215,7 @@ try {
       if (path === "/api/product-offers") {
         const base64 = JSON.parse(options.body).offerBase64;
         window.sentOffers.push(JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(base64), char => char.charCodeAt(0)))));
-        return new Promise(resolve => { window.finishPublishing = () => resolve({ id: "offer-test" }); });
+        return new Promise(resolve => { window.finishPublishing = () => resolve({ id: "12345678901" }); });
       }
       return { categories: [] };
     };
@@ -246,22 +246,24 @@ try {
   await page.evaluate(() => window.finishPublishing());
   await page.waitForFunction(() => state.products[0].publishStatus === "WYSTAWIONO");
   await page.locator(".edit-button").click();
-  assert.equal(await page.locator("#stockUnitInput").inputValue(), "PAIR");
-  assert.equal(await page.locator("#responsibleProducerInput").inputValue(), "producer");
-  assert.equal(await page.locator("#safetyInformationInput").inputValue(), "Informacje producenta dla tego produktu.");
-  assert.equal(await page.locator("#descriptionTextInput").inputValue(), "Wlasny opis produktu\nDruga linia");
+  assert.equal(await page.locator("#stockUnitInput").inputValue(), "UNIT", "Published offer never reopens in the local form");
+  assert.equal(await page.evaluate(() => window.searchWindows.at(-1)[0]), "https://allegro.pl/offer/12345678901/edit");
   await page.locator("#saveSessionButton").click();
   const listingSession = JSON.parse(await page.evaluate(() => window.savedSessionBlob.text()));
   assert.equal(listingSession.products[0].stockUnit, "PAIR");
   assert.equal(listingSession.products[0].marketedBeforeGPSRObligation, false, "Unchecked choice survives session save");
   assert.equal(listingSession.products[0].responsibleProducerId, "producer");
   assert.equal(listingSession.products[0].safetyInformation, "Informacje producenta dla tego produktu.");
-  await page.locator("#publishCurrentButton").click();
+  await page.evaluate(() => publishProduct(state.products[0].id));
   assert.equal(await page.evaluate(() => window.sentOffers.length), 1, "Editing then clicking Publish must preserve existing offer ID and not duplicate it");
   await page.locator("#loadSessionInput").setInputFiles({ name: "listing.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(listingSession)) });
-  await page.waitForFunction(() => state.products[0]?.allegroOfferId === "offer-test");
+  await page.waitForFunction(() => state.products[0]?.allegroOfferId === "12345678901");
   await page.locator(".edit-button").click();
-  assert.equal(await page.locator("#stockUnitInput").inputValue(), "PAIR");
+  assert.equal(await page.locator("#stockUnitInput").inputValue(), "UNIT", "Imported published offer remains external-only");
+  await page.evaluate(() => {
+    const draft = { ...state.products[0], id: crypto.randomUUID(), allegroOfferId: null };
+    state.products.push(draft); editProduct(draft.id);
+  });
   await page.locator("#parametersPanel").screenshot({ path: fileURLToPath(new URL("../outputs/layout-check/parameters.png", import.meta.url)) });
   await page.locator(".description-panel").screenshot({ path: fileURLToPath(new URL("../outputs/layout-check/description.png", import.meta.url)) });
   await page.reload();

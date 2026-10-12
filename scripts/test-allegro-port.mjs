@@ -183,7 +183,7 @@ try {
     return new Map(ast.statements.filter(ts.isFunctionDeclaration).map(fn => [fn.name.text, fn.getText(ast).replace(/\r\n/g, "\n")]));
   };
   const portFunctions = functions(app);
-  const listingFunctions = ["renderProducts", "splitOfferParameters"];
+  const listingFunctions = ["renderProducts", "splitOfferParameters", "useVehicle", "buildDescriptionParagraphs", "updateAutomaticDescriptionText"];
   for (const [name, implementation] of functions(originalApp)) {
     if (![...listingFunctions, "apiRequest", "checkConnectionStatus", "checkLoginStatus", "refreshConnectedAccountInfo", "closeConnectionModal", "prefillAllegroCredentials", "renderPhotos", "saveSession", "loadSession", "uploadProductImages", "publishProduct", "updateSummary", "validateProductBeforePublish", "resetForm", "addVehicle", "renderVehicles", "applyAutomaticParameterValues", "loadCategoryDetails", "renderRequiredParameters", "loadComplianceData", "renderDescriptionPreview", "buildAllegroOfferPayload", "findResponsibleProducerForProduct", "editProduct", "saveActiveProductDraft"].includes(name)) assert.equal(portFunctions.get(name), implementation, `Original function changed: ${name}`);
   }

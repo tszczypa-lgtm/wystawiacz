@@ -86,6 +86,7 @@ const mount = ast.statements.find(node => ts.isVariableStatement(node) && node.d
 let choose;
 let append;
 const editor = vm.createContext({
+  descriptionEditor: { replaceVehicle: () => false },
   window: { TitleSuggestions: { mount: options => { choose = options.choose; append = options.append; return {}; } } },
   state: { vehicles: [{ id: "golf", short: "VW Golf VII" }, { id: "tiguan", short: "VW Tiguan" }], selectedVehicleId: "golf", appendedPartNumber: "", descriptionManuallyEdited: true },
   partNumber: { value: "5NA803881F" }, titleInput: { value: "", dispatchEvent() {} },

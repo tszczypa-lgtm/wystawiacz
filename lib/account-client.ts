@@ -2,9 +2,10 @@ import { createSupabaseBrowserClient } from "./supabase";
 import type { CompanyDetails } from "./account-validation";
 
 export type AccountInfo = {
-  account: { email: string; company: Partial<CompanyDetails>; suspended: boolean; access_mode: string; free_until: string | null; subscription_status: string; paid_until: string | null; cancel_at_period_end: boolean };
+  account: { email: string; company: Partial<CompanyDetails>; suspended: boolean; access_mode: string; free_until: string | null; subscription_status: string; paid_until: string | null; cancel_at_period_end: boolean; trial_until?: string | null };
   isAdmin: boolean; access: { allowed: boolean; reason: string }; billingEnabled: boolean; billingIssue: boolean;
   price: { amount: number; currency: string; interval: string } | null; hasCustomer: boolean;
+  plannedPrice?: { amount: number; currency: string; interval: string };
 };
 export async function accountRequest<T>(path: string, method = "GET", payload?: unknown): Promise<T> {
   const { data } = await createSupabaseBrowserClient().auth.getSession();

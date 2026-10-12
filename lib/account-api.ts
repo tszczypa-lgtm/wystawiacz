@@ -10,12 +10,14 @@ export type AccountEnv = {
   STRIPE_PRICE_ID?: string;
   STRIPE_WEBHOOK_SECRET?: string;
   APP_ORIGIN?: string;
+  TRIAL_ENABLED?: string;
 };
 export type CustomerAccount = {
   owner_id: string; email: string; company: unknown; suspended: boolean;
   access_mode: "standard" | "free"; free_until: string | null;
   subscription_status: string; paid_until: string | null; cancel_at_period_end: boolean;
   stripe_customer_id: string | null; stripe_subscription_id: string | null;
+  trial_until?: string | null; trial_claimed_nip?: string | null; allegro_account_limit?: number;
 };
 class AccountError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -50,6 +52,9 @@ export async function accountContext(request: Request, env: AccountEnv) {
   const db = database(env);
   const accounts = await db(`customer_accounts?owner_id=eq.${user.id}&select=*`) as CustomerAccount[];
   if (!accounts[0]) throw new AccountError(503, "Brak profilu konta. Administrator musi wykonać migrację bazy.");
+  const nip = (accounts[0].company as { nip?: string } | null)?.nip;
+  if (env.TRIAL_ENABLED !== "true" || typeof nip !== "string" || !/^\d{10}$/.test(nip)) accounts[0].trial_until = null;
+  else if (accounts[0].trial_claimed_nip !== nip) accounts[0].trial_until = await db("rpc/claim_company_trial", { method: "POST", body: JSON.stringify({ p_owner: user.id }) }) as string | null;
   const roles = await db(`account_admins?owner_id=eq.${user.id}&select=owner_id`) as { owner_id: string }[];
   return { user, account: accounts[0], isAdmin: roles.length > 0, db };
 }
@@ -58,6 +63,7 @@ export function accountAccess(account: CustomerAccount, enforced: boolean, isAdm
   if (isAdmin) return { allowed: true, reason: "Administrator" };
   if (account.access_mode === "free" && (!account.free_until || Date.parse(account.free_until) > now)) return { allowed: true, reason: "Darmowy dostęp od administratora" };
   if (account.subscription_status === "active" && account.paid_until && Date.parse(account.paid_until) > now) return { allowed: true, reason: "Opłacony abonament" };
+  if (account.trial_until && Date.parse(account.trial_until) > now) return { allowed: true, reason: `Okres probny do ${new Date(account.trial_until).toLocaleDateString("pl-PL", { timeZone: "Europe/Warsaw" })}` };
   if (!enforced) return { allowed: true, reason: "Dostęp roboczy (płatności nie są wymagane)" };
   return { allowed: false, reason: "Brak aktywnego abonamentu lub darmowego dostępu." };
 }
@@ -67,7 +73,9 @@ export async function protectAllegroRequest(request: Request, env: AccountEnv, n
   try {
     const context = await accountContext(request, env);
     const access = accountAccess(context.account, env.BILLING_ENFORCED === "true", context.isAdmin);
-    if (!access.allowed) return json({ message: access.reason }, 403);
+    // Expiry blocks publishing, not viewing one's data or reconnecting Allegro.
+    const path = new URL(request.url).pathname;
+    if (!access.allowed && (context.account.suspended || (request.method !== "GET" && !path.startsWith("/api/allegro/auth/")))) return json({ message: access.reason }, 403);
     return next();
   } catch (error) { return failure(error); }
 }
@@ -168,7 +176,7 @@ export async function handleAccountApi(request: Request, env: AccountEnv): Promi
           price = { amount: configured.unit_amount, currency: configured.currency, interval: "month" };
         } catch { billingIssue = true; }
       }
-      return json({ account: { email: account.email, company: account.company, access_mode: account.access_mode, free_until: account.free_until, suspended: account.suspended, subscription_status: account.subscription_status, paid_until: account.paid_until, cancel_at_period_end: account.cancel_at_period_end }, isAdmin, access: accountAccess(account, env.BILLING_ENFORCED === "true", isAdmin), billingEnabled: Boolean(price), billingIssue, price, hasCustomer: Boolean(account.stripe_customer_id) });
+      return json({ account: { email: account.email, company: account.company, access_mode: account.access_mode, free_until: account.free_until, suspended: account.suspended, subscription_status: account.subscription_status, paid_until: account.paid_until, cancel_at_period_end: account.cancel_at_period_end, trial_until: account.trial_until }, isAdmin, access: accountAccess(account, env.BILLING_ENFORCED === "true", isAdmin), billingEnabled: Boolean(price), billingIssue, price, plannedPrice: { amount: 50000, currency: "pln", interval: "month" }, hasCustomer: Boolean(account.stripe_customer_id) });
     }
     if (request.method === "PUT" && path === "/company") {
       const payload = await body(request);
@@ -203,6 +211,17 @@ export async function handleAccountApi(request: Request, env: AccountEnv): Promi
     }
     if (path.startsWith("/admin/")) {
       if (!isAdmin || account.suspended) throw new AccountError(403, "Brak uprawnień administratora.");
+      if (request.method === "GET" && path === "/admin/allegro") {
+        const target = url.searchParams.get("target") || "";
+        if (!uuid.test(target)) throw new AccountError(400, "Nieprawidlowe konto.");
+        return json({ sellers: await db(`allowed_allegro_sellers?owner_id=eq.${target}&select=seller_id`), accounts: await db(`customer_accounts?owner_id=eq.${target}&select=allegro_account_limit`) });
+      }
+      if (request.method === "POST" && path === "/admin/allegro") {
+        const payload = await body(request);
+        if (typeof payload.target !== "string" || !uuid.test(payload.target) || !Number.isInteger(payload.limit) || Number(payload.limit) < 1 || Number(payload.limit) > 10 || typeof payload.reason !== "string" || payload.reason.trim().length < 3 || payload.reason.length > 500 || (payload.remove && !/^\d+$/.test(String(payload.remove)))) throw new AccountError(400, "Podaj konto, limit 1-10 i powod zmiany.");
+        await db("rpc/admin_allegro_binding", { method: "POST", body: JSON.stringify({ p_actor: context.user.id, p_target: payload.target, p_limit: payload.limit, p_remove: payload.remove || null, p_reason: payload.reason.trim() }) });
+        return json({ ok: true });
+      }
       if (request.method === "GET" && path === "/admin/accounts") {
         const offset = Number(url.searchParams.get("offset") || 0);
         if (!Number.isInteger(offset) || offset < 0 || offset > 100000) throw new AccountError(400, "Nieprawidłowa strona.");

@@ -6,7 +6,7 @@
     <title>Wystawiacz Allegro</title>
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="title-suggestions.css?v=counter-colors" />
-    <link rel="stylesheet" href="workspace-layout.css?v=catalog-checkbox" />
+    <link rel="stylesheet" href="workspace-layout.css?v=approved-changes-1" />
   </head>
   <body>
     <header class="topbar">
@@ -135,7 +135,7 @@
             <option value="Vauxhall"></option>
           </datalist>
           <input id="vehicleShortInput" aria-label="Skrót auta do tytułu" type="text" placeholder="Skrót, np. VW Golf VII 5G0" />
-          <input id="vehicleFullInput" aria-label="Pełny opis auta" type="text" placeholder="Pełny opis, np. Volkswagen Golf Variant VII 5G0 1.6 TDI 2019 rok" />
+          <textarea id="vehicleFullInput" aria-label="Pelny opis auta" rows="5" placeholder="Pelny opis auta: model, rok, silnik. Mozesz wpisac kilka akapitow."></textarea>
           <button id="addVehicleButton" class="secondary-button" type="button">Dodaj auto</button>
           <button id="cancelVehicleEditButton" class="secondary-button hidden" type="button">Anuluj edycję</button>
         </div>
@@ -317,6 +317,7 @@
             <select id="shippingRateInput">
               <option value="">Połącz konto, aby pobrać profile</option>
             </select>
+            <a href="https://salescenter.allegro.com/delivery-settings" target="_blank" rel="noopener noreferrer">Edytuj cenniki w Allegro</a>
           </label>
         </div>
         <div class="after-sales-row">
@@ -346,8 +347,8 @@
               <button id="searchAllegroPartButton" class="secondary-button" type="button">Allegro: numer części</button>
               <button id="searchAllegroTitleButton" class="secondary-button" type="button">Allegro: tytuł bez numeru</button>
             </div>
-            <label class="price-search-sort"><input id="priceSortLowestInput" type="checkbox" /> Od najniższej ceny</label>
-            <label class="price-search-sort"><input id="priceShippingPolandInput" type="checkbox" /> Wysyłka z Polski</label>
+            <label class="price-search-sort"><input id="priceSortLowestInput" type="checkbox" /> Allegro: od najniższej ceny</label>
+            <label class="price-search-sort"><input id="priceShippingPolandInput" type="checkbox" /> Allegro: wysyłka z Polski</label>
           </div>
           <div class="price-search-group">
             <div class="price-search-buttons">
@@ -453,7 +454,13 @@
     <script src="title-editor.js?v=counter-colors"></script>
     <script src="catalog-number-options.js?v=2"></script>
     <script src="catalog-link.js?v=checkbox"></script>
-    <script src="app.js?v=catalog-checkbox"></script>
+    <script src="session-safety.js?v=1"></script>
+    <script src="cloud-sessions.js?v=1"></script>
+    <script src="own-offers.js?v=1"></script>
+    <script src="description-editor.js?v=1"></script>
+    <script src="photo-upload.js?v=1"></script>
+    <script src="price-search.js?v=1"></script>
+    <script src="app.js?v=approved-changes-1"></script>
     <script src="workspace-layout.js?v=compact1"></script>
   </body>
 </html>
