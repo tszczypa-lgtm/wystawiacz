@@ -38,10 +38,16 @@ Nie zmieniono konfiguracji dzialajacego serwera ani jego sekretow.
 Administrator moze przedluzyc dostep przez istniejace `Nadaj darmowy dostep` z konkretna data.
 Przypomnienie o koncu triala jest w panelu i przy Wystawiaczu w ostatnich 3 dniach; nie sa wysylane e-maile.
 
-## Tpay - pozostaje do integracji
+## Tpay - aktualizacja przygotowania integracji
+
+Dodano osobny, domyslnie wylaczony checkout Tpay, weryfikacje powiadomien
+JWS/sumy kontrolnej i atomowe rozliczenie w migracji 005. Aktualna instrukcja:
+`TPAY-SETUP.md`. Wczesniejszy stan i plan ponizej nie oznaczaja uruchomienia
+nowej integracji. Potrzebne sa nadal sandbox end-to-end, weryfikacja firmy,
+dokumenty sprzedazy i osobna akceptacja produkcji. Stripe pozostaje wylaczony.
 
 Ustalona cena: **500 zl brutto / miesiac**. Uzytkownik nie ma jeszcze konta Tpay.
-Nie dodano obciazen, cyklicznych zgody ani produkcyjnego checkoutu Tpay. Dotychczasowy kod Stripe nie zostal wlaczony.
+Nie uruchomiono obciazen ani produkcyjnego checkoutu Tpay. Nie dodano cyklicznych zgod. Dotychczasowy kod Stripe nie zostal wlaczony.
 
 1. Zaloz i zweryfikuj konto firmowe: https://tpay.com/ .
 2. Utworz tez konto testowe: https://register.sandbox.tpay.com/ .

@@ -1,12 +1,14 @@
 import handler from "vinext/server/fetch-handler";
 import { handleAllegroApi } from "../lib/allegro-api";
 import { handleWorkspaceApi } from "../lib/workspace-api";
+import { handleTpayApi, type TpayEnv } from "../lib/tpay-api";
 import { handleAccountApi, protectAllegroRequest, type AccountEnv } from "../lib/account-api";
 import { runWithConnectorBinding } from "../lib/connector-context";
 import type { ConnectorBinding } from "../lib/connector-contract.mjs";
 
 export default {
   async fetch(request: Request, env: Cloudflare.Env, ctx: ExecutionContext<{ CONNECTORS?: ConnectorBinding }>) {
+    if (new URL(request.url).pathname.startsWith("/api/account/tpay/")) return handleTpayApi(request, env as TpayEnv);
     if (new URL(request.url).pathname.startsWith("/api/workspace/")) return handleWorkspaceApi(request, env as AccountEnv);
     if (new URL(request.url).pathname.startsWith("/api/account/")) return handleAccountApi(request, env as AccountEnv);
     if (new URL(request.url).pathname.startsWith("/api/allegro/")) {

@@ -11,6 +11,7 @@ export function BillingPanel() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [tpay, setTpay] = useState<{ enabled: boolean; sandbox: boolean } | null>(null);
   async function refresh() {
     const result = await accountRequest<AccountInfo>("/me");
     setInfo(result);
@@ -22,6 +23,9 @@ export function BillingPanel() {
     void accountRequest<AccountInfo>("/me").then(result => {
       if (mounted) { setInfo(result); setCompany(companyForForm(result.account.company)); }
     }).catch(error => { if (mounted) setMessage(error.message); });
+    void accountRequest<{ enabled: boolean; sandbox: boolean }>("/tpay/status").then(result => {
+      if (mounted) setTpay(result);
+    }).catch(() => { /* An older deployment may not expose Tpay yet. */ });
     return () => { mounted = false; };
   }, []);
   async function save(event: React.FormEvent) {
@@ -39,6 +43,16 @@ export function BillingPanel() {
       window.location.assign(url.href);
     } catch (error) { setMessage((error as Error).message); setBusy(false); }
   }
+  async function tpayPayment() {
+    setBusy(true); setMessage("");
+    try {
+      const result = await accountRequest<{ url: string }>("/tpay/checkout", "POST");
+      const url = new URL(result.url);
+      const host = tpay?.sandbox ? "secure.sandbox.tpay.com" : "secure.tpay.com";
+      if (url.protocol !== "https:" || url.hostname !== host || url.port || url.username || url.password) throw new Error("Nieprawidlowy adres Tpay.");
+      window.location.assign(url.href);
+    } catch (error) { setMessage((error as Error).message); setBusy(false); }
+  }
   return <div className="grid gap-5">
     <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
       <h1 className="text-3xl font-black">Abonament i rozliczenia</h1>
@@ -52,10 +66,12 @@ export function BillingPanel() {
         </dl>
         {info.account.cancel_at_period_end && <p className="mt-4 text-amber-200">Abonament nie odnowi się po końcu opłaconego okresu.</p>}
         {info.price && <p className="mt-5 text-2xl font-bold">{new Intl.NumberFormat("pl-PL", { style: "currency", currency: info.price.currency }).format(info.price.amount / 100)} / miesiąc</p>}
-        {!info.price && info.plannedPrice && <p className="mt-5 text-xl font-bold">Planowany abonament: 500 zl brutto / miesiac. BLIK zostanie uruchomiony po konfiguracji Tpay.</p>}
+        {!info.price && info.plannedPrice && <p className="mt-5 text-xl font-bold">{tpay?.enabled ? "Dostep: 500 zl brutto za miesiac. Bez automatycznego odnawiania." : "Planowany abonament: 500 zl brutto / miesiac. BLIK zostanie uruchomiony po konfiguracji Tpay."}</p>}
+        {tpay?.enabled && tpay.sandbox && <p className="mt-4 text-amber-200">Tryb testowy Tpay: bez prawdziwych oplat i bez przedluzania dostepu produkcyjnego.</p>}
         {info.account.trial_until && Date.parse(info.account.trial_until) > Date.now() && Date.parse(info.account.trial_until) - Date.now() <= 3 * 86400000 && <p className="mt-4 text-amber-200">Okres probny konczy sie w ciagu 3 dni. Sesje i wystawione aukcje nie zostana usuniete.</p>}
-        {!info.billingEnabled && <p className="mt-4 text-white/60">{info.billingIssue ? "Zakup chwilowo niedostępny. Administrator musi sprawdzić konfigurację płatności." : "Zakup abonamentu nie jest jeszcze uruchomiony. Nie pobieramy opłaty za rejestrację."}</p>}
+        {!info.billingEnabled && !tpay?.enabled && <p className="mt-4 text-white/60">{info.billingIssue ? "Zakup chwilowo niedostępny. Administrator musi sprawdzić konfigurację płatności." : "Zakup abonamentu nie jest jeszcze uruchomiony. Nie pobieramy opłaty za rejestrację."}</p>}
         <div className="mt-5 flex flex-wrap gap-3">
+          {tpay?.enabled && !info.account.suspended && (!tpay.sandbox || info.isAdmin) && <button disabled={busy} onClick={tpayPayment} className="rounded-xl bg-[#ff5a00] px-5 py-3 font-bold disabled:opacity-50">{tpay.sandbox ? "Test platnosci Tpay" : "Oplac kolejny miesiac - 500 zl"}</button>}
           {info.billingEnabled && !info.account.suspended && !info.isAdmin && info.account.access_mode !== "free" && info.account.subscription_status === "none" && <button disabled={busy} onClick={() => payment("/checkout")} className="rounded-xl bg-[#ff5a00] px-5 py-3 font-bold disabled:opacity-50">Kup abonament</button>}
           {info.billingEnabled && !info.account.suspended && ["canceled", "incomplete_expired"].includes(info.account.subscription_status) && <button disabled={busy} onClick={() => payment("/checkout")} className="rounded-xl bg-[#ff5a00] px-5 py-3 font-bold disabled:opacity-50">Wznów abonament</button>}
           {info.hasCustomer && <button disabled={busy} onClick={() => payment("/portal")} className="rounded-xl border border-white/20 px-5 py-3 font-bold disabled:opacity-50">Płatności, dokumenty i anulowanie</button>}
