@@ -24,6 +24,11 @@ assert.equal(verifyNotificationFields(notification({ test_mode: "0" }), { ...env
 assert.throws(() => verifyNotificationFields(notification({ test_mode: "1" }), { ...env, TPAY_ENVIRONMENT: "production" }), error => error.code === "TPAY_TEST_MODE_MISMATCH");
 assert.throws(() => verifyNotificationFields(notification({ test_mode: "" }), env));
 assert.equal(verifyNotificationFields(notification({ tr_status: "chargeback" }), env).refunded, true);
+assert.equal(verifyNotificationFields(notification({ tr_status: "TRUE" }), env).refunded, false);
+assert.equal(verifyNotificationFields(notification({ tr_status: "CHARGEBACK" }), env).refunded, true);
+for (const status of ["PAID", "paid", "FALSE", "PENDING", "true ", "1"]) {
+  assert.throws(() => verifyNotificationFields(notification({ tr_status: status }), env), error => error.code === "TPAY_STATUS_INVALID");
+}
 for (const change of [{ tr_paid: "499.99" }, { tr_amount: "1.00" }, { tr_currency: "EUR" }, { id: "999" }, { test_mode: "2" }, { tr_crc: "bad" }, { tr_status: "pending" }]) assert.throws(() => verifyNotificationFields(notification(change), env));
 assert.throws(() => verifyNotificationFields(notification() + "&tr_paid=500.00", env));
 assert.throws(() => verifyNotificationFields(notification().replace(/md5sum=[^&]+/, "md5sum=00000000000000000000000000000000"), env));
@@ -65,7 +70,7 @@ function certificate(key, ca) {
 }
 const rootPem = certificate(rootKey, true), leafPem = certificate(leafKey, false);
 const signedHeader = Buffer.from(JSON.stringify({ alg: "RS256", x5u: "https://secure.sandbox.tpay.com/x509/notifications-jws.pem" })).toString("base64url");
-const signedRaw = notification();
+const signedRaw = notification({ tr_status: "TRUE", test_mode: "0" });
 const signedJws = signedHeader + ".." + sign("RSA-SHA256", Buffer.from(signedHeader + "." + Buffer.from(signedRaw).toString("base64url")), leafKey.privateKey).toString("base64url");
 globalThis.fetch = async (input, options) => {
   // Workers rejects redirect:error before making any network request.
