@@ -54,8 +54,9 @@ export async function verifyTpayJws(raw: string, signature: string, secure: stri
   if (header.alg !== "RS256" || header.x5u !== `${secure}/x509/notifications-jws.pem` || header.crit || header.b64 === false) throw new PaymentError(400, "Nieprawidlowy naglowek JWS.");
   const certificate = async (url: string) => {
     let response;
-    try { response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(15000) }); }
+    try { response = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(15000) }); }
     catch { throw new PaymentError(503, "Nie mozna pobrac certyfikatu Tpay.", "TPAY_CERT_NETWORK"); }
+    if (response.status >= 300 && response.status < 400) throw new PaymentError(503, "Odrzucono przekierowanie certyfikatu Tpay.", "TPAY_CERT_REDIRECT");
     if (!response.ok) throw new PaymentError(503, "Nie mozna sprawdzic certyfikatu Tpay.", `TPAY_CERT_HTTP_${response.status}`);
     const pem = await response.text();
     if (pem.length > 20000) throw new PaymentError(400, "Nieprawidlowy certyfikat.");

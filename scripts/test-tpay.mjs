@@ -55,16 +55,27 @@ const rootPem = certificate(rootKey, true), leafPem = certificate(leafKey, false
 const signedHeader = Buffer.from(JSON.stringify({ alg: "RS256", x5u: "https://secure.sandbox.tpay.com/x509/notifications-jws.pem" })).toString("base64url");
 const signedRaw = notification();
 const signedJws = signedHeader + ".." + sign("RSA-SHA256", Buffer.from(signedHeader + "." + Buffer.from(signedRaw).toString("base64url")), leafKey.privateKey).toString("base64url");
-globalThis.fetch = async input => new Response(String(input).endsWith("tpay-jws-root.pem") ? rootPem : leafPem);
+globalThis.fetch = async (input, options) => {
+  // Workers rejects redirect:error before making any network request.
+  assert.equal(options.redirect, "manual");
+  return new Response(String(input).endsWith("tpay-jws-root.pem") ? rootPem : leafPem);
+};
 await verifyTpayJws(signedRaw, signedJws, "https://secure.sandbox.tpay.com");
 await assert.rejects(verifyTpayJws(signedRaw + "&tampered=yes", signedJws, "https://secure.sandbox.tpay.com"));
+let redirectFetches = 0;
+globalThis.fetch = async (_input, options) => {
+  assert.equal(options.redirect, "manual"); redirectFetches++;
+  return new Response(null, { status: 302, headers: { Location: "https://evil.test/certificate.pem" } });
+};
+await assert.rejects(verifyTpayJws(signedRaw, signedJws, "https://secure.sandbox.tpay.com"), error => error.code === "TPAY_CERT_REDIRECT");
+assert.equal(redirectFetches, 1);
 globalThis.fetch = async () => new Response(rootPem);
 await assert.rejects(verifyTpayJws(signedRaw, signedJws, "https://secure.sandbox.tpay.com"));
 let external = 0, transactions = 0, claims = 0, settlements = 0, attached = false, suspended = false, admin = true, lost = false;
 globalThis.fetch = async (input, init = {}) => {
   const target = String(input);
-  if (target.endsWith("/x509/notifications-jws.pem")) return new Response(leafPem);
-  if (target.endsWith("/x509/tpay-jws-root.pem")) return new Response(rootPem);
+  if (target.endsWith("/x509/notifications-jws.pem")) { assert.equal(init.redirect, "manual"); return new Response(leafPem); }
+  if (target.endsWith("/x509/tpay-jws-root.pem")) { assert.equal(init.redirect, "manual"); return new Response(rootPem); }
   if (target.includes("/rpc/settle_tpay_order")) {
     const data = JSON.parse(init.body); assert.equal(data.p_id, order); assert.equal(data.p_environment, "sandbox"); assert.equal(data.p_refunded, false);
     settlements++; return Response.json({ paid: true });
