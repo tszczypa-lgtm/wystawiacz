@@ -86,6 +86,14 @@ globalThis.fetch = async (input, init = {}) => {
 };
 const request = (path = "/checkout", origin = env.APP_ORIGIN) => new Request(`${env.APP_ORIGIN}/api/account/tpay${path}`, { method: path === "/status" ? "GET" : "POST", headers: { Authorization: "Bearer test-user", Origin: origin } });
 try {
+  let status = await (await handleTpayApi(request("/status"), { ...env, TPAY_SECURITY_CODE: undefined })).json();
+  assert.equal(status.enabled, false); assert.match(status.issue, /TPAY_SECURITY_CODE/);
+  assert.ok(!JSON.stringify(status).includes(env.TPAY_CLIENT_SECRET));
+  status = await (await handleTpayApi(request("/status"), { ...env, TPAY_ENABLED: "false" })).json();
+  assert.match(status.issue, /TPAY_ENABLED/);
+  admin = false;
+  status = await (await handleTpayApi(request("/status"), { ...env, TPAY_SECURITY_CODE: undefined })).json();
+  assert.equal(status.issue, undefined); admin = true;
   const rejected = Buffer.from(JSON.stringify({ alg: "RS256", x5u: "https://secure.sandbox.tpay.com.evil.test/x509/notifications-jws.pem" })).toString("base64url") + "..abc";
   await assert.rejects(verifyTpayJws(notification(), rejected, "https://secure.sandbox.tpay.com"));
   assert.equal(external, 0);

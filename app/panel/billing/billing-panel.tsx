@@ -11,7 +11,7 @@ export function BillingPanel() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
-  const [tpay, setTpay] = useState<{ enabled: boolean; sandbox: boolean } | null>(null);
+  const [tpay, setTpay] = useState<{ enabled: boolean; sandbox: boolean; issue?: string } | null>(null);
   async function refresh() {
     const result = await accountRequest<AccountInfo>("/me");
     setInfo(result);
@@ -23,9 +23,9 @@ export function BillingPanel() {
     void accountRequest<AccountInfo>("/me").then(result => {
       if (mounted) { setInfo(result); setCompany(companyForForm(result.account.company)); }
     }).catch(error => { if (mounted) setMessage(error.message); });
-    void accountRequest<{ enabled: boolean; sandbox: boolean }>("/tpay/status").then(result => {
+    void accountRequest<{ enabled: boolean; sandbox: boolean; issue?: string }>("/tpay/status").then(result => {
       if (mounted) setTpay(result);
-    }).catch(() => { /* An older deployment may not expose Tpay yet. */ });
+    }).catch(() => { if (mounted) setMessage("Nie udalo sie odczytac konfiguracji Tpay. Odswiez strone; jesli blad zostaje, administrator powinien sprawdzic wdrozenie."); });
     return () => { mounted = false; };
   }, []);
   async function save(event: React.FormEvent) {
@@ -68,6 +68,8 @@ export function BillingPanel() {
         {info.price && <p className="mt-5 text-2xl font-bold">{new Intl.NumberFormat("pl-PL", { style: "currency", currency: info.price.currency }).format(info.price.amount / 100)} / miesiąc</p>}
         {!info.price && info.plannedPrice && <p className="mt-5 text-xl font-bold">{tpay?.enabled ? "Dostep: 500 zl brutto za miesiac. Bez automatycznego odnawiania." : "Planowany abonament: 500 zl brutto / miesiac. BLIK zostanie uruchomiony po konfiguracji Tpay."}</p>}
         {tpay?.enabled && tpay.sandbox && <p className="mt-4 text-amber-200">Tryb testowy Tpay: bez prawdziwych oplat i bez przedluzania dostepu produkcyjnego.</p>}
+        {info.isAdmin && tpay?.issue && <p role="status" className="mt-4 text-amber-200">Tpay: {tpay.issue}</p>}
+        {tpay?.enabled && tpay.sandbox && !info.isAdmin && <p className="mt-4 text-amber-200">Przycisk testu Tpay jest dostepny tylko na koncie administratora. Przelacz konto Wystawiacza, nie konto Allegro.</p>}
         {info.account.trial_until && Date.parse(info.account.trial_until) > Date.now() && Date.parse(info.account.trial_until) - Date.now() <= 3 * 86400000 && <p className="mt-4 text-amber-200">Okres probny konczy sie w ciagu 3 dni. Sesje i wystawione aukcje nie zostana usuniete.</p>}
         {!info.billingEnabled && !tpay?.enabled && <p className="mt-4 text-white/60">{info.billingIssue ? "Zakup chwilowo niedostępny. Administrator musi sprawdzić konfigurację płatności." : "Zakup abonamentu nie jest jeszcze uruchomiony. Nie pobieramy opłaty za rejestrację."}</p>}
         <div className="mt-5 flex flex-wrap gap-3">

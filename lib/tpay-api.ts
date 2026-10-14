@@ -90,8 +90,18 @@ export async function handleTpayApi(request: Request, env: TpayEnv): Promise<Res
     const context = await accountContext(request, env);
     if (request.method === "GET" && path === "/status") {
       let enabled = false, sandbox = true;
-      try { const config = tpayConfig(env); sandbox = config.sandbox; enabled = env.TPAY_ENABLED === "true" && (sandbox || env.TPAY_LIVE_APPROVED === "true"); } catch { /* Keep checkout disabled until fully configured. */ }
-      return json({ enabled, sandbox, amount: 50000, currency: "PLN" });
+      let issue = "";
+      try {
+        const config = tpayConfig(env); sandbox = config.sandbox;
+        enabled = env.TPAY_ENABLED === "true" && (sandbox || env.TPAY_LIVE_APPROVED === "true");
+        if (!enabled) issue = env.TPAY_ENABLED !== "true" ? "TPAY_ENABLED musi miec wartosc true." : "Platnosci produkcyjne nie zostaly zatwierdzone. Testy wymagaja TPAY_ENVIRONMENT=sandbox.";
+      } catch (error) {
+        const required = ["TPAY_CLIENT_ID", "TPAY_CLIENT_SECRET", "TPAY_MERCHANT_ID", "TPAY_SECURITY_CODE", "SUPABASE_SERVICE_ROLE_KEY", "APP_ORIGIN"] as const;
+        const missing = required.filter(name => !env[name]);
+        issue = missing.length ? `Brakuje ustawien Cloudflare: ${missing.join(", ")}.` : error instanceof PaymentError ? error.message : "Sprawdz APP_ORIGIN i konfiguracje Tpay.";
+        if (env.TPAY_MERCHANT_ID && !/^\d+$/.test(env.TPAY_MERCHANT_ID)) issue = "TPAY_MERCHANT_ID musi zawierac tylko cyfry, bez spacji.";
+      }
+      return json({ enabled, sandbox, amount: 50000, currency: "PLN", ...(context.isAdmin ? { issue } : {}) });
     }
     if (path !== "/checkout" || request.method !== "POST") return json({ message: "Nieznana trasa platnosci." }, 404);
     const config = tpayConfig(env);
