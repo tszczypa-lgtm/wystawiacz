@@ -2,6 +2,9 @@
 
 Kod jest domyslnie wylaczony. Rejestracja Tpay nie wlacza zadnej platnosci.
 Nie wlaczaj starych platnosci Stripe (`BILLING_ENABLED`).
+Dokumenty publiczne sa projektami. Dodatkowa blokada `salesPolicy.approved=false`
+nie pozwala wlaczyc produkcyjnego checkoutu przed zatwierdzeniem dokumentow
+i wdrozeniem potwierdzania zamowien. Szczegoly: `SALES-READINESS.md`.
 
 ## Przed testami
 

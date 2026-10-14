@@ -18,6 +18,13 @@ assert.throws(() => validateCompany({ ...company, nip: "0000000000" }), /NIP/);
 assert.throws(() => validateCompany({ ...company, postcode: "12345" }), /pocztowy/);
 assert.throws(() => validateCompany({ ...company, country: "DE" }), /Polski/);
 assert.deepEqual(validateCompany({ ...company, role: "admin", access_mode: "free" }), company);
+const personal = { ...company, name: "Jan Kowalski", nip: "", customerType: "person" };
+assert.deepEqual(validateCompany(personal), personal);
+assert.equal(validateSignup("a-strong-password", "a-strong-password", personal).customerType, "person");
+assert.throws(() => validateCompany({ ...personal, customerType: "admin" }));
+assert.throws(() => validateCompany({ ...personal, nip: company.nip }));
+assert.throws(() => validateCompany({ ...personal, name: " " }));
+assert.throws(() => validateCompany({ ...company, nip: "" }), /NIP|dane klienta/);
 
 const owner = "00000000-0000-0000-0000-000000000001";
 const other = "00000000-0000-0000-0000-000000000002";
@@ -90,6 +97,13 @@ globalThis.fetch = async (input, options = {}) => {
 try {
   assert.equal((await handleAccountApi(new Request("https://example.test/api/account/me"), env)).status, 401);
   confirmed = false; assert.equal((await handleAccountApi(request("/me"), env)).status, 401); confirmed = true;
+  current.company = personal; current.trial_until = "2099-01-01T00:00:00.000Z";
+  const personalTrial = await (await handleAccountApi(request("/me"), { ...env, TRIAL_ENABLED: "true", BILLING_ENABLED: "false" })).json();
+  assert.equal(personalTrial.account.trial_until, current.trial_until);
+  assert.equal(personalTrial.access.allowed, true); assert.equal(personalTrial.isAdmin, false);
+  const noTrial = await (await handleAccountApi(request("/me"), { ...env, TRIAL_ENABLED: "false", BILLING_ENABLED: "false" })).json();
+  assert.equal(noTrial.account.trial_until, null); assert.equal(noTrial.access.allowed, false);
+  current = { ...account };
   assert.equal((await handleAccountApi(request("/admin/accounts"), env)).status, 403);
   assert.equal((await handleAccountApi(request("/admin/action", "POST", { target: other, action: "grant_free", reason: "test" }), env)).status, 403);
   assert.equal((await handleAccountApi(request("/company", "PUT", { company }, { Origin: "https://evil.test" }), env)).status, 403);

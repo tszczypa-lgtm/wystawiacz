@@ -32,22 +32,22 @@ export default function DocumentationPage() {
             <li>Wpisz numer części oraz tytuł. Możesz dodać modele aut do pomocniczej listy sesji.</li>
             <li>Sprawdź opis, kategorię, parametry, liczbę sztuk oraz szablony wysyłki, zwrotów i reklamacji pobrane z połączonego konta Allegro.</li>
             <li>Dodaj produkt do listy. Cena może zostać uzupełniona później podczas wyceny.</li>
-            <li>Przed publikacją uzupełnij cenę, wymagane parametry i lokalizację. Przycisk „Wystaw” prosi o potwierdzenie jednej konkretnej oferty.</li>
+            <li>Przed publikacją uzupełnij cenę, wymagane parametry i lokalizację. Kliknięcie „Wystaw” rozpoczyna publikację bez dodatkowego okna potwierdzenia. „Wystaw zaznaczone” publikuje wybrane pozycje kolejno; opublikowane pozycje są pomijane.</li>
           </ol>
           <p className="mt-4 text-white/75">Sprzedawca odpowiada za sprawdzenie poprawności tytułu, opisu, zdjęć, parametrów, ceny i warunków sprzedaży. Podpowiedzi programu nie zastępują tej kontroli.</p>
         </section>
         <section>
           <h2 className="text-2xl font-bold">Sesje i zdjęcia</h2>
           <p className="mt-4 text-white/75">„Zapisz sesję” pobiera plik JSON z listą produktów i aut. „Otwórz sesję” pozwala odczytać go ponownie lub przekazać go drugiej osobie do wyceny. Zdjęcia nie są osadzane w tym pliku: należy ponownie wskazać folder zawierający pliki o tych samych nazwach.</p>
-          <p className="mt-3 text-white/75">Zapisz sesję przed zamknięciem lub odświeżeniem strony. Obecna wersja nie zapewnia automatycznego zapisu sesji ani współdzielonego magazynu zdjęć w chmurze. Zdjęcia oferty są przekazywane do Allegro przy publikacji.</p>
+          <p className="mt-3 text-white/75">W menu „Serwer” możesz zapisać dane sesji na koncie oraz osobno włączyć autozapis. Historia obejmuje do 20 poprzednich wersji. Przy konflikcie zmian z innej karty autozapis zostaje zatrzymany. Zdjęcia nie są częścią sesji serwerowej: zachowaj oryginały i ponownie wskaż ich folder po odświeżeniu. Zdjęcia oferty są przekazywane do Allegro przy publikacji.</p>
         </section>
         <section>
           <h2 className="text-2xl font-bold">Uprawnienia i bezpieczeństwo</h2>
           <p className="mt-4 text-white/75">Konfiguracja integracji obejmuje odczyt i zapis ofert, odczyt i zapis ustawień sprzedaży oraz odczyt profilu sprzedawcy. Profil służy do identyfikacji połączonego konta. Program nie żąda dostępu do płatności, zamówień ani wiadomości.</p>
           <p className="mt-3 text-white/75">Autoryzacja wykorzystuje OAuth Authorization Code z PKCE. Tokeny Allegro są przechowywane na serwerze w postaci zaszyfrowanej i nie są udostępniane przeglądarce. Klucze wspólnej aplikacji pozostają po stronie serwera.</p>
-          <p className="mt-3 text-white/75">„Przełącz konto” usuwa zapisane połączenie z Wystawiacza, ale nie usuwa opublikowanych ofert. Pełne cofnięcie zgody aplikacji można wykonać w ustawieniach powiązanych aplikacji na Allegro.</p>
+          <p className="mt-3 text-white/75">Podczas przełączania dotychczasowe połączenie zostaje zastąpione dopiero po poprawnej autoryzacji dozwolonego konta. Zwykłe rozłączenie nie zwalnia przypisania konta Allegro do firmy. Administrator może zmienić limit lub zwolnić konkretne przypisanie. Operacje te nie usuwają opublikowanych ofert. Pełne cofnięcie zgody aplikacji można wykonać w ustawieniach powiązanych aplikacji na Allegro.</p>
         </section>
-        <footer className="border-t border-white/10 pt-5 text-sm text-white/50">Dokumentacja wersji rozwojowej · Tymo Garage</footer>
+        <footer className="border-t border-white/10 pt-5 text-sm text-white/50">Dokumentacja wersji rozwojowej · Tymo Garage · <a href="/oferta" className="text-[#ff8a3d]">Oferta i zasady dostępu</a></footer>
       </article>
     </main>
   );

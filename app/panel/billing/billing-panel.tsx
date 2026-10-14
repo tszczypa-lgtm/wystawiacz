@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { CompanyFields } from "@/components/company-fields";
 import { emptyCompany, validateCompany, companyForForm } from "@/lib/account-validation";
 import { accountDate, accountRequest, type AccountInfo } from "@/lib/account-client";
+import { LegalLinks } from "@/components/legal-links";
 
 export function BillingPanel() {
   const [info, setInfo] = useState<AccountInfo | null>(null);
@@ -56,6 +57,7 @@ export function BillingPanel() {
   return <div className="grid gap-5">
     <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
       <h1 className="text-3xl font-black">Abonament i rozliczenia</h1>
+      <a href="/oferta" className="mt-3 inline-block text-sm text-[#ffb38a] underline underline-offset-4">Zakres uslugi i zasady naliczania miesiaca</a>
       {info ? <>
         <p className={`mt-4 font-bold ${info.access.allowed ? "text-emerald-300" : "text-amber-200"}`}>{info.access.reason}</p>
         <dl className="mt-5 grid gap-3 text-white/70">
@@ -87,5 +89,6 @@ export function BillingPanel() {
       <CompanyFields value={company} onChange={setCompany} disabled={busy} />
       <button disabled={busy} className="mt-5 rounded-xl bg-[#ff5a00] px-5 py-3 font-bold disabled:opacity-50">Zapisz dane firmy</button>
     </form>}
+    <footer className="py-3 text-white/60"><LegalLinks /></footer>
   </div>;
 }

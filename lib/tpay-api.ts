@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual, verify, X509Certificate } from "node:crypto";
 import { accountContext, type AccountEnv } from "./account-api";
 import { validateCompany } from "./account-validation";
+import { salesPolicy } from "./sales-policy";
 
 export type TpayEnv = AccountEnv & {
   TPAY_ENABLED?: string; TPAY_ENVIRONMENT?: string; TPAY_LIVE_APPROVED?: string;
@@ -118,8 +119,8 @@ export async function handleTpayApi(request: Request, env: TpayEnv): Promise<Res
       let issue = "";
       try {
         const config = tpayConfig(env); sandbox = config.sandbox;
-        enabled = env.TPAY_ENABLED === "true" && (sandbox || env.TPAY_LIVE_APPROVED === "true");
-        if (!enabled) issue = env.TPAY_ENABLED !== "true" ? "TPAY_ENABLED musi miec wartosc true." : "Platnosci produkcyjne nie zostaly zatwierdzone. Testy wymagaja TPAY_ENVIRONMENT=sandbox.";
+        enabled = env.TPAY_ENABLED === "true" && (sandbox || (env.TPAY_LIVE_APPROVED === "true" && salesPolicy.approved));
+        if (!enabled) issue = !sandbox && !salesPolicy.approved ? "Dokumenty sprzedazy i obsluga zamowien konsumenckich wymagaja zatwierdzenia przed produkcja." : env.TPAY_ENABLED !== "true" ? "TPAY_ENABLED musi miec wartosc true." : "Platnosci produkcyjne nie zostaly zatwierdzone. Testy wymagaja TPAY_ENVIRONMENT=sandbox.";
       } catch (error) {
         const required = ["TPAY_CLIENT_ID", "TPAY_CLIENT_SECRET", "TPAY_MERCHANT_ID", "TPAY_SECURITY_CODE", "SUPABASE_SERVICE_ROLE_KEY", "APP_ORIGIN"] as const;
         const missing = required.filter(name => !env[name]);
@@ -131,6 +132,7 @@ export async function handleTpayApi(request: Request, env: TpayEnv): Promise<Res
     if (path !== "/checkout" || request.method !== "POST") return json({ message: "Nieznana trasa platnosci." }, 404);
     const config = tpayConfig(env);
     if (env.TPAY_ENABLED !== "true" || (!config.sandbox && env.TPAY_LIVE_APPROVED !== "true")) throw new PaymentError(503, "Zakup przez Tpay nie jest jeszcze uruchomiony.");
+    if (!config.sandbox && !salesPolicy.approved) throw new PaymentError(503, "Dokumenty sprzedazy nie sa jeszcze zatwierdzone. Produkcyjne platnosci pozostaja wylaczone.");
     if (request.headers.get("Origin") !== config.origin || new URL(request.url).origin !== config.origin) throw new PaymentError(403, "Nieprawidlowa domena.");
     if (context.account.suspended) throw new PaymentError(403, "Konto zawieszone.");
     if (config.sandbox && !context.isAdmin) throw new PaymentError(403, "Platnosci testowe sa dostepne tylko administratorowi.");

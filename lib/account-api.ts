@@ -53,7 +53,12 @@ export async function accountContext(request: Request, env: AccountEnv) {
   const accounts = await db(`customer_accounts?owner_id=eq.${user.id}&select=*`) as CustomerAccount[];
   if (!accounts[0]) throw new AccountError(503, "Brak profilu konta. Administrator musi wykonać migrację bazy.");
   const nip = (accounts[0].company as { nip?: string } | null)?.nip;
-  if (env.TRIAL_ENABLED !== "true" || typeof nip !== "string" || !/^\d{10}$/.test(nip)) accounts[0].trial_until = null;
+  let personalProfile = false;
+  if ((accounts[0].company as { customerType?: string } | null)?.customerType === "person") {
+    try { personalProfile = validateCompany(accounts[0].company).customerType === "person"; } catch { /* Incomplete personal profiles do not activate a trial. */ }
+  }
+  if (env.TRIAL_ENABLED !== "true" || (!personalProfile && (typeof nip !== "string" || !/^\d{10}$/.test(nip)))) accounts[0].trial_until = null;
+  else if (personalProfile) { /* Personal trials retain the creation deadline; seller binding prevents reuse. */ }
   else if (accounts[0].trial_claimed_nip !== nip) accounts[0].trial_until = await db("rpc/claim_company_trial", { method: "POST", body: JSON.stringify({ p_owner: user.id }) }) as string | null;
   const roles = await db(`account_admins?owner_id=eq.${user.id}&select=owner_id`) as { owner_id: string }[];
   return { user, account: accounts[0], isAdmin: roles.length > 0, db };

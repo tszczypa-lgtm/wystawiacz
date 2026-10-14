@@ -6,7 +6,8 @@ const compile = source => ts.transpileModule(source, { compilerOptions: { module
 const url = source => `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
 const validation = url(compile(await readFile(new URL("../lib/account-validation.ts", import.meta.url), "utf8")));
 const account = url(compile(await readFile(new URL("../lib/account-api.ts", import.meta.url), "utf8")).replace('"./account-validation"', JSON.stringify(validation)));
-const source = compile(await readFile(new URL("../lib/tpay-api.ts", import.meta.url), "utf8")).replace('"./account-api"', JSON.stringify(account)).replace('"./account-validation"', JSON.stringify(validation));
+const policy = url(compile(await readFile(new URL("../lib/sales-policy.ts", import.meta.url), "utf8")));
+const source = compile(await readFile(new URL("../lib/tpay-api.ts", import.meta.url), "utf8")).replace('"./account-api"', JSON.stringify(account)).replace('"./account-validation"', JSON.stringify(validation)).replace('"./sales-policy"', JSON.stringify(policy));
 const { handleTpayApi, verifyNotificationFields, verifyTpayJws, amountInGrosz, paymentUrl } = await import(url(source));
 const owner = "00000000-0000-0000-0000-000000000001";
 const order = "00000000-0000-0000-0000-000000000002";
@@ -90,6 +91,7 @@ assert.equal(redirectFetches, 1);
 globalThis.fetch = async () => new Response(rootPem);
 await assert.rejects(verifyTpayJws(signedRaw, signedJws, "https://secure.sandbox.tpay.com"));
 let external = 0, transactions = 0, claims = 0, settlements = 0, attached = false, suspended = false, admin = true, lost = false;
+let privateCustomer = false;
 globalThis.fetch = async (input, init = {}) => {
   const target = String(input);
   if (target.endsWith("/x509/notifications-jws.pem")) { assert.equal(init.redirect, "manual"); return new Response(leafPem); }
@@ -99,7 +101,7 @@ globalThis.fetch = async (input, init = {}) => {
     settlements++; return Response.json({ paid: true });
   }
   if (target.endsWith("/auth/v1/user")) return Response.json({ id: owner, email_confirmed_at: "2026-01-01" });
-  if (target.includes("/customer_accounts")) return Response.json([{ owner_id: owner, email: "test@example.test", suspended, company: { name: "Test", nip: "5260250274", street: "Test 1", postcode: "00-001", city: "Warszawa", country: "PL" } }]);
+  if (target.includes("/customer_accounts")) return Response.json([{ owner_id: owner, email: "test@example.test", suspended, company: { name: privateCustomer ? "Jan Kowalski" : "Test", nip: privateCustomer ? "" : "5260250274", street: "Test 1", postcode: "00-001", city: "Warszawa", country: "PL", ...(privateCustomer ? { customerType: "person" } : {}) } }]);
   if (target.includes("/account_admins")) return Response.json(admin ? [{ owner_id: owner }] : []);
   if (target.includes("/rpc/claim_tpay_order")) {
     assert.equal(JSON.parse(init.body).p_owner, owner);
@@ -131,6 +133,7 @@ try {
   assert.equal(external, 0);
   assert.equal((await handleTpayApi(request(), { ...env, TPAY_ENABLED: "false" })).status, 503);
   assert.equal((await handleTpayApi(request(), { ...env, TPAY_ENVIRONMENT: "production" })).status, 503);
+  assert.equal((await handleTpayApi(request(), { ...env, TPAY_ENVIRONMENT: "production", TPAY_LIVE_APPROVED: "true" })).status, 503);
   assert.equal((await handleTpayApi(request("/checkout", "https://evil.test"), env)).status, 403);
   admin = false; assert.equal((await handleTpayApi(request(), env)).status, 403); admin = true;
   suspended = true; assert.equal((await handleTpayApi(request(), env)).status, 403); suspended = false;
@@ -140,6 +143,8 @@ try {
   claims = 0; attached = false; lost = true;
   assert.equal((await handleTpayApi(request(), env)).status, 503);
   assert.equal((await handleTpayApi(request(), env)).status, 409); assert.equal(transactions, 2);
+  claims = 0; attached = false; lost = false; privateCustomer = true;
+  assert.equal((await handleTpayApi(request(), env)).status, 200); assert.equal(transactions, 3);
   const badWebhook = new Request(`${env.APP_ORIGIN}/api/account/tpay/webhook`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: notification() });
   assert.equal((await handleTpayApi(badWebhook, env)).status, 400);
   assert.equal(settlements, 0);

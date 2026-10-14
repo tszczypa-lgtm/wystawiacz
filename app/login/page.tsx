@@ -1,5 +1,6 @@
 import { LockKeyhole, ShieldCheck } from "lucide-react";
 import { LoginForm } from "./login-form";
+import { LegalLinks } from "@/components/legal-links";
 
 export default function LoginPage() {
   return (
@@ -11,7 +12,7 @@ export default function LoginPage() {
           </span>
           <span>
             <span className="block text-lg font-black">Wystawiacz by Tymo</span>
-            <span className="block text-sm text-white/55">konto firmowe</span>
+            <span className="block text-sm text-white/55">konto klienta</span>
           </span>
         </a>
 
@@ -19,11 +20,12 @@ export default function LoginPage() {
           Logowanie do panelu
         </p>
         <h1 className="text-4xl font-black tracking-[-0.05em] sm:text-5xl">
-          Twoje konto firmowe w Wystawiaczu.
+          Twoje konto w Wystawiaczu.
         </h1>
         <p className="mt-5 text-lg leading-8 text-white/62">
-          Zarejestruj firmę, potwierdź e-mail i wejdź do panelu konta. Rejestracja nie uruchamia płatności. Abonament i dane do faktury znajdziesz w rozliczeniach.
+          Wybierz firmę lub osobę prywatną, potwierdź e-mail i wejdź do panelu konta. Rejestracja nie uruchamia płatności. Dostęp i dane rozliczeniowe znajdziesz w panelu.
         </p>
+        <a href="/oferta" className="mt-4 w-fit text-sm font-bold text-[#ffb38a] underline underline-offset-4">Oferta, cena i zasady dostepu</a>
 
         <div className="mt-8 grid gap-3 text-sm text-white/70">
           <div className="flex gap-3 rounded-2xl border border-white/10 bg-white/[.04] p-4">
@@ -48,6 +50,7 @@ export default function LoginPage() {
           </div>
         </div>
       </section>
+      <footer className="mx-auto mt-8 w-full max-w-5xl text-white/60 lg:col-span-2"><LegalLinks /></footer>
     </main>
   );
 }
