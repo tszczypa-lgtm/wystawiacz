@@ -27,6 +27,9 @@ Nie wlaczaj starych platnosci Stripe (`BILLING_ENABLED`).
   kwocie docelowej/zaplaconej, walucie, srodowisku oraz powiazaniu zamowienia.
 - Brak waluty w powiadomieniu jest dozwolony przez API Tpay; samo zamowienie jest PLN.
 - Sandbox zapisuje platnosc jako testowa, ale nie zmienia dostepu. Checkout sandbox tylko dla administratora.
+- `test_mode` jest flaga transakcji, nie identyfikatorem srodowiska API.
+  Sandbox dopuszcza 0 i 1 po weryfikacji certyfikatu sandbox; produkcja dopuszcza tylko 0.
+  Zamowienie musi miec to samo srodowisko co zweryfikowane powiadomienie.
 - Jedna nierozstrzygnieta platnosc na klienta/srodowisko; ponowne klikniecie wznawia ten sam link.
 - Przerwane tworzenie bez odpowiedzi blokuje ponowny POST. Administrator sprawdza
   transakcje w Tpay po hiddenDescription (UUID zamowienia) i nie usuwa rekordu w ciemno.

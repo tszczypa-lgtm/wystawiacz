@@ -41,7 +41,9 @@ export function verifyNotificationFields(raw: string, env: TpayEnv) {
   if (get("id") !== env.TPAY_MERCHANT_ID) throw new PaymentError(400, "Nieprawidlowy akceptant.", "TPAY_MERCHANT_MISMATCH");
   if (!uuid.test(get("tr_crc"))) throw new PaymentError(400, "Nieprawidlowy identyfikator zamowienia.", "TPAY_ORDER_FORMAT");
   if (!/^TR-[A-Z0-9-]{1,80}$/i.test(get("tr_id"))) throw new PaymentError(400, "Nieprawidlowy tytul transakcji.", "TPAY_TITLE_FORMAT");
-  if (get("test_mode") !== (config.sandbox ? "1" : "0")) throw new PaymentError(400, "Nieprawidlowe srodowisko powiadomienia.", "TPAY_TEST_MODE_MISMATCH");
+  // test_mode is a transaction flag, not the identity of the sandbox environment.
+  // Environment isolation is enforced by the preceding JWS certificate and the DB order.
+  if (!["0", "1"].includes(get("test_mode")) || (!config.sandbox && get("test_mode") !== "0")) throw new PaymentError(400, "Nieprawidlowy tryb transakcji.", "TPAY_TEST_MODE_MISMATCH");
   if (amountInGrosz(get("tr_amount")) !== 50000) throw new PaymentError(400, "Nieprawidlowa kwota transakcji.", "TPAY_AMOUNT_MISMATCH");
   if (amountInGrosz(get("tr_paid")) !== 50000) throw new PaymentError(400, "Nieprawidlowa zaplacona kwota.", "TPAY_PAID_MISMATCH");
   if (get("tr_currency") && get("tr_currency") !== "PLN") throw new PaymentError(400, "Nieprawidlowa waluta.", "TPAY_CURRENCY_MISMATCH");

@@ -19,13 +19,17 @@ function notification(changes = {}) {
 assert.equal(amountInGrosz("500.00"), 50000);
 for (const value of ["500,00", "5e2", "500.001", "-500", "Infinity"]) assert.equal(amountInGrosz(value), -1);
 assert.equal(verifyNotificationFields(notification(), env).order, order);
+assert.equal(verifyNotificationFields(notification({ test_mode: "0" }), env).environment, "sandbox");
+assert.equal(verifyNotificationFields(notification({ test_mode: "0" }), { ...env, TPAY_ENVIRONMENT: "production" }).environment, "production");
+assert.throws(() => verifyNotificationFields(notification({ test_mode: "1" }), { ...env, TPAY_ENVIRONMENT: "production" }), error => error.code === "TPAY_TEST_MODE_MISMATCH");
+assert.throws(() => verifyNotificationFields(notification({ test_mode: "" }), env));
 assert.equal(verifyNotificationFields(notification({ tr_status: "chargeback" }), env).refunded, true);
-for (const change of [{ tr_paid: "499.99" }, { tr_amount: "1.00" }, { tr_currency: "EUR" }, { id: "999" }, { test_mode: "0" }, { tr_crc: "bad" }, { tr_status: "pending" }]) assert.throws(() => verifyNotificationFields(notification(change), env));
+for (const change of [{ tr_paid: "499.99" }, { tr_amount: "1.00" }, { tr_currency: "EUR" }, { id: "999" }, { test_mode: "2" }, { tr_crc: "bad" }, { tr_status: "pending" }]) assert.throws(() => verifyNotificationFields(notification(change), env));
 assert.throws(() => verifyNotificationFields(notification() + "&tr_paid=500.00", env));
 assert.throws(() => verifyNotificationFields(notification().replace(/md5sum=[^&]+/, "md5sum=00000000000000000000000000000000"), env));
 for (const [change, code] of [
   [{ id: "999" }, "TPAY_MERCHANT_MISMATCH"],
-  [{ test_mode: "0" }, "TPAY_TEST_MODE_MISMATCH"],
+  [{ test_mode: "2" }, "TPAY_TEST_MODE_MISMATCH"],
   [{ tr_amount: "1.00" }, "TPAY_AMOUNT_MISMATCH"],
   [{ tr_paid: "495.05" }, "TPAY_PAID_MISMATCH"],
   [{ tr_currency: "EUR" }, "TPAY_CURRENCY_MISMATCH"],
@@ -69,6 +73,7 @@ globalThis.fetch = async (input, options) => {
   return new Response(String(input).endsWith("tpay-jws-root.pem") ? rootPem : leafPem);
 };
 await verifyTpayJws(signedRaw, signedJws, "https://secure.sandbox.tpay.com");
+await assert.rejects(verifyTpayJws(signedRaw, signedJws, "https://secure.tpay.com"));
 await assert.rejects(verifyTpayJws(signedRaw + "&tampered=yes", signedJws, "https://secure.sandbox.tpay.com"));
 let redirectFetches = 0;
 globalThis.fetch = async (_input, options) => {
