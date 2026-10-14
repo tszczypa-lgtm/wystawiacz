@@ -23,6 +23,14 @@ assert.equal(verifyNotificationFields(notification({ tr_status: "chargeback" }),
 for (const change of [{ tr_paid: "499.99" }, { tr_amount: "1.00" }, { tr_currency: "EUR" }, { id: "999" }, { test_mode: "0" }, { tr_crc: "bad" }, { tr_status: "pending" }]) assert.throws(() => verifyNotificationFields(notification(change), env));
 assert.throws(() => verifyNotificationFields(notification() + "&tr_paid=500.00", env));
 assert.throws(() => verifyNotificationFields(notification().replace(/md5sum=[^&]+/, "md5sum=00000000000000000000000000000000"), env));
+for (const [change, code] of [
+  [{ id: "999" }, "TPAY_MERCHANT_MISMATCH"],
+  [{ test_mode: "0" }, "TPAY_TEST_MODE_MISMATCH"],
+  [{ tr_amount: "1.00" }, "TPAY_AMOUNT_MISMATCH"],
+  [{ tr_paid: "495.05" }, "TPAY_PAID_MISMATCH"],
+  [{ tr_currency: "EUR" }, "TPAY_CURRENCY_MISMATCH"],
+  [{ tr_error: "error" }, "TPAY_TRANSACTION_ERROR"],
+]) assert.throws(() => verifyNotificationFields(notification(change), env), error => error.code === code);
 for (const value of ["https://secure.tpay.com.evil.test/", "https://secure.tpay.com@evil.test/", "javascript:alert(1)", "https://secure.tpay.com/"]) assert.throws(() => paymentUrl(value, "https://secure.sandbox.tpay.com"));
 const previous = globalThis.fetch;
 const previousError = console.error;

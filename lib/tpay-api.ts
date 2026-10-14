@@ -36,13 +36,19 @@ function sameHex(expected: string, received: string) {
 export function verifyNotificationFields(raw: string, env: TpayEnv) {
   const config = tpayConfig(env);
   const fields = new URLSearchParams(raw);
-  for (const key of new Set(fields.keys())) if (fields.getAll(key).length !== 1) throw new PaymentError(400, "Powtorzone pole powiadomienia.");
+  for (const key of new Set(fields.keys())) if (fields.getAll(key).length !== 1) throw new PaymentError(400, "Powtorzone pole powiadomienia.", "TPAY_FIELD_DUPLICATE");
   const get = (key: string) => fields.get(key) || "";
-  if (get("id") !== env.TPAY_MERCHANT_ID || !uuid.test(get("tr_crc")) || !/^TR-[A-Z0-9-]{1,80}$/i.test(get("tr_id")) || get("test_mode") !== (config.sandbox ? "1" : "0")) throw new PaymentError(400, "Nieprawidlowe powiadomienie.");
-  if (amountInGrosz(get("tr_amount")) !== 50000 || amountInGrosz(get("tr_paid")) !== 50000 || (get("tr_currency") && get("tr_currency") !== "PLN") || get("tr_error") !== "none") throw new PaymentError(400, "Nieprawidlowa kwota lub waluta.");
+  if (get("id") !== env.TPAY_MERCHANT_ID) throw new PaymentError(400, "Nieprawidlowy akceptant.", "TPAY_MERCHANT_MISMATCH");
+  if (!uuid.test(get("tr_crc"))) throw new PaymentError(400, "Nieprawidlowy identyfikator zamowienia.", "TPAY_ORDER_FORMAT");
+  if (!/^TR-[A-Z0-9-]{1,80}$/i.test(get("tr_id"))) throw new PaymentError(400, "Nieprawidlowy tytul transakcji.", "TPAY_TITLE_FORMAT");
+  if (get("test_mode") !== (config.sandbox ? "1" : "0")) throw new PaymentError(400, "Nieprawidlowe srodowisko powiadomienia.", "TPAY_TEST_MODE_MISMATCH");
+  if (amountInGrosz(get("tr_amount")) !== 50000) throw new PaymentError(400, "Nieprawidlowa kwota transakcji.", "TPAY_AMOUNT_MISMATCH");
+  if (amountInGrosz(get("tr_paid")) !== 50000) throw new PaymentError(400, "Nieprawidlowa zaplacona kwota.", "TPAY_PAID_MISMATCH");
+  if (get("tr_currency") && get("tr_currency") !== "PLN") throw new PaymentError(400, "Nieprawidlowa waluta.", "TPAY_CURRENCY_MISMATCH");
+  if (get("tr_error") !== "none") throw new PaymentError(400, "Blad transakcji.", "TPAY_TRANSACTION_ERROR");
   const checksum = createHash("md5").update(get("id") + get("tr_id") + get("tr_amount") + get("tr_crc") + env.TPAY_SECURITY_CODE).digest("hex");
-  if (!sameHex(checksum, get("md5sum"))) throw new PaymentError(400, "Nieprawidlowa suma kontrolna.");
-  if (!["true", "chargeback"].includes(get("tr_status"))) throw new PaymentError(400, "Nieprawidlowy status.");
+  if (!sameHex(checksum, get("md5sum"))) throw new PaymentError(400, "Nieprawidlowa suma kontrolna.", "TPAY_CHECKSUM_MISMATCH");
+  if (!["true", "chargeback"].includes(get("tr_status"))) throw new PaymentError(400, "Nieprawidlowy status.", "TPAY_STATUS_INVALID");
   return { order: get("tr_crc"), title: get("tr_id"), refunded: get("tr_status") === "chargeback", environment: config.environment };
 }
 // Only the exact Tpay certificate endpoint is fetched; untrusted x5u cannot redirect.
