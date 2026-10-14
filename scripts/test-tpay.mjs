@@ -25,6 +25,9 @@ assert.throws(() => verifyNotificationFields(notification() + "&tr_paid=500.00",
 assert.throws(() => verifyNotificationFields(notification().replace(/md5sum=[^&]+/, "md5sum=00000000000000000000000000000000"), env));
 for (const value of ["https://secure.tpay.com.evil.test/", "https://secure.tpay.com@evil.test/", "javascript:alert(1)", "https://secure.tpay.com/"]) assert.throws(() => paymentUrl(value, "https://secure.sandbox.tpay.com"));
 const previous = globalThis.fetch;
+const previousError = console.error;
+const errors = [];
+console.error = message => errors.push(message);
 // Generate disposable certificates in memory; no fixture private keys are persisted.
 const der = (tag, ...items) => {
   const data = Buffer.concat(items);
@@ -116,5 +119,11 @@ try {
   assert.equal(settled.status, 200); assert.equal(await settled.text(), "TRUE"); assert.equal(settlements, 1);
   const changed = new Request(`${env.APP_ORIGIN}/api/account/tpay/webhook`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", "X-JWS-Signature": signedJws }, body: signedRaw + "&tampered=yes" });
   assert.equal((await handleTpayApi(changed, env)).status, 400); assert.equal(settlements, 1);
-} finally { globalThis.fetch = previous; }
+  assert.ok(errors.some(message => JSON.parse(message).stage === "signature"));
+  for (const message of errors) {
+    assert.ok(!message.includes(env.TPAY_CLIENT_SECRET));
+    assert.ok(!message.includes(env.TPAY_SECURITY_CODE));
+    assert.ok(!message.includes(order));
+  }
+} finally { globalThis.fetch = previous; console.error = previousError; }
 console.log("Tpay tests passed: amounts, checksum, environment, disabled live checkout, origin, suspension, sandbox admin, reused link, uncertain creation, unsigned webhook.");

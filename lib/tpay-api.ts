@@ -8,7 +8,7 @@ export type TpayEnv = AccountEnv & {
   TPAY_MERCHANT_ID?: string; TPAY_SECURITY_CODE?: string;
 };
 class PaymentError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  constructor(public status: number, message: string, public code = "TPAY_ERROR") { super(message); }
 }
 const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { "Cache-Control": "no-store" } });
 const uuid = /^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i;
@@ -53,37 +53,52 @@ export async function verifyTpayJws(raw: string, signature: string, secure: stri
   const header = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8"));
   if (header.alg !== "RS256" || header.x5u !== `${secure}/x509/notifications-jws.pem` || header.crit || header.b64 === false) throw new PaymentError(400, "Nieprawidlowy naglowek JWS.");
   const certificate = async (url: string) => {
-    const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(15000) });
-    if (!response.ok) throw new PaymentError(503, "Nie mozna sprawdzic certyfikatu Tpay.");
+    let response;
+    try { response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(15000) }); }
+    catch { throw new PaymentError(503, "Nie mozna pobrac certyfikatu Tpay.", "TPAY_CERT_NETWORK"); }
+    if (!response.ok) throw new PaymentError(503, "Nie mozna sprawdzic certyfikatu Tpay.", `TPAY_CERT_HTTP_${response.status}`);
     const pem = await response.text();
     if (pem.length > 20000) throw new PaymentError(400, "Nieprawidlowy certyfikat.");
-    return new X509Certificate(pem);
+    try { return new X509Certificate(pem); }
+    catch { throw new PaymentError(503, "Nie mozna odczytac certyfikatu Tpay.", "TPAY_CERT_PARSE"); }
   };
   const leaf = await certificate(header.x5u);
   const root = await certificate(`${secure}/x509/tpay-jws-root.pem`);
   for (const cert of [leaf, root]) if (Date.parse(cert.validFrom) > Date.now() || Date.parse(cert.validTo) < Date.now()) throw new PaymentError(400, "Certyfikat poza okresem waznosci.");
-  if (!root.ca || !leaf.verify(root.publicKey) || !verify("RSA-SHA256", Buffer.from(`${parts[0]}.${Buffer.from(raw).toString("base64url")}`), leaf.publicKey, Buffer.from(parts[2], "base64url"))) throw new PaymentError(400, "Nieprawidlowy podpis Tpay.");
+  let valid;
+  try { valid = root.ca && leaf.verify(root.publicKey) && verify("RSA-SHA256", Buffer.from(`${parts[0]}.${Buffer.from(raw).toString("base64url")}`), leaf.publicKey, Buffer.from(parts[2], "base64url")); }
+  catch { throw new PaymentError(503, "Nie mozna wykonac weryfikacji podpisu.", "TPAY_CRYPTO_RUNTIME"); }
+  if (!valid) throw new PaymentError(400, "Nieprawidlowy podpis Tpay.");
 }
 function database(env: TpayEnv) {
   return async (path: string, body: unknown) => {
     const response = await fetch(`${env.NEXT_PUBLIC_SUPABASE_URL || "https://wgshalvkjfefavnbccil.supabase.co"}/rest/v1/${path}`, {
       method: "POST", headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY!, Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
-    if (!response.ok) throw new PaymentError(503, "Nie zapisano platnosci. Sprawdz migracje 005; nie ponawiaj zaplaty.");
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({})) as { code?: string };
+      const code = typeof error.code === "string" && /^[A-Z0-9]{1,10}$/.test(error.code) ? error.code : String(response.status);
+      throw new PaymentError(503, "Nie zapisano platnosci. Sprawdz migracje 005; nie ponawiaj zaplaty.", `TPAY_DB_${code}`);
+    }
     return response.json();
   };
 }
 export async function handleTpayApi(request: Request, env: TpayEnv): Promise<Response> {
+  let webhookStage = "";
   try {
     const path = new URL(request.url).pathname.slice("/api/account/tpay".length);
     if (path === "/webhook" && request.method === "POST") {
+      webhookStage = "configuration";
       const config = tpayConfig(env);
       if (!request.headers.get("Content-Type")?.startsWith("application/x-www-form-urlencoded")) throw new PaymentError(400, "Nieprawidlowy typ danych.");
       if (Number(request.headers.get("Content-Length")) > 16384) throw new PaymentError(413, "Zbyt duzo danych.");
       const raw = await request.text();
       if (Buffer.byteLength(raw) > 16384) throw new PaymentError(413, "Zbyt duzo danych.");
+      webhookStage = "signature";
       await verifyTpayJws(raw, request.headers.get("X-JWS-Signature") || "", config.secure);
+      webhookStage = "fields";
       const data = verifyNotificationFields(raw, env);
+      webhookStage = "settlement";
       await database(env)("rpc/settle_tpay_order", { p_id: data.order, p_environment: data.environment, p_title: data.title, p_refunded: data.refunded });
       return new Response("TRUE", { headers: { "Content-Type": "text/plain", "Cache-Control": "no-store" } });
     }
@@ -139,6 +154,7 @@ export async function handleTpayApi(request: Request, env: TpayEnv): Promise<Res
     await db("rpc/attach_tpay_transaction", { p_id: claim.id, p_transaction: transaction.transactionId, p_title: transaction.title, p_url: url });
     return json({ url });
   } catch (error) {
+    if (webhookStage) console.error(JSON.stringify({ event: "tpay_webhook_failed", stage: webhookStage, code: error instanceof PaymentError ? error.code : "TPAY_UNEXPECTED", status: error instanceof PaymentError ? error.status : 503 }));
     if (!(error instanceof PaymentError) && (error as { status?: number })?.status === 401) return json({ message: "Zaloguj sie ponownie." }, 401);
     return json({ message: error instanceof PaymentError ? error.message : "Nie udalo sie obsluzyc platnosci. Nie ponawiaj zaplaty; sprawdz status lub skontaktuj sie z administratorem." }, error instanceof PaymentError ? error.status : 503);
   }
