@@ -7,11 +7,16 @@ const url = source => `data:text/javascript;base64,${Buffer.from(source).toStrin
 const validation = url(compile(await readFile(new URL("../lib/account-validation.ts", import.meta.url), "utf8")));
 const account = url(compile(await readFile(new URL("../lib/account-api.ts", import.meta.url), "utf8")).replace('"./account-validation"', JSON.stringify(validation)));
 const policy = url(compile(await readFile(new URL("../lib/sales-policy.ts", import.meta.url), "utf8")));
-const source = compile(await readFile(new URL("../lib/tpay-api.ts", import.meta.url), "utf8")).replace('"./account-api"', JSON.stringify(account)).replace('"./account-validation"', JSON.stringify(validation)).replace('"./sales-policy"', JSON.stringify(policy));
+const checkout = url(compile(await readFile(new URL("../lib/checkout-policy.ts", import.meta.url), "utf8")).replace('"./sales-policy"', JSON.stringify(policy)));
+const { checkoutPolicy, checkoutAcceptance } = await import(checkout);
+const source = compile(await readFile(new URL("../lib/tpay-api.ts", import.meta.url), "utf8")).replace('"./account-api"', JSON.stringify(account)).replace('"./account-validation"', JSON.stringify(validation)).replace('"./sales-policy"', JSON.stringify(policy)).replace('"./checkout-policy"', JSON.stringify(checkout));
 const { handleTpayApi, verifyNotificationFields, verifyTpayJws, amountInGrosz, paymentUrl } = await import(url(source));
 const owner = "00000000-0000-0000-0000-000000000001";
 const order = "00000000-0000-0000-0000-000000000002";
 const env = { APP_ORIGIN: "https://example.test", TPAY_ENABLED: "true", TPAY_ENVIRONMENT: "sandbox", TPAY_CLIENT_ID: "test-id", TPAY_CLIENT_SECRET: "test-secret", TPAY_MERCHANT_ID: "123", TPAY_SECURITY_CODE: "test-code", SUPABASE_SERVICE_ROLE_KEY: "test-db" };
+const consent = { version: checkoutPolicy.version, termsVersion: checkoutPolicy.termsVersion, acceptTerms: true, requestEarlyStart: true };
+for (const bad of [null, [], {}, { ...consent, acceptTerms: "true" }, { ...consent, requestEarlyStart: false }, { ...consent, version: "old" }, { ...consent, termsVersion: "old" }]) assert.equal(checkoutAcceptance(bad, "sandbox"), null);
+assert.equal(checkoutAcceptance({ ...consent, statements: "forged", recordedAt: "forged" }, "sandbox").statements.terms, checkoutPolicy.terms);
 function notification(changes = {}) {
   const fields = { id: "123", tr_id: "TR-TEST-123", tr_crc: order, tr_amount: "500.00", tr_paid: "500.00", tr_currency: "PLN", tr_status: "true", tr_error: "none", test_mode: "1", ...changes };
   fields.md5sum = createHash("md5").update(fields.id + fields.tr_id + fields.tr_amount + fields.tr_crc + env.TPAY_SECURITY_CODE).digest("hex");
@@ -91,7 +96,7 @@ assert.equal(redirectFetches, 1);
 globalThis.fetch = async () => new Response(rootPem);
 await assert.rejects(verifyTpayJws(signedRaw, signedJws, "https://secure.sandbox.tpay.com"));
 let external = 0, transactions = 0, claims = 0, settlements = 0, attached = false, suspended = false, admin = true, lost = false;
-let privateCustomer = false;
+let privateCustomer = false, acceptanceConflict = false;
 globalThis.fetch = async (input, init = {}) => {
   const target = String(input);
   if (target.endsWith("/x509/notifications-jws.pem")) { assert.equal(init.redirect, "manual"); return new Response(leafPem); }
@@ -103,8 +108,11 @@ globalThis.fetch = async (input, init = {}) => {
   if (target.endsWith("/auth/v1/user")) return Response.json({ id: owner, email_confirmed_at: "2026-01-01" });
   if (target.includes("/customer_accounts")) return Response.json([{ owner_id: owner, email: "test@example.test", suspended, company: { name: privateCustomer ? "Jan Kowalski" : "Test", nip: privateCustomer ? "" : "5260250274", street: "Test 1", postcode: "00-001", city: "Warszawa", country: "PL", ...(privateCustomer ? { customerType: "person" } : {}) } }]);
   if (target.includes("/account_admins")) return Response.json(admin ? [{ owner_id: owner }] : []);
-  if (target.includes("/rpc/claim_tpay_order")) {
-    assert.equal(JSON.parse(init.body).p_owner, owner);
+  if (target.includes("/rpc/claim_tpay_order_with_acceptance")) {
+    if (acceptanceConflict) return Response.json({ code: "P0002" }, { status: 400 });
+    const data = JSON.parse(init.body);
+    assert.equal(data.p_owner, owner);
+    assert.deepEqual(data.p_acceptance, checkoutAcceptance(consent, "sandbox"));
     return Response.json({ id: order, created: ++claims === 1, payment_url: attached ? "https://secure.sandbox.tpay.com/test" : null });
   }
   if (target.includes("/rpc/attach_tpay_transaction")) { attached = true; return Response.json({ ok: true }); }
@@ -118,7 +126,7 @@ globalThis.fetch = async (input, init = {}) => {
   }
   throw Error(`Unexpected fetch ${target}`);
 };
-const request = (path = "/checkout", origin = env.APP_ORIGIN) => new Request(`${env.APP_ORIGIN}/api/account/tpay${path}`, { method: path === "/status" ? "GET" : "POST", headers: { Authorization: "Bearer test-user", Origin: origin } });
+const request = (path = "/checkout", origin = env.APP_ORIGIN, body = consent) => new Request(`${env.APP_ORIGIN}/api/account/tpay${path}`, { method: path === "/status" ? "GET" : "POST", headers: { Authorization: "Bearer test-user", Origin: origin, "Content-Type": "application/json" }, ...(path === "/status" ? {} : { body: JSON.stringify(body) }) });
 try {
   let status = await (await handleTpayApi(request("/status"), { ...env, TPAY_SECURITY_CODE: undefined })).json();
   assert.equal(status.enabled, false); assert.match(status.issue, /TPAY_SECURITY_CODE/);
@@ -131,6 +139,15 @@ try {
   const rejected = Buffer.from(JSON.stringify({ alg: "RS256", x5u: "https://secure.sandbox.tpay.com.evil.test/x509/notifications-jws.pem" })).toString("base64url") + "..abc";
   await assert.rejects(verifyTpayJws(notification(), rejected, "https://secure.sandbox.tpay.com"));
   assert.equal(external, 0);
+  for (const bad of [{}, { ...consent, acceptTerms: false }, { ...consent, requestEarlyStart: "true" }, { ...consent, version: "old" }]) assert.equal((await handleTpayApi(request("/checkout", env.APP_ORIGIN, bad), env)).status, 400);
+  assert.equal(claims, 0); assert.equal(external, 0);
+  const malformed = new Request(`${env.APP_ORIGIN}/api/account/tpay/checkout`, { method: "POST", headers: { Authorization: "Bearer test-user", Origin: env.APP_ORIGIN, "Content-Type": "application/json" }, body: "{" });
+  assert.equal((await handleTpayApi(malformed, env)).status, 400);
+  assert.equal((await handleTpayApi(request("/checkout", env.APP_ORIGIN, "x".repeat(4096)), env)).status, 413);
+  acceptanceConflict = true;
+  assert.equal((await handleTpayApi(request(), env)).status, 409);
+  assert.equal(claims, 0); assert.equal(external, 0);
+  acceptanceConflict = false;
   assert.equal((await handleTpayApi(request(), { ...env, TPAY_ENABLED: "false" })).status, 503);
   assert.equal((await handleTpayApi(request(), { ...env, TPAY_ENVIRONMENT: "production" })).status, 503);
   assert.equal((await handleTpayApi(request(), { ...env, TPAY_ENVIRONMENT: "production", TPAY_LIVE_APPROVED: "true" })).status, 503);
@@ -160,4 +177,4 @@ try {
     assert.ok(!message.includes(order));
   }
 } finally { globalThis.fetch = previous; console.error = previousError; }
-console.log("Tpay tests passed: amounts, checksum, environment, disabled live checkout, origin, suspension, sandbox admin, reused link, uncertain creation, unsigned webhook.");
+console.log("Tpay tests passed: strict versioned acceptance, server-owned snapshot, legacy-order conflict, malformed/oversized input, amounts, checksum, disabled live checkout, origin, suspension, sandbox admin, reused link, uncertain creation and signed webhook (mocked HTTP; no SQL execution).");

@@ -17,6 +17,15 @@ Sprzedaz docelowo firmom i osobom prywatnym z Polski.
   ponawianiem przy ponownym polaczeniu wykorzystuje zachowany identyfikator
   sprzedawcy Allegro. Sam zadeklarowany NIP nie dowodzi tozsamosci firmy.
 - Bez zmian w istniejacych aukcjach i polaczeniach Allegro.
+- Formularz proby zamowienia sandbox: dwa niezaznaczone oswiadczenia, linki
+  do dokumentow, podsumowanie ceny i brak automatycznego odnawiania.
+- Serwer wymaga scislych wartosci logicznych i aktualnej wersji. Migracja 007
+  zapisuje niezmienny snapshot tresci oswiadczen i danych sprzedawcy przy
+  atomowym utworzeniu zamowienia, ze znacznikiem czasu bazy. Ponowienie nie
+  zmienia tego zapisu; starsze otwarte zamowienie wymaga wyjasnienia, nie
+  automatycznego utworzenia drugiej platnosci.
+- To NIE jest jeszcze archiwum pelnych dokumentow ani potwierdzenie umowy
+  na trwalym nosniku. Brak wysylki e-maila z dokumentami. Produkcja zamknieta.
 
 ## Kolejnosc wdrozenia
 
@@ -31,6 +40,14 @@ Sprzedaz docelowo firmom i osobom prywatnym z Polski.
 
 ## Warunki przed dopuszczeniem produkcji
 
+Nastepne wdrozenie: uruchom `supabase/007_checkout_acceptance.sql` przed
+wyslaniem kodu, nastepnie sprawdz `scripts/check-checkout-acceptance-rollback.sql`.
+Test SQL tworzy tylko tymczasowe zamowienie bez wywolan operatora i wycofuje
+zmiany wewnatrz bloku. Nie uruchamiaj migracji 007 ponownie po sukcesie.
+Po wdrozeniu sprawdz w sandboxie brak mozliwosci przejscia bez dwoch zaznaczen.
+Nie oplacaj ponownie poprzedniego zamowienia. Otwarte zamowienia sprzed 007
+nie sa uzupelniane wstecz fikcyjna akceptacja.
+
 `lib/sales-policy.ts` ma `approved: false`. Nawet samo ustawienie
 `TPAY_LIVE_APPROVED=true` nie otworzy produkcyjnego checkoutu, dopoki dokumenty
 i proces zakupu nie zostana przygotowane i osobno zatwierdzone w kodzie.
@@ -43,7 +60,8 @@ Przed zmiana approved trzeba wykonac co najmniej:
 - wersjonowana akceptacja regulaminu i osobne oswiadczenia o rozpoczeciu
   uslugi przed uplywem terminu odstapienia (bez automatycznego zrzeczenia sie praw);
 - niezmienny zapis wersji i oswiadczen w zamowieniu, wraz z potwierdzeniem umowy
-  i dokumentow na trwalym nosniku; obecny checkout tych elementow NIE zapewnia;
+  i dokumentow na trwalym nosniku; snapshot oswiadczen jest przygotowany,
+  ale archiwum pelnych dokumentow i wysylka potwierdzenia nadal NIE sa gotowe;
 - rozstrzygniecie retencji, usuwania kont i danych, eksportu, kopii, logow,
   rejestrow antynaduzyciowych, rol/umow powierzenia i transferow danych;
 - uzgodnienie fakturowania i rozliczen z ksiegowoscia;

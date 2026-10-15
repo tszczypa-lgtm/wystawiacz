@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual, verify, X509Certificate } from "node:crypt
 import { accountContext, type AccountEnv } from "./account-api";
 import { validateCompany } from "./account-validation";
 import { salesPolicy } from "./sales-policy";
+import { checkoutAcceptance } from "./checkout-policy";
 
 export type TpayEnv = AccountEnv & {
   TPAY_ENABLED?: string; TPAY_ENVIRONMENT?: string; TPAY_LIVE_APPROVED?: string;
@@ -89,7 +90,8 @@ function database(env: TpayEnv) {
     if (!response.ok) {
       const error = await response.json().catch(() => ({})) as { code?: string };
       const code = typeof error.code === "string" && /^[A-Z0-9]{1,10}$/.test(error.code) ? error.code : String(response.status);
-      throw new PaymentError(503, "Nie zapisano platnosci. Sprawdz migracje 005; nie ponawiaj zaplaty.", `TPAY_DB_${code}`);
+      if (code === "P0002") throw new PaymentError(409, "Istniejace zamowienie ma starsza wersje oswiadczen. Nie tworzymy drugiej platnosci. Skontaktuj sie z administratorem.", "TPAY_ACCEPTANCE_CONFLICT");
+      throw new PaymentError(503, "Nie zapisano platnosci. Sprawdz migracje platnosci (005 i 007); nie ponawiaj zaplaty.", `TPAY_DB_${code}`);
     }
     return response.json();
   };
@@ -137,11 +139,19 @@ export async function handleTpayApi(request: Request, env: TpayEnv): Promise<Res
     if (context.account.suspended) throw new PaymentError(403, "Konto zawieszone.");
     if (config.sandbox && !context.isAdmin) throw new PaymentError(403, "Platnosci testowe sa dostepne tylko administratorowi.");
     if (context.account.stripe_subscription_id) throw new PaymentError(409, "Najpierw wyjasnij istniejacy abonament z administratorem.");
+    if (!request.headers.get("Content-Type")?.startsWith("application/json")) throw new PaymentError(400, "Brak oswiadczen zamowienia.");
+    if (Number(request.headers.get("Content-Length")) > 4096) throw new PaymentError(413, "Zbyt duzo danych.");
+    const rawAcceptance = await request.text();
+    if (Buffer.byteLength(rawAcceptance) > 4096) throw new PaymentError(413, "Zbyt duzo danych.");
+    let input;
+    try { input = JSON.parse(rawAcceptance); } catch { throw new PaymentError(400, "Nieprawidlowe dane zamowienia."); }
+    const acceptance = checkoutAcceptance(input, config.environment);
+    if (!acceptance) throw new PaymentError(400, "Przeczytaj aktualne podsumowanie i zaznacz osobno oba oswiadczenia. Odswiez strone, jesli zmienila sie wersja dokumentow.");
     let company;
     try { company = validateCompany(context.account.company); }
     catch { throw new PaymentError(400, "Uzupelnij poprawne dane firmy przed zakupem."); }
     const db = database(env);
-    const claim = await db("rpc/claim_tpay_order", { p_owner: context.user.id, p_environment: config.environment }) as { id: string; created: boolean; payment_url?: string };
+    const claim = await db("rpc/claim_tpay_order_with_acceptance", { p_owner: context.user.id, p_environment: config.environment, p_acceptance: acceptance }) as { id: string; created: boolean; payment_url?: string };
     if (!claim.created) {
       if (claim.payment_url) return json({ url: paymentUrl(claim.payment_url, config.secure) });
       throw new PaymentError(409, "Platnosc jest przygotowywana lub jej wynik jest niepewny. Nie tworzymy drugiej; skontaktuj sie z administratorem.");

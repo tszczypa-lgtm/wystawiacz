@@ -47,4 +47,11 @@ assert.ok(personal.includes("Imię i nazwisko")); assert.ok(!personal.includes("
 assert.ok(business.includes("NIP")); assert.ok(business.includes("Nazwa firmy"));
 const policy = load(path.join(root, "lib", "sales-policy.ts"));
 assert.equal(policy.salesPolicy.approved, false);
+const checkoutFields = load(path.join(root, "components", "checkout-acceptance.tsx"));
+const checkoutHtml = renderToStaticMarkup(React.createElement(checkoutFields.CheckoutAcceptance, { sandbox: true, disabled: false, acceptTerms: false, requestEarlyStart: false, onTerms() {}, onEarlyStart() {} }));
+assert.equal((checkoutHtml.match(/type="checkbox"/g) || []).length, 2);
+assert.ok(!checkoutHtml.includes(' checked=""'));
+assert.ok(checkoutHtml.includes("bez prawdziwej umowy i oplaty"));
+assert.ok(checkoutHtml.includes('href="/regulamin"'));
+assert.ok(checkoutHtml.includes("Samo rozpoczecie uslugi nie oznacza utraty prawa odstapienia"));
 console.log("Sales pages: public routes, seller details, draft notices, links, personal/business fields and closed production gate passed (SSR component test).");

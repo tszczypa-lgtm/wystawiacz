@@ -5,6 +5,8 @@ import { CompanyFields } from "@/components/company-fields";
 import { emptyCompany, validateCompany, companyForForm } from "@/lib/account-validation";
 import { accountDate, accountRequest, type AccountInfo } from "@/lib/account-client";
 import { LegalLinks } from "@/components/legal-links";
+import { CheckoutAcceptance } from "@/components/checkout-acceptance";
+import { checkoutPolicy } from "@/lib/checkout-policy";
 
 export function BillingPanel() {
   const [info, setInfo] = useState<AccountInfo | null>(null);
@@ -12,6 +14,8 @@ export function BillingPanel() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [acceptTerms, setAcceptTerms] = useState(false);
+  const [requestEarlyStart, setRequestEarlyStart] = useState(false);
   const [tpay, setTpay] = useState<{ enabled: boolean; sandbox: boolean; issue?: string } | null>(null);
   async function refresh() {
     const result = await accountRequest<AccountInfo>("/me");
@@ -47,7 +51,10 @@ export function BillingPanel() {
   async function tpayPayment() {
     setBusy(true); setMessage("");
     try {
-      const result = await accountRequest<{ url: string }>("/tpay/checkout", "POST");
+      if (!acceptTerms || !requestEarlyStart) throw new Error("Sprawdz podsumowanie i zaznacz osobno oba oswiadczenia przed przejsciem do Tpay.");
+      const result = await accountRequest<{ url: string }>("/tpay/checkout", "POST", {
+        version: checkoutPolicy.version, termsVersion: checkoutPolicy.termsVersion, acceptTerms, requestEarlyStart,
+      });
       const url = new URL(result.url);
       const host = tpay?.sandbox ? "secure.sandbox.tpay.com" : "secure.tpay.com";
       if (url.protocol !== "https:" || url.hostname !== host || url.port || url.username || url.password) throw new Error("Nieprawidlowy adres Tpay.");
@@ -74,8 +81,9 @@ export function BillingPanel() {
         {tpay?.enabled && tpay.sandbox && !info.isAdmin && <p className="mt-4 text-amber-200">Przycisk testu Tpay jest dostepny tylko na koncie administratora. Przelacz konto Wystawiacza, nie konto Allegro.</p>}
         {info.account.trial_until && Date.parse(info.account.trial_until) > Date.now() && Date.parse(info.account.trial_until) - Date.now() <= 3 * 86400000 && <p className="mt-4 text-amber-200">Okres probny konczy sie w ciagu 3 dni. Sesje i wystawione aukcje nie zostana usuniete.</p>}
         {!info.billingEnabled && !tpay?.enabled && <p className="mt-4 text-white/60">{info.billingIssue ? "Zakup chwilowo niedostępny. Administrator musi sprawdzić konfigurację płatności." : "Zakup abonamentu nie jest jeszcze uruchomiony. Nie pobieramy opłaty za rejestrację."}</p>}
+        {tpay?.enabled && !info.account.suspended && (!tpay.sandbox || info.isAdmin) && <CheckoutAcceptance sandbox={tpay.sandbox} disabled={busy} acceptTerms={acceptTerms} requestEarlyStart={requestEarlyStart} onTerms={setAcceptTerms} onEarlyStart={setRequestEarlyStart} />}
         <div className="mt-5 flex flex-wrap gap-3">
-          {tpay?.enabled && !info.account.suspended && (!tpay.sandbox || info.isAdmin) && <button disabled={busy} onClick={tpayPayment} className="rounded-xl bg-[#ff5a00] px-5 py-3 font-bold disabled:opacity-50">{tpay.sandbox ? "Test platnosci Tpay" : "Oplac kolejny miesiac - 500 zl"}</button>}
+          {tpay?.enabled && !info.account.suspended && (!tpay.sandbox || info.isAdmin) && <button disabled={busy || !acceptTerms || !requestEarlyStart} onClick={tpayPayment} className="rounded-xl bg-[#ff5a00] px-5 py-3 font-bold disabled:opacity-50">{tpay.sandbox ? "Test zamowienia i platnosci Tpay" : "Zamawiam i place 500 zl"}</button>}
           {info.billingEnabled && !info.account.suspended && !info.isAdmin && info.account.access_mode !== "free" && info.account.subscription_status === "none" && <button disabled={busy} onClick={() => payment("/checkout")} className="rounded-xl bg-[#ff5a00] px-5 py-3 font-bold disabled:opacity-50">Kup abonament</button>}
           {info.billingEnabled && !info.account.suspended && ["canceled", "incomplete_expired"].includes(info.account.subscription_status) && <button disabled={busy} onClick={() => payment("/checkout")} className="rounded-xl bg-[#ff5a00] px-5 py-3 font-bold disabled:opacity-50">Wznów abonament</button>}
           {info.hasCustomer && <button disabled={busy} onClick={() => payment("/portal")} className="rounded-xl border border-white/20 px-5 py-3 font-bold disabled:opacity-50">Płatności, dokumenty i anulowanie</button>}
