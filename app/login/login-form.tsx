@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LockKeyhole, Mail } from "lucide-react";
 import { createSupabaseBrowserClient } from "@/lib/supabase";
 import { CompanyFields } from "@/components/company-fields";
@@ -16,6 +16,23 @@ export function LoginForm() {
   const [company, setCompany] = useState({ ...emptyCompany });
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
+  const client = useRef<ReturnType<typeof createSupabaseBrowserClient> | null>(null);
+
+  useEffect(() => {
+    const supabase = client.current ??= createSupabaseBrowserClient();
+    // Also receives sign-in events from the tab opened by the confirmation email.
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) window.location.replace("/panel");
+    });
+    const params = new URLSearchParams(window.location.hash.slice(1));
+    const query = new URLSearchParams(window.location.search);
+    if (params.has("error") || query.has("error")) {
+      setMessage("Link potwierdzajacy jest niewazny lub wygasl. Sprobuj sie zalogowac; jesli konto nie jest potwierdzone, skontaktuj sie z biuro@tymogarage.pl.");
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+    return () => data.subscription.unsubscribe();
+  }, []);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -24,7 +41,7 @@ export function LoginForm() {
 
     try {
       const billingCompany = mode === "signup" ? validateSignup(password, confirmation, company) : null;
-      const supabase = createSupabaseBrowserClient();
+      const supabase = client.current ??= createSupabaseBrowserClient();
       const result =
         mode === "login"
           ? await supabase.auth.signInWithPassword({ email, password })
@@ -38,6 +55,7 @@ export function LoginForm() {
       if (mode === "signup" && !result.data.session) {
         setPassword("");
         setConfirmation("");
+        setAwaitingConfirmation(true);
         setMessage("Konto utworzone. Sprawdz email i potwierdz rejestracje.");
         return;
       }
@@ -49,6 +67,19 @@ export function LoginForm() {
       setIsLoading(false);
     }
   }
+
+  if (awaitingConfirmation) return (
+    <section className="mt-6 grid gap-4" aria-live="polite">
+      <h2 className="text-xl font-black">Sprawdz skrzynke e-mail</h2>
+      <p>Wyslalismy link potwierdzajacy na {email}. Sprawdz tez folder spam.</p>
+      <p>Nie rejestruj sie ponownie. Po potwierdzeniu w tej samej przegladarce przejdziesz do panelu. Jesli otworzysz mail w innej przegladarce, wroc tutaj i zaloguj sie.</p>
+      <button type="button" className="rounded-2xl bg-[#ff5a00] px-5 py-3 font-black text-white" onClick={() => {
+        setAwaitingConfirmation(false);
+        setMode("login");
+        setMessage("Zaloguj sie haslem podanym podczas rejestracji.");
+      }}>Przejdz do logowania</button>
+    </section>
+  );
 
   return (
     <form className="mt-6 grid gap-4" onSubmit={submit}>
