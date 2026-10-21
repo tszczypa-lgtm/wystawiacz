@@ -6,7 +6,7 @@
     <title>Wystawiacz Allegro</title>
     <link rel="stylesheet" href="styles.css?v=named-templates-3" />
     <link rel="stylesheet" href="title-suggestions.css?v=counter-colors" />
-    <link rel="stylesheet" href="workspace-layout.css?v=diagram-prices-5" />
+    <link rel="stylesheet" href="workspace-layout.css?v=photo-price-boxes-6" />
   </head>
   <body>
     <header class="topbar">
@@ -181,6 +181,7 @@
                 <strong id="mainPhotoStatus"></strong>
               </div>
             </div>
+            <small class="photo-typing-hint">Najedź na zdjęcie i zacznij pisać numer części.</small>
             <div class="photo-controls photo-navigation" aria-label="Przeglądanie i wybór zdjęć">
               <button id="previousPhotoButton" class="secondary-button" type="button" title="Poprzednie zdjęcie" aria-label="Poprzednie zdjęcie">&larr;<span class="photo-nav-label"> Poprzednie</span></button>
               <button id="togglePhotoButton" class="primary-button compact-button" type="button">Zaznacz zdjęcie</button>
@@ -331,7 +332,7 @@
             <select id="shippingRateInput" hidden>
               <option value="">Połącz konto, aby pobrać profile</option>
             </select>
-            <div id="shippingRateButtons" class="shipping-rate-buttons" role="group" aria-label="Moje profile wysyłki"></div>
+            <div id="shippingRateButtons" class="shipping-rate-buttons" role="group" aria-label="Profile wysyłki"></div>
             <a href="https://salescenter.allegro.com/delivery-settings" target="_blank" rel="noopener noreferrer">Edytuj cenniki w Allegro</a>
           </label>
         </div>
@@ -474,8 +475,9 @@
     <script src="own-offers.js?v=1"></script>
     <script src="description-editor.js?v=diagram-prices-5"></script>
     <script src="photo-upload.js?v=1"></script>
-    <script src="price-search.js?v=diagram-prices-5"></script>
-    <script src="app.js?v=diagram-prices-5"></script>
+    <script src="allegro-price-reader.js?v=photo-price-boxes-6"></script>
+    <script src="price-search.js?v=photo-price-boxes-6"></script>
+    <script src="app.js?v=photo-price-boxes-6"></script>
     <script src="workspace-layout.js?v=compact1"></script>
   </body>
 </html>

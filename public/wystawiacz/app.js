@@ -436,6 +436,18 @@ photoPreviewWrap.addEventListener("mousemove", (event) => {
 photoPreviewWrap.addEventListener("mouseleave", () => {
   photoPreviewWrap.classList.remove("zooming");
 });
+document.addEventListener("keydown", event => {
+  if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.key.length !== 1 || !/^[\p{L}\p{N} .\/-]$/u.test(event.key)) return;
+  if (!photoPreviewWrap.matches(":hover") || !photoPreview.getAttribute("src") || document.querySelector("dialog[open]")) return;
+  const active = document.activeElement;
+  if (active === partNumber || active?.tagName === "SELECT") return;
+  if (event.key === " ") return;
+  event.preventDefault();
+  partNumber.focus({ preventScroll: true });
+  partNumber.setSelectionRange(partNumber.value.length, partNumber.value.length);
+  partNumber.setRangeText(event.key, partNumber.selectionStart, partNumber.selectionEnd, "end");
+  partNumber.dispatchEvent(new Event("input", { bubbles: true }));
+});
 previousProductButton.addEventListener("click", () => navigateProduct(-1));
 nextProductButton.addEventListener("click", () => navigateProduct(1));
 
@@ -752,7 +764,7 @@ function resetForm() {
   responsibleProducerInput.value = "";
   responsiblePersonInput.value = "";
   safetyInformationInput.value = "";
-  if (state.shippingRates.length) shippingRateInput.value = state.shippingRates[0].id;
+  if (state.shippingRates.length) shippingRateInput.value = (state.shippingRates.find(rate => !isAllegroShippingRate(rate)) || state.shippingRates[0]).id;
   renderShippingRateButtons();
   renderAfterSalesInputs();
   suggestionPanel.classList.add("hidden");
@@ -1271,10 +1283,12 @@ async function loadShippingRates() {
   try {
     const result = await apiRequest("/api/shipping-rates");
     const selected = shippingRateInput.value;
-    state.shippingRates = (result.shippingRates || []).filter(rate => !rate.features?.isFulfillment && !rate.features?.managedByAllegro && !/one\s*fulfill?ment/i.test(rate.name || ""));
+    state.shippingRates = result.shippingRates || [];
     shippingRateInput.innerHTML = state.shippingRates.length
       ? state.shippingRates.map((rate) => `<option value="${escapeHtml(rate.id)}">${escapeHtml(fixEncoding(rate.name))}</option>`).join("")
-      : '<option value="">Brak Twoich własnych profili wysyłki</option>';
+      : '<option value="">Brak profili wysyłki</option>';
+    const own = state.shippingRates.find(rate => !isAllegroShippingRate(rate));
+    if (own) shippingRateInput.value = own.id;
     if (state.shippingRates.some(rate => rate.id === selected)) shippingRateInput.value = selected;
   } catch (error) {
     shippingRateInput.innerHTML = `<option value="">Nie udało się pobrać profili</option>`;
@@ -1283,17 +1297,26 @@ async function loadShippingRates() {
   renderShippingRateButtons();
 }
 
+function isAllegroShippingRate(rate) {
+  return Boolean(rate.features?.isFulfillment || rate.features?.managedByAllegro || /one\s*fulfill?ment/i.test(rate.name || ""));
+}
+
 function renderShippingRateButtons() {
   const container = document.getElementById("shippingRateButtons");
   if (!container) return;
   container.replaceChildren();
-  const rates = state.shippingRates.filter(rate => !rate.features?.isFulfillment && !rate.features?.managedByAllegro && !/one\s*fulfill?ment/i.test(rate.name || ""));
-  if (!rates.length) { container.textContent = shippingRateInput.options[0]?.textContent || "Brak Twoich profili wysyłki."; return; }
-  for (const rate of rates) {
-    const button = document.createElement("button"); button.type = "button"; button.className = "secondary-button"; button.textContent = fixEncoding(rate.name); button.dataset.shippingRateId = rate.id;
-    button.setAttribute("aria-pressed", String(shippingRateInput.value === rate.id));
-    button.onclick = () => { shippingRateInput.value = rate.id; shippingRateInput.dispatchEvent(new Event("change", { bubbles: true })); renderShippingRateButtons(); };
-    container.append(button);
+  for (const [kind, label] of [["own", "Twoje profile"], ["allegro", "Profile Allegro"]]) {
+    const group = document.createElement("div"); group.className = "shipping-rate-group"; group.dataset.shippingGroup = kind;
+    const heading = document.createElement("strong"); heading.textContent = label; group.append(heading);
+    const rates = state.shippingRates.filter(rate => isAllegroShippingRate(rate) === (kind === "allegro"));
+    if (!rates.length) { const empty = document.createElement("small"); empty.textContent = state.shippingRates.length ? "Brak profili w tej grupie." : shippingRateInput.options[0]?.textContent || "Brak profili."; group.append(empty); }
+    for (const rate of rates) {
+      const button = document.createElement("button"); button.type = "button"; button.className = "secondary-button"; button.textContent = fixEncoding(rate.name); button.dataset.shippingRateId = rate.id;
+      button.setAttribute("aria-pressed", String(shippingRateInput.value === rate.id));
+      button.onclick = () => { shippingRateInput.value = rate.id; shippingRateInput.dispatchEvent(new Event("change", { bubbles: true })); renderShippingRateButtons(); };
+      group.append(button);
+    }
+    container.append(group);
   }
 }
 

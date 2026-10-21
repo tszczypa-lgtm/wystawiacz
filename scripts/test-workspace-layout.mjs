@@ -117,6 +117,15 @@ try {
     renderPhotos();
   });
   await page.locator("#togglePhotoButton").click();
+  const originalNumberForPhoto = await page.locator("#partNumber").inputValue(), originalTitleForPhoto = await page.locator("#titleInput").inputValue();
+  await page.locator("#titleInput").focus();
+  await page.locator("#photoPreview").hover();
+  await page.keyboard.type("5QX");
+  assert.equal(await page.locator("#partNumber").inputValue(), originalNumberForPhoto + "5QX", "Typing over a photo starts the part-number field without clicking it");
+  assert.equal(await page.evaluate(() => document.activeElement.id), "partNumber");
+  await page.mouse.move(0, 0);
+  await page.locator("#partNumber").fill(originalNumberForPhoto);
+  await page.locator("#titleInput").fill(originalTitleForPhoto);
   await page.locator("#nextPhotoButton").click();
   await page.locator("#togglePhotoButton").click();
   await page.locator("#rotatePhotoRightButton").click();
