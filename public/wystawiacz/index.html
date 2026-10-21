@@ -6,7 +6,7 @@
     <title>Wystawiacz Allegro</title>
     <link rel="stylesheet" href="styles.css?v=named-templates-3" />
     <link rel="stylesheet" href="title-suggestions.css?v=counter-colors" />
-    <link rel="stylesheet" href="workspace-layout.css?v=approved-changes-1" />
+    <link rel="stylesheet" href="workspace-layout.css?v=compact-workspace-4" />
   </head>
   <body>
     <header class="topbar">
@@ -49,25 +49,30 @@
         </div>
         <div class="session-actions">
           <input id="sessionNameInput" class="session-name" type="text" aria-label="Nazwa sesji" placeholder="Nazwa sesji" />
-          <button class="secondary-button" id="saveSessionButton" type="button">Zapisz sesję</button>
+          <div class="session-storage-group session-file-controls" aria-label="Do pliku">
+          <strong>Do pliku</strong><small>Kopia JSON na komputerze</small>
+          <button class="secondary-button" id="saveSessionButton" type="button">Pobierz plik</button>
           <label class="secondary-button file-button" for="loadSessionInput">
-            Otwórz sesję
+            Otwórz plik
             <input id="loadSessionInput" type="file" accept=".json,application/json" />
           </label>
+          </div>
+          <div class="session-photo-controls">
           <label class="secondary-button file-button" for="relinkFolderInput">
             Wskaż folder zdjęć
             <input id="relinkFolderInput" type="file" accept="image/*" webkitdirectory directory multiple />
           </label>
           <button class="secondary-button" id="locationSettingsButton" type="button">Ustaw lokalizację</button>
+          </div>
         </div>
         <small id="sessionStatus">Folder zdjęć dla sesji nie jest jeszcze wskazany.</small>
       </section>
       </div>
 
       <section id="descriptionTemplates" class="description-templates" aria-label="Szablony opisow">
-        <strong>Szablony opisow</strong>
-        <div class="template-choose-row"><select id="descriptionTemplateSelect" aria-label="Zapisane szablony opisow"><option value="">Wczytywanie szablonow...</option></select><button id="applyDescriptionTemplate" type="button" class="secondary-button">Zastosuj wybrany</button></div>
-        <div class="template-save-row"><input id="descriptionTemplateName" type="text" maxlength="80" placeholder="Nazwa szablonu, np. Czesci sprawne" aria-label="Nazwa szablonu" /><button id="saveDescriptionTemplate" type="button" class="primary-button">Zapisz jako nowy</button><button id="overwriteDescriptionTemplate" type="button" class="secondary-button">Nadpisz wybrany</button></div>
+        <div class="template-heading"><strong>Szablony opisów</strong><button id="saveDescriptionTemplate" type="button" class="secondary-button">Zapisz</button><button id="overwriteDescriptionTemplate" type="button" class="text-button">Edytuj</button></div>
+        <div id="descriptionTemplateButtons" class="template-buttons" aria-label="Zapisane szablony opisow"></div>
+        <div id="descriptionTemplateForm" class="template-save-row" hidden><input id="descriptionTemplateName" type="text" maxlength="80" placeholder="Nazwa szablonu" aria-label="Nazwa szablonu" /><button id="confirmDescriptionTemplate" type="button" class="primary-button">Zapisz szablon</button><button id="cancelDescriptionTemplate" type="button" class="text-button">Anuluj</button><small id="descriptionTemplateFormHint"></small></div>
         <p id="descriptionTemplateStatus" role="status">Szablony sa zapisywane na Twoim koncie.</p>
         <button id="reloadDescriptionTemplates" type="button" class="text-button">Wczytaj ponownie</button>
       </section>
@@ -227,6 +232,7 @@
           <div class="title-editor-options">
             <output id="titleCharacterCount" for="titleInput" role="status" aria-live="polite">0 / 75 znaków</output>
           </div>
+          <div id="titleSideButtons" class="title-side-buttons" aria-label="Strona czesci"><small>Strona części:</small></div>
           <div class="vehicle-buttons-wrap">
             <div class="vehicle-picker-heading">
               <span>Dodaj model auta do tytułu:</span>
@@ -357,6 +363,7 @@
             </div>
             <label class="price-search-sort"><input id="priceSortLowestInput" type="checkbox" /> Allegro: od najniższej ceny</label>
             <label class="price-search-sort"><input id="priceShippingPolandInput" type="checkbox" /> Allegro: wysyłka z Polski</label>
+            <label class="price-search-sort"><input id="priceUsedInput" type="checkbox" /> Używane</label>
           </div>
           <div class="price-search-group">
             <div class="price-search-buttons">
@@ -367,9 +374,9 @@
         </div>
         <div class="pricing-final-row">
           <label class="field">
-            <span>Cena</span>
+            <span>Twoja cena sprzedaży</span>
             <div class="suffix-input">
-              <input id="priceInput" type="number" min="0" step="0.01" placeholder="uzupełni osoba wyceniająca" />
+              <input id="priceInput" type="number" min="0" step="0.01" placeholder="0,00" />
               <b>PLN</b>
             </div>
           </label>
@@ -459,16 +466,16 @@
     </div>
     <script src="web-auth.js"></script>
     <script src="title-suggestions.js?v=no-source"></script>
-    <script src="title-editor.js?v=counter-colors"></script>
+    <script src="title-editor.js?v=compact-workspace-4"></script>
     <script src="catalog-number-options.js?v=2"></script>
     <script src="catalog-link.js?v=checkbox"></script>
     <script src="session-safety.js?v=1"></script>
-    <script src="cloud-sessions.js?v=1"></script>
+    <script src="cloud-sessions.js?v=compact-workspace-4"></script>
     <script src="own-offers.js?v=1"></script>
-    <script src="description-editor.js?v=named-templates-3"></script>
+    <script src="description-editor.js?v=compact-workspace-4"></script>
     <script src="photo-upload.js?v=1"></script>
-    <script src="price-search.js?v=1"></script>
-    <script src="app.js?v=named-templates-3"></script>
+    <script src="price-search.js?v=compact-workspace-4"></script>
+    <script src="app.js?v=compact-workspace-4"></script>
     <script src="workspace-layout.js?v=compact1"></script>
   </body>
 </html>

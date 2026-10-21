@@ -39,9 +39,10 @@
     mount({ state, input, vehicleInput, selectedVehicle, titleInput, partNumberInput, notify }) {
       let template = `${titleMarker}\n\nCzęść używana 100% sprawna\n\n${marker}`;
       let savedRange = null, lastRendered = "";
-      let templates = [], loaded = false, saving = false;
-      const select = document.getElementById("descriptionTemplateSelect"), nameInput = document.getElementById("descriptionTemplateName"), status = document.getElementById("descriptionTemplateStatus");
-      const saveNew = document.getElementById("saveDescriptionTemplate"), overwrite = document.getElementById("overwriteDescriptionTemplate"), apply = document.getElementById("applyDescriptionTemplate"), reload = document.getElementById("reloadDescriptionTemplates");
+      let templates = [], snippets = [], selectedId = "", appliedId = "", loaded = false, saving = false, replacing = false, editingSnippet = "", editingSnippets = false;
+      const templateButtons = document.getElementById("descriptionTemplateButtons"), nameInput = document.getElementById("descriptionTemplateName"), status = document.getElementById("descriptionTemplateStatus");
+      const saveNew = document.getElementById("saveDescriptionTemplate"), overwrite = document.getElementById("overwriteDescriptionTemplate"), reload = document.getElementById("reloadDescriptionTemplates");
+      const templateForm = document.getElementById("descriptionTemplateForm"), confirmTemplate = document.getElementById("confirmDescriptionTemplate");
       const bar = document.createElement("div"); bar.className = "description-toolbar";
       const editor = document.createElement("div");
       editor.id = "descriptionVisualEditor"; editor.className = "formatted-description description-visual-editor";
@@ -141,23 +142,76 @@
       button("Wstaw tytul tutaj", () => insertToken("title"));
       button("Wstaw czesc + numer bez auta", () => insertToken("part"));
       button("Wstaw dane auta tutaj", () => insertToken("vehicle"));
+      const expressions = document.createElement("div"); expressions.className = "description-expressions";
+      expressions.innerHTML = '<div class="expression-heading"><strong>Moje wyrazenia</strong><button type="button" id="addDescriptionExpression">+ Wyrazenie</button><button type="button" id="editDescriptionExpressions">Edytuj</button></div><div id="descriptionExpressionButtons" class="template-buttons"></div><div id="descriptionExpressionForm" hidden><input id="descriptionExpressionName" maxlength="40" placeholder="Nazwa przycisku" aria-label="Nazwa wyrazenia"><textarea id="descriptionExpressionText" rows="2" maxlength="2000" placeholder="Tekst do wstawienia w opis" aria-label="Tresc wyrazenia"></textarea><div class="expression-actions"><button type="button" id="saveDescriptionExpression">Zapisz wyrazenie</button><button type="button" id="deleteDescriptionExpression">Usun</button><button type="button" id="cancelDescriptionExpression">Anuluj</button></div></div><small id="descriptionExpressionStatus" role="status">Ustaw kursor w opisie i kliknij wyrazenie.</small>';
+      bar.after(expressions);
+      const expressionButtons = expressions.querySelector("#descriptionExpressionButtons"), expressionForm = expressions.querySelector("#descriptionExpressionForm");
+      const expressionName = expressions.querySelector("#descriptionExpressionName"), expressionText = expressions.querySelector("#descriptionExpressionText"), expressionStatus = expressions.querySelector("#descriptionExpressionStatus");
+      function showExpressionForm(entry) {
+        editingSnippet = entry?.id || ""; expressionName.value = entry?.name || ""; expressionText.value = entry?.text || "";
+        expressionForm.hidden = false; expressions.querySelector("#deleteDescriptionExpression").hidden = !entry; expressionName.focus();
+      }
+      expressions.querySelector("#addDescriptionExpression").onclick = () => showExpressionForm();
+      expressions.querySelector("#editDescriptionExpressions").onclick = () => { editingSnippets = !editingSnippets; showSnippets(); };
+      expressions.querySelector("#cancelDescriptionExpression").onclick = () => { expressionForm.hidden = true; };
+      function showSnippets() {
+        expressionButtons.replaceChildren();
+        expressions.querySelector("#editDescriptionExpressions").setAttribute("aria-pressed", String(editingSnippets));
+        expressionStatus.textContent = editingSnippets ? "Kliknij wyrazenie, aby zmienic tekst lub je usunac." : "Ustaw kursor w opisie i kliknij wyrazenie.";
+        for (const entry of snippets) {
+          const b = document.createElement("button"); b.type = "button"; b.textContent = entry.name; b.title = entry.text; b.dataset.expressionId = entry.id;
+          b.addEventListener("mousedown", e => e.preventDefault());
+          b.onclick = () => {
+            if (editingSnippets) { showExpressionForm(entry); return; }
+            const range = restore(); range.deleteContents();
+            const fragment = document.createDocumentFragment();
+            for (const [i, line] of entry.text.split("\n").entries()) { if (i) fragment.append(document.createElement("br")); fragment.append(document.createTextNode(line)); }
+            const last = fragment.lastChild; range.insertNode(fragment); range.setStartAfter(last); range.collapse(true);
+            const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); commit();
+          };
+          b.disabled = !loaded || saving; expressionButtons.append(b);
+        }
+      }
+      async function saveExpression(remove = false) {
+        if (!loaded || saving) return;
+        const name = expressionName.value.trim(), text = expressionText.value.trim();
+        if (!remove && (!name || !text || /\{\{(?:AUTO|TYTUL|CZESC)\}\}/.test(text))) { expressionStatus.textContent = "Podaj nazwe i zwykly tekst (bez blokow automatycznych)."; return; }
+        if (remove && !window.confirm("Usunac ten przycisk wyrazenia?")) return;
+        const entry = { id: editingSnippet || crypto.randomUUID(), name, text };
+        const next = remove ? snippets.filter(s => s.id !== editingSnippet) : editingSnippet ? snippets.map(s => s.id === editingSnippet ? entry : s) : [...snippets, entry];
+        if (next.length > 30) { expressionStatus.textContent = "Mozesz zapisac do 30 wyrazen."; return; }
+        const result = await persist(templates, next, selectedId, expressionStatus);
+        if (result) { snippets = next; expressionForm.hidden = true; editingSnippets = false; showSnippets(); expressionStatus.textContent = remove ? "Usunieto wyrazenie." : "Zapisano wyrazenie na Twoim koncie."; }
+      }
+      expressions.querySelector("#saveDescriptionExpression").onclick = () => saveExpression();
+      expressions.querySelector("#deleteDescriptionExpression").onclick = () => saveExpression(true);
       async function request(method, body) {
         const token = await window.getWystawiaczToken();
         const result = await fetch("/api/workspace/preferences", { method, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
         const data = await result.json(); if (!result.ok) throw new Error(data.message); return data;
       }
       function controls() {
-        saveNew.disabled = overwrite.disabled = apply.disabled = !loaded || saving;
-        overwrite.disabled ||= !select.value; apply.disabled ||= !select.value; reload.disabled = saving;
+        saveNew.disabled = confirmTemplate.disabled = !loaded || saving;
+        overwrite.disabled = !loaded || saving || !selectedId; reload.disabled = saving;
+        templateButtons.querySelectorAll("button").forEach(b => { b.disabled = !loaded || saving; });
+        expressions.querySelectorAll("button").forEach(b => { b.disabled = !loaded || saving; });
       }
-      function showTemplates(selectedId) {
-        select.replaceChildren();
-        const empty = document.createElement("option"); empty.value = ""; empty.textContent = templates.length ? "Wybierz szablon" : "Brak zapisanych szablonow"; select.append(empty);
-        for (const entry of templates) { const option = document.createElement("option"); option.value = entry.id; option.textContent = entry.name; select.append(option); }
-        select.value = selectedId || ""; const current = templates.find(t => t.id === select.value);
-        nameInput.value = current?.name || ""; if (current) template = current.text; controls();
+      function showTemplates(id) {
+        selectedId = templates.some(t => t.id === id) ? id : ""; templateButtons.replaceChildren();
+        if (!templates.length) templateButtons.textContent = "Brak szablonow. Gotowy opis zapiszesz przyciskiem Zapisz.";
+        for (const entry of templates) {
+          const b = document.createElement("button"); b.type = "button"; b.textContent = entry.name; b.dataset.templateId = entry.id;
+          b.setAttribute("aria-pressed", String(entry.id === selectedId)); b.title = "Wstaw ten szablon do opisu";
+          b.onclick = () => {
+            if (input.value !== entry.text && state.descriptionManuallyEdited && !window.confirm("Zastapic obecny opis szablonem?")) return;
+            template = entry.text; appliedId = entry.id; state.descriptionText = input.value = template; state.descriptionFullLayout = true;
+            state.descriptionManuallyEdited = true; state.vehicleDescriptionBlock = null; refresh(); showTemplates(entry.id);
+            input.dispatchEvent(new Event("input", { bubbles: true })); status.textContent = `Wybrano: ${entry.name}.`;
+          };
+          templateButtons.append(b);
+        }
+        const current = templates.find(t => t.id === selectedId); if (current) template = current.text; controls();
       }
-      select.onchange = () => { const selected = templates.find(t => t.id === select.value); nameInput.value = selected?.name || ""; controls(); };
       async function loadTemplates() {
         loaded = false; controls(); status.textContent = "Wczytywanie szablonow...";
         try {
@@ -165,36 +219,55 @@
           let saved; try { saved = JSON.parse(raw); } catch {}
           if (saved?.format === "wystawiacz-description-templates-v3" && Array.isArray(saved.templates)) {
             templates = saved.templates.filter(t => t && typeof t.id === "string" && typeof t.name === "string" && typeof t.text === "string");
+            snippets = Array.isArray(saved.snippets) ? saved.snippets.filter(s => s && typeof s.id === "string" && typeof s.name === "string" && typeof s.text === "string") : [];
           } else if (typeof raw === "string") {
             templates = [{ id: "00000000-0000-4000-8000-000000000001", name: "Moj dotychczasowy szablon", text: saved?.format === "wystawiacz-description-v2" && typeof saved.text === "string" ? saved.text : `${titleMarker}\n\n${raw}` }];
           } else templates = [];
-          loaded = true; showTemplates(saved?.selectedId || templates[0]?.id);
+          loaded = true; showTemplates(saved?.selectedId || templates[0]?.id); showSnippets();
           status.textContent = templates.length ? `Wczytano ${templates.length} szablonow z Twojego konta.` : "Nazwij gotowy opis i zapisz pierwszy szablon.";
         } catch (error) { status.textContent = `Nie wczytano szablonow: ${error.message} Nie nadpisujemy zapisanych danych.`; }
+      }
+      async function persist(nextTemplates, nextSnippets, nextId, message) {
+        saving = true; controls(); message.textContent = "Zapisywanie...";
+        try {
+          await request("PUT", { descriptionTemplate: JSON.stringify({ format: "wystawiacz-description-templates-v3", templates: nextTemplates, snippets: nextSnippets, selectedId: nextId || null }) });
+          return true;
+        } catch (error) { message.textContent = `Nie zapisano: ${error.message}`; notify(message.textContent); return false; }
+        finally { saving = false; controls(); }
+      }
+      function openTemplateForm(replace) {
+        replacing = replace; const current = templates.find(t => t.id === selectedId);
+        nameInput.value = replace ? current?.name || "" : ""; templateForm.hidden = false;
+        document.getElementById("descriptionTemplateFormHint").textContent = replace ? "Popraw opis w edytorze ponizej, potem zapisz tutaj. Zastapisz wybrany szablon." : "Zapiszesz obecny opis jako nowy szablon.";
+        nameInput.focus();
       }
       async function saveTemplate(replace) {
         if (!loaded || saving) return;
         const name = nameInput.value.trim(); if (!name) { nameInput.focus(); status.textContent = "Wpisz nazwe szablonu."; return; }
-        const existing = templates.find(t => t.id === select.value);
+        const existing = templates.find(t => t.id === selectedId);
         if (replace && (!existing || !window.confirm(`Nadpisac szablon: ${existing.name}?`))) return;
         const entry = { id: replace ? existing.id : crypto.randomUUID(), name, text: input.value };
         const next = replace ? templates.map(t => t.id === entry.id ? entry : t) : [...templates, entry];
-        saving = true; controls(); status.textContent = "Zapisywanie...";
-        try {
-          await request("PUT", { descriptionTemplate: JSON.stringify({ format: "wystawiacz-description-templates-v3", templates: next, selectedId: entry.id }) });
-          templates = next; template = entry.text; showTemplates(entry.id); status.textContent = `Zapisano szablon: ${name}.`; notify(status.textContent);
-        } catch (error) { status.textContent = `Nie zapisano: ${error.message}`; notify(status.textContent); }
-        finally { saving = false; controls(); }
+        if (next.length > 20) { status.textContent = "Mozesz zapisac do 20 szablonow."; return; }
+        if (await persist(next, snippets, entry.id, status)) {
+          templates = next; template = entry.text; appliedId = entry.id; showTemplates(entry.id); templateForm.hidden = true;
+          status.textContent = `Zapisano szablon: ${name}.`; notify(status.textContent);
+        }
       }
-      saveNew.onclick = () => saveTemplate(false); overwrite.onclick = () => saveTemplate(true); reload.onclick = loadTemplates;
-      apply.onclick = () => {
-        const selected = templates.find(t => t.id === select.value); if (!selected) return;
-        if (input.value && !window.confirm("Zastapic caly opis Twoim szablonem?")) return;
-        template = selected.text;
-        state.descriptionText = input.value = template; state.descriptionFullLayout = true;
-        state.descriptionManuallyEdited = true; state.vehicleDescriptionBlock = null; refresh();
-        status.textContent = `Zastosowano: ${selected.name}.`;
+      saveNew.onclick = () => openTemplateForm(false);
+      overwrite.onclick = () => {
+        const current = templates.find(t => t.id === selectedId); if (!current) return;
+        if (appliedId !== selectedId && input.value !== current.text) {
+          if (!window.confirm("Otworzyc zapisany szablon do edycji? Obecny opis zostanie zastapiony.")) return;
+          state.descriptionText = input.value = current.text; state.descriptionFullLayout = true; state.descriptionManuallyEdited = true; state.vehicleDescriptionBlock = null;
+          refresh(); input.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        appliedId = current.id; openTemplateForm(true);
       };
+      reload.onclick = loadTemplates;
+      confirmTemplate.onclick = () => saveTemplate(replacing);
+      nameInput.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); void saveTemplate(replacing); } });
+      document.getElementById("cancelDescriptionTemplate").onclick = () => { templateForm.hidden = true; };
       void loadTemplates();
       vehicleInput.setAttribute("aria-description", "Pelna nazwa auta do automatycznego bloku w opisie");
       function replaceVehicle(vehicle) {

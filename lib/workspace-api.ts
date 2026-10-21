@@ -22,14 +22,22 @@ export async function handleWorkspaceApi(request: Request, env: AccountEnv) {
       let template;
       try { template = JSON.parse(templateText); } catch { /* Legacy templates are plain text. */ }
       if (template?.format === "wystawiacz-description-templates-v3") {
-        if (!Array.isArray(template.templates) || template.templates.length > 20 || template.templates.length < 1) return reply({ message: "Zapisz od 1 do 20 szablonow." }, 400);
+        if (!Array.isArray(template.templates) || template.templates.length > 20) return reply({ message: "Mozesz zapisac do 20 szablonow." }, 400);
         const ids = new Set();
         for (const entry of template.templates) {
           if (!entry || !uuid.test(entry.id) || ids.has(entry.id) || typeof entry.name !== "string" || !entry.name.trim() || entry.name.length > 80 || typeof entry.text !== "string") return reply({ message: "Nieprawidlowa nazwa lub tresc szablonu." }, 400);
           ids.add(entry.id);
           if (["{{AUTO}}", "{{TYTUL}}", "{{CZESC}}"].some(marker => entry.text.split(marker).length > 2)) return reply({ message: "W szablonie kazdy blok automatyczny moze wystapic tylko raz." }, 400);
         }
-        if (!ids.has(template.selectedId)) return reply({ message: "Wybierz zapisany szablon." }, 400);
+        if (template.templates.length ? !ids.has(template.selectedId) : template.selectedId !== null) return reply({ message: "Wybierz zapisany szablon." }, 400);
+        if (template.snippets !== undefined) {
+          if (!Array.isArray(template.snippets) || template.snippets.length > 30) return reply({ message: "Mozesz zapisac do 30 wyrazen." }, 400);
+          const snippetIds = new Set();
+          for (const entry of template.snippets) {
+            if (!entry || !uuid.test(entry.id) || snippetIds.has(entry.id) || typeof entry.name !== "string" || !entry.name.trim() || entry.name.length > 40 || typeof entry.text !== "string" || !entry.text.trim() || entry.text.length > 2000 || /\{\{(?:AUTO|TYTUL|CZESC)\}\}/.test(entry.text)) return reply({ message: "Nieprawidlowe wyrazenie: podaj nazwe i zwykly tekst do 2000 znakow." }, 400);
+            snippetIds.add(entry.id);
+          }
+        }
       } else if (template?.format === "wystawiacz-description-v2") {
         if (typeof template.text !== "string") return reply({ message: "Brak tekstu szablonu." }, 400);
         templateText = template.text;

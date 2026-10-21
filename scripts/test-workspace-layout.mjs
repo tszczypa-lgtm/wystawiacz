@@ -36,7 +36,7 @@ try {
   assert.equal(await page.locator(".photo-preview .photo-rotate").count(), 2);
   assert.equal(await page.locator(".photo-navigation #mainPhotoButton").count(), 1);
   assert.equal(await page.locator("#vehiclesDialog").isVisible(), false);
-  assert.ok((await page.locator(".session-card").boundingBox()).height < 125);
+  assert.ok((await page.locator(".session-card").boundingBox()).height < 300, "Two visible storage groups stay compact");
   const accountBox = await page.locator(".connection-card").boundingBox();
   const sessionBox = await page.locator(".session-card").boundingBox();
   assert.equal(accountBox.y, sessionBox.y, "Account and session sit side by side on desktop");

@@ -42,6 +42,31 @@
       refresh();
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
+    const sides = document.getElementById("titleSideButtons");
+    let hasCaret = false;
+    input.addEventListener("focus", () => { hasCaret = true; });
+    for (const side of ["przód", "tył", "lewy", "prawy", "lewy przód", "prawy przód", "lewy tył", "prawy tył"]) {
+      const button = document.createElement("button"); button.type = "button"; button.textContent = side;
+      button.addEventListener("mousedown", event => event.preventDefault());
+      button.onclick = () => {
+        let start = input.selectionStart, end = input.selectionEnd;
+        if (!hasCaret || start === end && end === input.value.length) {
+          const part = document.getElementById("partNumber")?.value.trim();
+          start = end = part && input.value.endsWith(part) ? input.value.length - part.length : input.value.length;
+          const existing = [...input.value.matchAll(/(?<![\p{L}\p{N}])(?:(?:lewy|prawy)\s+(?:prz[oó]d|ty[lł])|(?:prz[oó]d|ty[lł])\s+(?:lewy|prawy)|prz[oó]d|ty[lł]|lewy|prawy)(?![\p{L}\p{N}])/giu)];
+          if (existing.length === 1) { start = existing[0].index; end = start + existing[0][0].length; }
+        }
+        const before = input.value.slice(0, start), after = input.value.slice(end);
+        const prefix = before && !/\s$/.test(before) ? " " : "";
+        const suffix = after && !/^\s/.test(after) ? " " : "";
+        input.setRangeText(prefix + side + suffix, start, end, "select");
+        const selectedStart = start + prefix.length;
+        input.setSelectionRange(selectedStart, selectedStart + side.length);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.focus(); hasCaret = true;
+      };
+      sides?.append(button);
+    }
     refresh();
     return { refresh };
   }

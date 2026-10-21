@@ -90,19 +90,59 @@
 .batch-toolbar, .cloud-session-controls, .description-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
 .batch-toolbar button, .cloud-session-controls button, .description-toolbar button, .own-offers-panel button, .cloud-session-list button { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: #fff; color: var(--ink); cursor: pointer; font: inherit; font-size: 12px; }
 .cloud-session-controls label { font-size: 12px; }
-.cloud-session-controls { position: relative; display: block; margin: 0; }
-.cloud-session-controls summary { padding: 8px 9px; font-size: 11px; border: 1px solid var(--line); border-radius: 8px; background: #fff; cursor: pointer; }
-.cloud-session-controls > div { position: absolute; z-index: 5; top: 100%; right: 0; width: 240px; padding: 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px #14213d22; }
-.cloud-session-controls button { margin-top: 8px; }
+.workspace-utilities .session-actions { display: grid; grid-template-columns: 1fr 1fr; align-items: stretch; }
+.workspace-utilities .session-name { grid-column: 1 / -1; width: 100%; padding: 6px 9px; }
+.session-storage-group { display: flex; flex-wrap: wrap; align-content: start; align-items: center; gap: 5px; margin: 0; padding: 8px; background: #fff; border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+.session-storage-group > strong { font-size: 12px; }
+.session-storage-group > small { width: 100%; color: var(--muted); }
+.session-storage-group button, .session-storage-group .file-button { margin: 0; width: auto; }
+.session-storage-group label:has(input[type="checkbox"]) { display: flex; gap: 5px; align-items: center; width: 100%; margin-top: 3px; font-size: 11px; }
+.session-photo-controls { display: flex; gap: 6px; flex-wrap: wrap; grid-column: 1 / -1; }
+.workspace-utilities .session-actions .secondary-button, .cloud-session-controls button { font-size: 11px; padding: 6px 8px; }
 .cloud-session-controls input, .product-select input { width: auto; accent-color: var(--orange); }
 .product-card { position: relative; padding-left: 40px; }
 .product-select { position: absolute; top: 18px; left: 12px; }
 .own-offers-panel { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
 .own-offers-panel.hidden { display: none; }
 .own-offers-panel button { text-align: left; }
-.price-search-table { width: 100%; display: grid; gap: 6px; }
-.price-search-row { display: grid; grid-template-columns: minmax(65px,.6fr) 1fr 1fr; gap: 8px; align-items: center; font-size: 12px; }
-.price-search-row button { padding: 8px; }
+.price-search-table { width: 100%; max-width: 660px; display: grid; gap: 4px; }
+.price-search-row { display: grid; grid-template-columns: 70px 88px 84px minmax(0,1fr); gap: 6px; align-items: center; font-size: 11px; }
+.price-search-row button { padding: 6px 8px; width: auto; min-height: 30px; font-size: 11px; }
+.price-brand { display: inline-flex; justify-content: center; align-items: center; min-height: 28px; border-radius: 6px; background: #edf0f4; letter-spacing: -.3px; font-size: 13px; }
+.price-brand-allegro { color: #e44d00; background: #fff0e8; }
+.price-brand-ovoko { color: #30623d; background: #e7f2e6; }
+.price-brand-otomoto { color: #cc3039; background: #ffedef; font-size: 11px; }
+.price-brand-olx { color: #004d50; background: #d6f5f1; }
+.price-brand-google { color: #3268c4; background: #eef4ff; }
+.price-site-filters { display: flex; flex-wrap: wrap; gap: 5px 12px; min-width: 0; }
+.price-site-filters .price-search-sort, .price-site-filters small { font-size: 10px; }
+.price-comparison-hint { flex-basis: 100%; max-width: 660px; font-size: 11px; color: var(--muted); }
+.pricing-final-row { max-width: 320px; padding: 14px; margin: 14px 0 18px; border: 2px solid var(--orange); border-radius: 12px; background: #fff7ed; }
+.pricing-final-row .field > span { color: #913900; font-weight: 700; }
+.pricing-final-row input { font-size: 25px; font-weight: 700; background: #fff; }
+.description-templates { padding: 10px 12px; margin-bottom: 14px; }
+.template-heading, .expression-heading { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; }
+.template-heading strong, .expression-heading strong { font-size: 12px; margin-right: 6px; }
+.template-heading button, .template-buttons button, .expression-heading button, .expression-actions button { border: 1px solid var(--line); background: #fff; border-radius: 7px; padding: 6px 10px; font: inherit; font-size: 11px; color: var(--ink); cursor: pointer; width: auto; }
+.template-heading #saveDescriptionTemplate { border-color: var(--orange); color: var(--orange-dark); }
+.template-buttons { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 7px; font-size: 11px; color: var(--muted); }
+.template-buttons button[aria-pressed="true"], .expression-heading button[aria-pressed="true"] { border-color: var(--orange); color: var(--orange-dark); background: #fff3e8; }
+.description-templates #descriptionTemplateStatus { display: inline; margin: 5px 8px 0 0; font-size: 10px; }
+.description-templates #reloadDescriptionTemplates { padding: 3px; margin-top: 3px; font-size: 10px; width: auto; }
+.description-templates .template-save-row { margin: 8px 0; gap: 6px; }
+.description-templates .template-save-row input { min-width: 120px; padding: 6px 8px; font-size: 12px; }
+.description-templates .template-save-row button { padding: 7px 9px; font-size: 11px; }
+.template-save-row small { flex-basis: 100%; font-size: 11px; }
+.description-expressions { padding: 8px 0; border-top: 1px solid var(--line); margin-bottom: 8px; }
+.description-expressions > small { display: block; font-size: 10px; color: var(--muted); margin-top: 5px; }
+#descriptionExpressionForm { display: grid; gap: 6px; margin: 8px 0; }
+#descriptionExpressionForm input, #descriptionExpressionForm textarea { width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 7px; padding: 7px; font: inherit; font-size: 12px; }
+.expression-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.title-side-buttons { display: flex; flex-wrap: wrap; gap: 5px; margin: 4px 0 14px; align-items: center; }
+.title-side-buttons small { width: 100%; color: var(--muted); font-size: 11px; }
+.title-side-buttons button { width: auto; border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 11px; background: #fff; color: var(--ink); cursor: pointer; }
+.title-side-buttons button:hover, .template-buttons button:hover { border-color: var(--orange); background: #fff7ed; }
+#descriptionTemplateForm[hidden], #descriptionExpressionForm[hidden] { display: none; }
 .after-sales-row { gap: 8px; }
 .after-sales-row .field span { font-size: 11px; }
 .after-sales-row select { padding: 8px; font-size: 12px; }
@@ -118,6 +158,9 @@
 dialog:has(.cloud-session-list) { width: min(720px,calc(100% - 32px)); max-height: 80vh; padding: 20px; border: 1px solid var(--line); border-radius: 14px; }
 #vehiclesDialog .vehicle-chip button { margin-left: 10px; font-size: 12px; }
 @media (max-width: 700px) {
+  .price-search-row { grid-template-columns: 60px 82px 78px; }
+  .price-site-filters { grid-column: 2 / -1; }
+  .workspace-utilities .session-actions { grid-template-columns: 1fr; }
   .listing-details { grid-template-columns: 1fr; }
   .workspace-utilities { grid-template-columns: 1fr; gap: 8px; margin-bottom: 20px; }
   .workspace-grid { padding: 7px; gap: 12px; border-radius: 16px; }

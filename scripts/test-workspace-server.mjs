@@ -86,6 +86,12 @@ try {
   assert.equal((await (await handleWorkspaceApi(request("/api/workspace/preferences"), env)).json()).descriptionTemplate, JSON.stringify(templates));
   assert.equal((await handleWorkspaceApi(request("/api/workspace/preferences", "PUT", { descriptionTemplate: JSON.stringify({ ...templates, selectedId: "invalid" }) }), env)).status, 400);
   assert.equal((await handleWorkspaceApi(request("/api/workspace/preferences", "PUT", { descriptionTemplate: JSON.stringify({ ...templates, templates: [templates.templates[0], templates.templates[0]] }) }), env)).status, 400);
+  const expressions = { format: templates.format, templates: [], selectedId: null, snippets: [{ id: owner, name: "Sprawdzone", text: "Czesc sprawdzona na aucie." }] };
+  assert.equal((await handleWorkspaceApi(request("/api/workspace/preferences", "PUT", { descriptionTemplate: JSON.stringify(expressions) }), env)).status, 200);
+  assert.equal((await (await handleWorkspaceApi(request("/api/workspace/preferences"), env)).json()).descriptionTemplate, JSON.stringify(expressions));
+  for (const snippets of [[...expressions.snippets, ...expressions.snippets], [{ ...expressions.snippets[0], text: "{{AUTO}}" }], [{ ...expressions.snippets[0], name: "" }], [{ ...expressions.snippets[0], text: "x".repeat(2001) }]]) {
+    assert.equal((await handleWorkspaceApi(request("/api/workspace/preferences", "PUT", { descriptionTemplate: JSON.stringify({ ...expressions, snippets }) }), env)).status, 400);
+  }
   const payload = { id: productId, revision: 1, payload: { format: "wystawiacz-allegro-session", products: [{ photoNames: [], image: "not stored" }] } };
   assert.equal((await handleWorkspaceApi(request("/api/workspace/session", "PUT", payload, { Origin: "https://evil.test" }), env)).status, 403);
   assert.equal((await handleWorkspaceApi(request("/api/workspace/session", "PUT", payload), env)).status, 409);

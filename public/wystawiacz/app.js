@@ -106,6 +106,9 @@ try { priceSortLowestInput.checked = localStorage.getItem(priceSortStorageKey) =
 const priceShippingPolandInput = document.querySelector("#priceShippingPolandInput");
 const priceShippingStorageKey = "wystawiacz-price-shipping-poland";
 try { priceShippingPolandInput.checked = localStorage.getItem(priceShippingStorageKey) === "true"; } catch {}
+const priceUsedInput = document.querySelector("#priceUsedInput");
+try { priceUsedInput.checked = localStorage.getItem("wystawiacz-price-used") === "true"; } catch {}
+priceUsedInput.addEventListener("change", () => { try { localStorage.setItem("wystawiacz-price-used", String(priceUsedInput.checked)); } catch {} });
 const productList = document.querySelector("#productList");
 const emptyState = document.querySelector("#emptyState");
 const toast = document.querySelector("#toast");
@@ -395,6 +398,7 @@ function openAllegroSearch(query) {
   const url = new URL("https://allegro.pl/listing");
   if (priceSortLowestInput.checked) url.searchParams.set("order", "p");
   if (priceShippingPolandInput.checked) url.searchParams.set("miejsce-wysylki", "polska");
+  if (priceUsedInput.checked) url.searchParams.set("stan", "używane");
   url.searchParams.set("string", "");
   openSearch(url.href, query);
 }
