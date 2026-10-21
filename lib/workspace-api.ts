@@ -17,7 +17,15 @@ export async function handleWorkspaceApi(request: Request, env: AccountEnv) {
       const raw = await request.text();
       if (raw.length > 50000) return reply({ message: "Szablon jest zbyt dlugi." }, 413);
       const input = JSON.parse(raw);
-      if (typeof input.descriptionTemplate !== "string" || input.descriptionTemplate.length > 20000 || input.descriptionTemplate.split("{{AUTO}}").length > 2) return reply({ message: "Nieprawidlowy szablon. Jeden blok auta, maksymalnie 20000 znakow." }, 400);
+      if (typeof input.descriptionTemplate !== "string" || input.descriptionTemplate.length > 20000) return reply({ message: "Nieprawidlowy szablon. Maksymalnie 20000 znakow." }, 400);
+      let templateText = input.descriptionTemplate;
+      let template;
+      try { template = JSON.parse(templateText); } catch { /* Legacy templates are plain text. */ }
+      if (template?.format === "wystawiacz-description-v2") {
+        if (typeof template.text !== "string") return reply({ message: "Brak tekstu szablonu." }, 400);
+        templateText = template.text;
+      }
+      if (templateText.split("{{AUTO}}").length > 2 || templateText.split("{{TYTUL}}").length > 2) return reply({ message: "Szablon moze miec jeden blok auta i jeden tytul." }, 400);
       await context.db("workspace_preferences?on_conflict=owner_id", { method: "POST", headers: { Prefer: "resolution=merge-duplicates" }, body: JSON.stringify({ owner_id: context.user.id, description_template: input.descriptionTemplate }) });
       return reply({ ok: true });
     }

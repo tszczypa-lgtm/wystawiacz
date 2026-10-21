@@ -15,13 +15,20 @@ let connection = await sealConnection({ clientId: "app", accessToken: "seller-to
 const env = { SUPABASE_SERVICE_ROLE_KEY: "secret", ALLEGRO_ENCRYPTION_KEY: Buffer.from(keyBytes).toString("base64"), ALLEGRO_CLIENT_ID: "app", ALLEGRO_CLIENT_SECRET: "secret", ALLEGRO_REDIRECT_URI: "https://example.test/api/allegro/auth/callback", PUBLICATION_DEDUP_ENABLED: "true", ALLEGRO_PAIRING_ENFORCED: "true" };
 const request = (path, method = "GET", payload, extra = {}) => new Request(`https://example.test${path}`, { method, headers: { Authorization: "Bearer user", Origin: "https://example.test", "Content-Type": "application/json", ...extra }, body: payload ? JSON.stringify(payload) : undefined });
 const ledger = new Map(), calls = [];
-let creationCount = 0, rejection = false, uncertain = false, recovered = false;
+let creationCount = 0, rejection = false, uncertain = false, recovered = false, storedDescriptionTemplate = null;
 const previousFetch = globalThis.fetch;
 globalThis.fetch = async (input, options = {}) => {
   const url = String(input); calls.push({ url, options });
   if (url.endsWith("/auth/v1/user")) return Response.json({ id: owner, email_confirmed_at: "2026-01-01" });
   if (url.includes("/rest/v1/customer_accounts")) return Response.json([{ owner_id: owner, suspended: false }]);
   if (url.includes("/rest/v1/account_admins")) return Response.json([]);
+  if (url.includes("/rest/v1/workspace_preferences")) {
+    if (options.method === "POST") {
+      const body = JSON.parse(options.body); assert.equal(body.owner_id, owner); storedDescriptionTemplate = body.description_template;
+      return Response.json({});
+    }
+    return Response.json([{ description_template: storedDescriptionTemplate }]);
+  }
   if (url.includes("/rest/v1/workspace_sessions") || url.includes("/rest/v1/workspace_session_versions")) {
     assert.ok(url.includes(`owner_id=eq.${owner}`)); assert.ok(!url.includes(`owner_id=eq.${other}`)); return Response.json([]);
   }
@@ -65,6 +72,12 @@ try {
   assert.equal((await handleWorkspaceApi(request("/api/workspace/sessions?owner_id=" + other), env)).status, 200);
   assert.equal((await handleWorkspaceApi(request(`/api/workspace/session?id=${productId}`), env)).status, 404);
   assert.equal((await handleWorkspaceApi(request("/api/workspace/session?id=bad"), env)).status, 400);
+  const visualTemplate = JSON.stringify({ format: "wystawiacz-description-v2", text: "Uwagi\n{{TYTUL}}\n{{AUTO}}" });
+  assert.equal((await handleWorkspaceApi(request("/api/workspace/preferences", "PUT", { descriptionTemplate: visualTemplate }), env)).status, 200);
+  assert.equal((await (await handleWorkspaceApi(request("/api/workspace/preferences"), env)).json()).descriptionTemplate, visualTemplate);
+  const duplicateTitle = JSON.stringify({ format: "wystawiacz-description-v2", text: "{{TYTUL}}\n{{TYTUL}}" });
+  assert.equal((await handleWorkspaceApi(request("/api/workspace/preferences", "PUT", { descriptionTemplate: duplicateTitle }), env)).status, 400);
+  assert.equal((await handleWorkspaceApi(request("/api/workspace/preferences", "PUT", { descriptionTemplate: "Stary opis\n{{AUTO}}" }), env)).status, 200);
   const payload = { id: productId, revision: 1, payload: { format: "wystawiacz-allegro-session", products: [{ photoNames: [], image: "not stored" }] } };
   assert.equal((await handleWorkspaceApi(request("/api/workspace/session", "PUT", payload, { Origin: "https://evil.test" }), env)).status, 403);
   assert.equal((await handleWorkspaceApi(request("/api/workspace/session", "PUT", payload), env)).status, 409);

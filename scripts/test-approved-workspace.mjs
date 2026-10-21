@@ -4,13 +4,16 @@ import { createServer } from "node:http";
 import { pathToFileURL, fileURLToPath } from "node:url";
 const { chromium } = await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href);
 const root = new URL("../public/wystawiacz/", import.meta.url);
-let saved, conflict = false, writes = 0;
+let saved, conflict = false, writes = 0, savedTemplate = null;
 const server = createServer(async (req, res) => {
   const path = new URL(req.url, "http://test.local").pathname;
   if (path.startsWith("/api/")) {
     res.setHeader("Content-Type", "application/json");
     let data = { connected: false, build: "2026-06-02.35", categories: [], parameters: [] };
-    if (path === "/api/workspace/preferences") data = { descriptionTemplate: null };
+    if (path === "/api/workspace/preferences") {
+      if (req.method === "PUT") { let raw = ""; for await (const chunk of req) raw += chunk; savedTemplate = JSON.parse(raw).descriptionTemplate; }
+      data = { descriptionTemplate: savedTemplate };
+    }
     if (path === "/api/workspace/session" && req.method === "PUT") {
       let raw = ""; for await (const chunk of req) raw += chunk;
       writes++;
@@ -65,15 +68,69 @@ try {
   await page.evaluate(() => { state.products = []; resetForm(); state.vehicles = [{ id: "a", manufacturer: "BMW", short: "BMW F40", full: "BMW F40\n2019\n2.0 diesel" }, { id: "b", manufacturer: "Volkswagen", short: "VW Golf", full: "VW Golf\n2020\n1.6 TDI" }]; renderVehicles(); });
   await page.locator("#titleInput").fill("Pompa ABS");
   await page.locator('[data-use-vehicle-id="a"]').click();
-  const original = await page.locator("#descriptionTextInput").inputValue();
-  await page.locator("#descriptionTextInput").fill(original + "\n\nMoje uwagi bez zmian");
+  assert.equal(await page.locator("#descriptionTextInput").isVisible(), false);
+  assert.equal(await page.locator("#descriptionPreviewTitle").count(), 0);
+  await page.locator("#descriptionVisualEditor").click();
+  await page.locator("#descriptionVisualEditor").focus();
+  await page.evaluate(() => { const e = document.querySelector("#descriptionVisualEditor"), range = document.createRange(); range.selectNodeContents(e); range.collapse(false); getSelection().removeAllRanges(); getSelection().addRange(range); });
+  await page.keyboard.press("Enter");
+  await page.keyboard.insertText("Moje uwagi bez zmian");
+  assert.ok((await page.locator("#descriptionTextInput").inputValue()).includes("Moje uwagi bez zmian"));
   await page.locator('[data-use-vehicle-id="b"]').click();
-  const changed = await page.locator("#descriptionTextInput").inputValue();
-  assert.ok(changed.includes("VW Golf\n2020\n1.6 TDI")); assert.ok(changed.includes("Moje uwagi bez zmian")); assert.ok(!changed.includes("BMW F40"));
-  await page.locator("#descriptionTextInput").fill('**Pompa ABS**\n- Sprawna\n<script>window.hacked=2</script>');
+  const changed = await page.locator("#descriptionVisualEditor").innerText();
+  assert.ok(changed.includes("VW Golf\n2020\n1.6 TDI")); assert.ok(changed.includes("Moje uwagi bez zmian")); assert.ok(!changed.includes("2019"));
+  await page.locator("#descriptionVisualEditor").fill("Pompa ABS");
+  await page.keyboard.press("Control+a");
+  await page.getByRole("button", { name: "Pogrubienie", exact: true }).click();
   assert.equal(await page.locator(".formatted-description b").textContent(), "Pompa ABS");
+  await page.locator("#descriptionVisualEditor").fill("Sprawna");
+  await page.getByRole("button", { name: "Lista", exact: true }).click();
   assert.equal(await page.locator(".formatted-description li").textContent(), "Sprawna");
+  await page.locator("#descriptionVisualEditor").fill('<script>window.hacked=2</script>');
+  assert.equal(await page.locator("#descriptionVisualEditor").isVisible(), true);
   assert.equal(await page.locator(".formatted-description script").count(), 0);
+  assert.equal(await page.evaluate(() => window.hacked), undefined);
+  await page.locator("#descriptionVisualEditor").fill("Wstep\nKoniec");
+  await page.evaluate(() => {
+    const editor = document.querySelector("#descriptionVisualEditor"), walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT), node = walker.nextNode();
+    const range = document.createRange(); range.setStart(node, node.textContent.length); range.collapse(true);
+    const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+    editor.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    document.dispatchEvent(new Event("selectionchange"));
+  });
+  await page.getByRole("button", { name: "Wstaw tytul tutaj", exact: true }).click();
+  assert.equal(await page.locator('[data-description-token="title"]').count(), 1);
+  const positioned = await page.locator("#descriptionTextInput").inputValue();
+  assert.ok(positioned.indexOf("{{TYTUL}}") > positioned.indexOf("Wstep"));
+  await page.getByRole("button", { name: "Wstaw tytul tutaj", exact: true }).click();
+  assert.equal(await page.locator('[data-description-token="title"]').count(), 1, "Moving the title must not duplicate it");
+  await page.locator("#titleInput").fill("Inny tytul");
+  assert.equal(await page.locator('[data-description-token="title"]').textContent(), "INNY TYTUL");
+  await page.locator("#descriptionVisualEditor").click();
+  await page.keyboard.press("Control+End");
+  await page.getByRole("button", { name: "Wstaw dane auta tutaj", exact: true }).click();
+  assert.equal(await page.locator('[data-description-token="vehicle"]').count(), 1);
+  await page.getByRole("button", { name: "Zapisz moj szablon", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector("#toast")?.textContent?.includes("Zapisano"));
+  assert.equal(JSON.parse(savedTemplate).format, "wystawiacz-description-v2");
+  await page.locator("#descriptionVisualEditor").fill("Chwilowy opis");
+  await page.getByRole("button", { name: "Uzyj mojego szablonu", exact: true }).click();
+  assert.equal(await page.locator('[data-description-token="title"]').count(), 1);
+  assert.equal(await page.locator('[data-description-token="vehicle"]').count(), 1);
+  const publication = await page.evaluate(() => buildDescriptionModel().sections[0].items.find(i => i.type === "TEXT").content);
+  assert.equal((publication.match(/INNY TYTUL/g) || []).length, 1);
+  assert.ok(!publication.includes("{{")); assert.ok(publication.includes("1.6 TDI")); assert.ok(!publication.includes("<br"));
+  await mkdir(new URL("../outputs/approved-check/", import.meta.url), { recursive: true });
+  await page.locator(".description-panel").screenshot({ path: fileURLToPath(new URL("../outputs/approved-check/description-editor.png", import.meta.url)) });
+  const freshPage = await browser.newPage();
+  await freshPage.goto(`http://127.0.0.1:${server.address().port}`);
+  await freshPage.evaluate(() => { window.confirm = () => true; titleInput.value = "Tytul innej aukcji"; summaryCard.classList.remove("hidden"); updateSummary(); });
+  await freshPage.getByRole("button", { name: "Uzyj mojego szablonu", exact: true }).click();
+  assert.equal(await freshPage.locator('[data-description-token="title"]').textContent(), "TYTUL INNEJ AUKCJI");
+  assert.ok((await freshPage.locator("#descriptionVisualEditor").innerText()).includes("Wstep"));
+  await freshPage.close();
+  const legacy = await page.evaluate(() => buildProductDescriptionForPublish({ title: "Stara oferta", descriptionText: "Moje stare uwagi" }, []).sections[0].items[0].content);
+  assert.ok(legacy.includes("STARA OFERTA")); assert.ok(legacy.includes("Moje stare uwagi"));
   await page.evaluate(() => {
     state.allegroConnected = true; state.selectedPhotoNames = ["moje.jpg"];
     state.shippingRates = [{ id: "shipping", name: "Cennik" }]; shippingRateInput.innerHTML = '<option value="shipping">Cennik</option>';
@@ -102,6 +159,7 @@ try {
   assert.equal(conversion.same, true); assert.equal(conversion.type, "image/jpeg"); assert.ok(conversion.bytes > 0);
   await page.evaluate(() => cloudSessions.save());
   assert.equal(writes, 1); assert.equal(saved.revision, 0); assert.equal(saved.payload.draft.price, "500.00"); assert.equal(saved.payload.draft.image, undefined);
+  assert.equal(saved.payload.draft.descriptionFullLayout, true);
   conflict = true;
   await page.locator("#priceInput").fill("600");
   await page.evaluate(() => cloudSessions.save());

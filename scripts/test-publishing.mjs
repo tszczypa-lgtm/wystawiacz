@@ -11,8 +11,9 @@ let requests = [];
 const context = vm.createContext({
   window: { getWystawiaczToken: async () => "session" },
   fetch: async (url, options) => { requests.push({ url, options }); if (response instanceof Error) throw response; return response; },
-  state: { localPhotosByName: new Map() },
+  state: { localPhotosByName: new Map(), vehicles: [] },
 });
+vm.runInContext(await readFile(new URL("../public/wystawiacz/description-editor.js", import.meta.url), "utf8"), context);
 vm.runInContext(functions + "\nconst publishingProducts = new Set();", context);
 context.state.compliance = { responsibleProducers: [{ id: "producer", name: "BMW" }], responsiblePersons: [{ id: "person" }] };
 assert.match(context.validateProductBeforePublish({ catalogLinkRequested: true }), /Wybierz produkt z katalogu/, "Never silently create a new product when catalog selection is requested but missing");
@@ -65,6 +66,15 @@ assert.equal(payload.productSet[0].marketedBeforeGPSRObligation, false, "Uncheck
 assert.equal(payload.productSet[0].product.parameters.find(item => item.id === "count").values[0], "2", "Package count is independent of available stock");
 assert.ok(payload.parameters.some(item => item.id === "state"));
 assert.ok(payload.description.sections[0].items[1].content.includes("&lt;script&gt;"));
+const dynamic = context.buildAllegroOfferPayload({ ...complete, descriptionFullLayout: true,
+  descriptionText: "Uwagi\n{{AUTO}}\n**{{TYTUL}}**", descriptionVehicleFull: "BMW F40\n<script>auto</script>" }, [], definitions, {});
+const dynamicText = dynamic.description.sections[0].items[0].content;
+assert.equal((dynamicText.match(/POMPA ABS BMW F40/g) || []).length, 1);
+assert.ok(dynamicText.indexOf("Uwagi") < dynamicText.indexOf("BMW F40"));
+assert.ok(dynamicText.includes("&lt;script&gt;auto&lt;/script&gt;"));
+assert.ok(!dynamicText.includes("{{"));
+assert.ok(!dynamicText.includes("<br"));
+assert.equal(context.window.DescriptionEditor.descriptionHtml("**{{AUTO}}**", "Tytul", { full: "BMW F40\n2020" }, true), "<p><b>BMW F40</b></p><p><b>2020</b></p>");
 for (const unit of ["UNIT", "SET"]) assert.equal(context.buildAllegroOfferPayload({ ...complete, stockUnit: unit }, [], definitions, {}).stock.unit, unit);
 const oldSessionPayload = context.buildAllegroOfferPayload({ ...complete, parameterValues: { ...complete.parameterValues, before: "yes" } }, [], definitions, {});
 assert.equal(oldSessionPayload.productSet[0].marketedBeforeGPSRObligation, false, "Explicit unchecked choice overrides obsolete parameter");

@@ -94,7 +94,7 @@ try {
   assert.equal(await page.locator("#vehicleList .vehicle-chip").count(), 1, "Edit keeps model id rather than adding duplicates");
   await page.keyboard.press("Escape");
   assert.equal(await page.locator("#titleInput").inputValue(), "Czujnik parktronik PDC VW Golf VIII 5Q0919275B");
-  assert.ok((await page.locator("#descriptionTextInput").inputValue()).includes("Volkswagen Golf VIII 2021"));
+  assert.ok((await page.locator("#descriptionVisualEditor").innerText()).includes("Volkswagen Golf VIII 2021"));
   await page.locator("#openVehiclesButton").click();
   await page.locator("[data-edit-vehicle-id]").click();
   await page.locator("#vehicleShortInput").fill("Unsaved");
@@ -227,7 +227,7 @@ try {
   await page.locator("#responsibleProducerInput").selectOption("producer");
   await page.locator("#responsiblePersonInput").selectOption("person");
   await page.locator("#safetyInformationInput").fill("Informacje producenta dla tego produktu.");
-  await page.locator("#descriptionTextInput").fill("Wlasny opis produktu\nDruga linia");
+  await page.locator("#descriptionVisualEditor").fill("Wlasny opis produktu\nDruga linia");
   await page.locator("#priceInput").fill("120");
   await page.locator("#publishCurrentButton").click();
   await page.waitForFunction(() => window.sentOffers.length === 1);

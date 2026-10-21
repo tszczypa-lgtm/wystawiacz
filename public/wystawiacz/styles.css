@@ -232,9 +232,21 @@ textarea { resize: vertical; line-height: 1.45; }
 .description-preview { display: grid; grid-template-columns: minmax(180px, 42%) 1fr; gap: 20px; align-items: center; margin-top: 12px; padding: 14px; border-radius: 10px; background: #f7f8fa; }
 .description-image-wrap { display: grid; min-height: 220px; place-items: center; border-radius: 8px; background: #eef1f5; overflow: hidden; }
 .description-image-wrap img { display: block; width: 100%; max-height: 300px; object-fit: contain; }
+.description-image-wrap img.hidden { display: none; }
 .description-image-wrap span { color: var(--muted); font-size: 12px; }
 .description-copy p { margin-bottom: 22px; font-size: 16px; line-height: 1.4; text-transform: uppercase; }
 .description-copy div { white-space: pre-line; font-size: 15px; font-weight: 700; line-height: 1.5; }
+.description-copy .description-visual-editor { min-height: 260px; padding: 18px; border: 1px solid #cbd5e1; border-radius: 12px; background: white; color: #17202a; white-space: normal; font-weight: 400; overflow-wrap: anywhere; }
+.description-copy .description-visual-editor:focus { outline: 2px solid #ff5a00; outline-offset: 2px; }
+.description-copy .description-visual-editor:empty { display: block; }
+.description-copy .description-visual-editor p { margin: 0 0 14px; font-size: 15px; line-height: 1.5; text-transform: none; }
+.description-visual-editor ul, .description-visual-editor ol { padding-left: 24px; margin: 12px 0; }
+.description-visual-editor .description-token { display: inline; white-space: pre-line; background: #fff2e8; border-bottom: 2px solid #ff8a3d; border-radius: 3px; padding: 2px; }
+.description-editor-hint { display: block; margin: 10px 0; color: #536171; line-height: 1.5; }
+.description-toolbar { display: flex; flex-wrap: wrap; gap: 6px; }
+.description-toolbar button { padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: #17202a; font-size: 13px; cursor: pointer; }
+.description-toolbar button:hover { border-color: #ff5a00; background: #fff2e8; }
+#descriptionTextInput[hidden] { display: none !important; }
 .description-editor { margin-top: 14px; }
 .search-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; padding: 12px 0; }
 .search-actions span { color: var(--muted); font-size: 12px; }

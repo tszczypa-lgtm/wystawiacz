@@ -22,6 +22,8 @@ const state = {
   vehicles: [],
   selectedVehicleId: "",
   descriptionText: "",
+  descriptionFullLayout: false,
+  descriptionVehicleFull: "",
   descriptionManuallyEdited: false
 };
 
@@ -91,7 +93,6 @@ const parametersGrid = document.querySelector("#parametersGrid");
 const parametersStatus = document.querySelector("#parametersStatus");
 const descriptionPreviewImage = document.querySelector("#descriptionPreviewImage");
 const descriptionMissingImage = document.querySelector("#descriptionMissingImage");
-const descriptionPreviewTitle = document.querySelector("#descriptionPreviewTitle");
 const descriptionPreviewText = document.querySelector("#descriptionPreviewText");
 const descriptionTextInput = document.querySelector("#descriptionTextInput");
 const searchAllegroPartButton = document.querySelector("#searchAllegroPartButton");
@@ -171,7 +172,7 @@ function renderBatchToolbar() {
 
 const titleEditor = window.TitleEditor.mount();
 const cloudSessions = window.CloudSessions.mount({ snapshot: sessionSnapshot, restore: restoreSessionPayload, status: sessionStatus });
-const descriptionEditor = window.DescriptionEditor.mount({ state, input: descriptionTextInput, vehicleInput: vehicleFullInput, selectedVehicle: getSelectedVehicle, notify: showToast });
+const descriptionEditor = window.DescriptionEditor.mount({ state, input: descriptionTextInput, vehicleInput: vehicleFullInput, selectedVehicle: () => getSelectedVehicle() || (state.descriptionVehicleFull ? { full: state.descriptionVehicleFull } : null), titleInput, notify: showToast });
 const catalogLink = window.CatalogLink.mount({
   getContext: () => ({ number: partNumber.value.trim(), categoryId: state.categoryId, productId: activeProductId }),
   request: (path) => apiRequest(path)
@@ -561,6 +562,8 @@ function addCurrentProductToList() {
     image: findPhotoUrl(state.selectedPhotoNames[0]),
     description: buildDescriptionModel(),
     descriptionText: state.descriptionText,
+    descriptionFullLayout: state.descriptionFullLayout === true,
+    descriptionVehicleFull: getSelectedVehicle()?.full || state.descriptionVehicleFull || "",
     vehicleDescriptionBlock: state.vehicleDescriptionBlock || null,
     sourceVehicleTitle: state.sourceVehicleTitle || "",
     selectedVehicleId: state.selectedVehicleId
@@ -730,6 +733,8 @@ function resetForm() {
   state.appendedPartNumber = "";
   state.selectedVehicleId = "";
   state.descriptionText = "";
+  state.descriptionFullLayout = false;
+  state.descriptionVehicleFull = "";
   state.vehicleDescriptionBlock = null;
   state.sourceVehicleTitle = "";
   state.descriptionManuallyEdited = false;
@@ -1661,14 +1666,13 @@ function renderDescriptionPreview() {
   descriptionPreviewImage.src = mainPhotoUrl || "";
   descriptionPreviewImage.classList.toggle("hidden", !mainPhotoUrl);
   descriptionMissingImage.classList.toggle("hidden", Boolean(mainPhotoUrl));
-  descriptionPreviewTitle.textContent = titleInput.value.trim() || "Tytuł aukcji pojawi się tutaj";
   updateAutomaticDescriptionText();
   if (descriptionTextInput.value !== state.descriptionText) descriptionTextInput.value = state.descriptionText;
   descriptionEditor.refresh();
 }
 
 function buildDescriptionModel() {
-  const lines = buildDescriptionParagraphs(state.descriptionText);
+  const lines = window.DescriptionEditor.descriptionHtml(state.descriptionText, titleInput.value.trim(), getSelectedVehicle() || { full: state.descriptionVehicleFull || "" }, state.descriptionFullLayout);
   return {
     sections: [
       {
@@ -1676,7 +1680,7 @@ function buildDescriptionModel() {
           { type: "IMAGE", photoName: state.selectedPhotoNames[0] || "" },
           {
             type: "TEXT",
-            content: `<p>${escapeHtml(titleInput.value.trim()).toUpperCase()}</p>${lines}`
+            content: lines
           }
         ]
       }
@@ -1686,7 +1690,7 @@ function buildDescriptionModel() {
 
 function buildAllegroDescription(imageUrls) {
   const mainImageUrl = imageUrls[0] || "";
-  const text = `<p>${escapeHtml(titleInput.value.trim()).toUpperCase()}</p>${buildDescriptionParagraphs(state.descriptionText)}`;
+  const text = window.DescriptionEditor.descriptionHtml(state.descriptionText, titleInput.value.trim(), getSelectedVehicle() || { full: state.descriptionVehicleFull || "" }, state.descriptionFullLayout);
   return {
     sections: [
       {
@@ -2147,7 +2151,8 @@ function buildAfterSalesServices(product) {
 
 function buildProductDescriptionForPublish(product, imageUrls) {
   const mainImageUrl = imageUrls[0] || "";
-  const text = `<p>${escapeHtml(product.title).toUpperCase()}</p>${buildDescriptionParagraphs(product.descriptionText || "Część używana 100% sprawna")}`;
+  const vehicle = state.vehicles.find(item => item.id === product.selectedVehicleId) || { full: product.descriptionVehicleFull || "" };
+  const text = window.DescriptionEditor.descriptionHtml(product.descriptionText || "Część używana 100% sprawna", product.title, vehicle, product.descriptionFullLayout === true);
   return {
     sections: [
       {
@@ -2265,6 +2270,8 @@ function editProduct(id) {
   state.appendedPartNumber = product.enteredPartNumber || "";
   state.selectedVehicleId = product.selectedVehicleId || "";
   state.descriptionText = product.descriptionText || "Część używana 100% sprawna";
+  state.descriptionFullLayout = product.descriptionFullLayout === true;
+  state.descriptionVehicleFull = product.descriptionVehicleFull || "";
   state.vehicleDescriptionBlock = product.vehicleDescriptionBlock || null;
   state.sourceVehicleTitle = product.sourceVehicleTitle || "";
   state.descriptionManuallyEdited = Boolean(product.descriptionText);
@@ -2327,6 +2334,8 @@ function getFormProduct(id) {
   product.image = findPhotoUrl(product.photoNames[0]);
   product.description = buildDescriptionModel();
   product.descriptionText = state.descriptionText;
+  product.descriptionFullLayout = state.descriptionFullLayout === true;
+  product.descriptionVehicleFull = getSelectedVehicle()?.full || state.descriptionVehicleFull || "";
   product.vehicleDescriptionBlock = state.vehicleDescriptionBlock || null;
   product.sourceVehicleTitle = state.sourceVehicleTitle || "";
   product.selectedVehicleId = state.selectedVehicleId;
