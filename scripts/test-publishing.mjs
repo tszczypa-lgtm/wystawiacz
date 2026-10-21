@@ -75,6 +75,8 @@ assert.ok(dynamicText.includes("&lt;script&gt;auto&lt;/script&gt;"));
 assert.ok(!dynamicText.includes("{{"));
 assert.ok(!dynamicText.includes("<br"));
 assert.equal(context.window.DescriptionEditor.descriptionHtml("**{{AUTO}}**", "Tytul", { full: "BMW F40\n2020" }, true), "<p><b>BMW F40</b></p><p><b>2020</b></p>");
+assert.equal(context.window.DescriptionEditor.partTitle("SILNICZEK SZYBY GOLF 5Q0959801B", { short: "Golf" }, "5Q0959801B"), "SILNICZEK SZYBY 5Q0959801B");
+assert.equal(context.window.DescriptionEditor.descriptionHtml("{{CZESC}}", "Pompa ABS BMW F40 12345", { short: "BMW F40" }, true, "12345"), "<p>POMPA ABS 12345</p>");
 for (const unit of ["UNIT", "SET"]) assert.equal(context.buildAllegroOfferPayload({ ...complete, stockUnit: unit }, [], definitions, {}).stock.unit, unit);
 const oldSessionPayload = context.buildAllegroOfferPayload({ ...complete, parameterValues: { ...complete.parameterValues, before: "yes" } }, [], definitions, {});
 assert.equal(oldSessionPayload.productSet[0].marketedBeforeGPSRObligation, false, "Explicit unchecked choice overrides obsolete parameter");

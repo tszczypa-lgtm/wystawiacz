@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Wystawiacz Allegro</title>
-    <link rel="stylesheet" href="styles.css?v=visual-description-2" />
+    <link rel="stylesheet" href="styles.css?v=named-templates-3" />
     <link rel="stylesheet" href="title-suggestions.css?v=counter-colors" />
     <link rel="stylesheet" href="workspace-layout.css?v=approved-changes-1" />
   </head>
@@ -63,6 +63,14 @@
         <small id="sessionStatus">Folder zdjęć dla sesji nie jest jeszcze wskazany.</small>
       </section>
       </div>
+
+      <section id="descriptionTemplates" class="description-templates" aria-label="Szablony opisow">
+        <strong>Szablony opisow</strong>
+        <div class="template-choose-row"><select id="descriptionTemplateSelect" aria-label="Zapisane szablony opisow"><option value="">Wczytywanie szablonow...</option></select><button id="applyDescriptionTemplate" type="button" class="secondary-button">Zastosuj wybrany</button></div>
+        <div class="template-save-row"><input id="descriptionTemplateName" type="text" maxlength="80" placeholder="Nazwa szablonu, np. Czesci sprawne" aria-label="Nazwa szablonu" /><button id="saveDescriptionTemplate" type="button" class="primary-button">Zapisz jako nowy</button><button id="overwriteDescriptionTemplate" type="button" class="secondary-button">Nadpisz wybrany</button></div>
+        <p id="descriptionTemplateStatus" role="status">Szablony sa zapisywane na Twoim koncie.</p>
+        <button id="reloadDescriptionTemplates" type="button" class="text-button">Wczytaj ponownie</button>
+      </section>
 
       <section class="hero creation-heading">
         <div>
@@ -134,7 +142,8 @@
             <option value="Tesla"></option>
             <option value="Vauxhall"></option>
           </datalist>
-          <input id="vehicleShortInput" aria-label="Skrót auta do tytułu" type="text" placeholder="Skrót, np. VW Golf VII 5G0" />
+          <label>Nazwa auta dopisywana do tytulu<input id="vehicleShortInput" aria-label="Skrót auta do tytułu" type="text" placeholder="Np. VW Golf VII 5G0" /></label>
+          <label>Skrot auta na przycisku<input id="vehicleButtonLabelInput" aria-label="Skrot auta na przycisku" type="text" maxlength="40" placeholder="Np. Golf VII (opcjonalny)" /></label>
           <textarea id="vehicleFullInput" aria-label="Pelny opis auta" rows="5" placeholder="Pelny opis auta: model, rok, silnik. Mozesz wpisac kilka akapitow."></textarea>
           <button id="addVehicleButton" class="secondary-button" type="button">Dodaj auto</button>
           <button id="cancelVehicleEditButton" class="secondary-button hidden" type="button">Anuluj edycję</button>
@@ -456,10 +465,10 @@
     <script src="session-safety.js?v=1"></script>
     <script src="cloud-sessions.js?v=1"></script>
     <script src="own-offers.js?v=1"></script>
-    <script src="description-editor.js?v=visual-2"></script>
+    <script src="description-editor.js?v=named-templates-3"></script>
     <script src="photo-upload.js?v=1"></script>
     <script src="price-search.js?v=1"></script>
-    <script src="app.js?v=visual-description-2"></script>
+    <script src="app.js?v=named-templates-3"></script>
     <script src="workspace-layout.js?v=compact1"></script>
   </body>
 </html>

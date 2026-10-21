@@ -48,6 +48,7 @@ try {
   assert.equal(await page.locator("#vehiclesDialog").isVisible(), true);
   await page.locator("#vehicleManufacturerInput").fill("Volkswagen");
   await page.locator("#vehicleShortInput").fill("VW Golf VII");
+  await page.locator("#vehicleButtonLabelInput").fill("Golf krotko");
   await page.locator("#vehicleFullInput").fill("Volkswagen Golf VII 2019");
   await page.locator("#addVehicleButton").click();
   assert.equal(await page.locator("#vehicleList .vehicle-chip").count(), 1);
@@ -55,6 +56,7 @@ try {
   await page.locator("#titleInput").fill("Czujnik parktronik PDC");
   await page.locator("#partNumber").fill("5Q0919275B");
   await page.locator("#vehicleButtons button").click();
+  assert.equal((await page.locator("#vehicleButtons button").textContent()).trim(), "Golf krotko");
   assert.equal(await page.locator("#titleInput").inputValue(), "Czujnik parktronik PDC VW Golf VII 5Q0919275B");
   await page.evaluate(() => { window.searchWindows = []; window.open = (...args) => { window.searchWindows.push(args); return null; }; });
   await page.locator("#searchGooglePartButton").click();
@@ -88,6 +90,7 @@ try {
   assert.equal(new URL(searches[6][0]).searchParams.get("miejsce-wysylki"), null, "Shipping filter does not affect Google");
   await page.locator("#openVehiclesButton").click();
   await page.locator("[data-edit-vehicle-id]").click();
+  assert.equal(await page.locator("#vehicleButtonLabelInput").inputValue(), "Golf krotko");
   await page.locator("#vehicleShortInput").fill("VW Golf VIII");
   await page.locator("#vehicleFullInput").fill("Volkswagen Golf VIII 2021");
   await page.locator("#addVehicleButton").click();

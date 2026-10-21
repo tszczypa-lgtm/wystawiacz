@@ -4,13 +4,14 @@ import { createServer } from "node:http";
 import { pathToFileURL, fileURLToPath } from "node:url";
 const { chromium } = await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href);
 const root = new URL("../public/wystawiacz/", import.meta.url);
-let saved, conflict = false, writes = 0, savedTemplate = null;
+let saved, conflict = false, writes = 0, savedTemplate = null, preferenceFailure = false;
 const server = createServer(async (req, res) => {
   const path = new URL(req.url, "http://test.local").pathname;
   if (path.startsWith("/api/")) {
     res.setHeader("Content-Type", "application/json");
     let data = { connected: false, build: "2026-06-02.35", categories: [], parameters: [] };
     if (path === "/api/workspace/preferences") {
+      if (preferenceFailure) { res.statusCode = 503; res.end(JSON.stringify({ message: "Testowy blad zapisu" })); return; }
       if (req.method === "PUT") { let raw = ""; for await (const chunk of req) raw += chunk; savedTemplate = JSON.parse(raw).descriptionTemplate; }
       data = { descriptionTemplate: savedTemplate };
     }
@@ -83,16 +84,16 @@ try {
   await page.keyboard.press("Control+a");
   await page.getByRole("button", { name: "Pogrubienie", exact: true }).click();
   assert.equal(await page.locator(".formatted-description b").textContent(), "Pompa ABS");
-  await page.locator("#descriptionVisualEditor").fill("Sprawna");
-  await page.getByRole("button", { name: "Lista", exact: true }).click();
-  assert.equal(await page.locator(".formatted-description li").textContent(), "Sprawna");
+  assert.equal(await page.getByRole("button", { name: "Lista", exact: true }).count(), 0);
   await page.locator("#descriptionVisualEditor").fill('<script>window.hacked=2</script>');
   assert.equal(await page.locator("#descriptionVisualEditor").isVisible(), true);
   assert.equal(await page.locator(".formatted-description script").count(), 0);
   assert.equal(await page.evaluate(() => window.hacked), undefined);
   await page.locator("#descriptionVisualEditor").fill("Wstep\nKoniec");
   await page.evaluate(() => {
-    const editor = document.querySelector("#descriptionVisualEditor"), walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT), node = walker.nextNode();
+    const editor = document.querySelector("#descriptionVisualEditor"), walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+    let node; while ((node = walker.nextNode()) && !node.textContent.includes("Wstep")) {}
+    if (!node) throw Error("Missing Wstep text in editor");
     const range = document.createRange(); range.setStart(node, node.textContent.length); range.collapse(true);
     const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
     editor.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
@@ -101,7 +102,7 @@ try {
   await page.getByRole("button", { name: "Wstaw tytul tutaj", exact: true }).click();
   assert.equal(await page.locator('[data-description-token="title"]').count(), 1);
   const positioned = await page.locator("#descriptionTextInput").inputValue();
-  assert.ok(positioned.indexOf("{{TYTUL}}") > positioned.indexOf("Wstep"));
+  assert.ok(positioned.indexOf("{{TYTUL}}") > positioned.indexOf("Wstep"), positioned);
   await page.getByRole("button", { name: "Wstaw tytul tutaj", exact: true }).click();
   assert.equal(await page.locator('[data-description-token="title"]').count(), 1, "Moving the title must not duplicate it");
   await page.locator("#titleInput").fill("Inny tytul");
@@ -110,11 +111,12 @@ try {
   await page.keyboard.press("Control+End");
   await page.getByRole("button", { name: "Wstaw dane auta tutaj", exact: true }).click();
   assert.equal(await page.locator('[data-description-token="vehicle"]').count(), 1);
-  await page.getByRole("button", { name: "Zapisz moj szablon", exact: true }).click();
+  await page.locator("#descriptionTemplateName").fill("Moj pierwszy szablon");
+  await page.locator("#saveDescriptionTemplate").click();
   await page.waitForFunction(() => document.querySelector("#toast")?.textContent?.includes("Zapisano"));
-  assert.equal(JSON.parse(savedTemplate).format, "wystawiacz-description-v2");
+  assert.equal(JSON.parse(savedTemplate).format, "wystawiacz-description-templates-v3");
   await page.locator("#descriptionVisualEditor").fill("Chwilowy opis");
-  await page.getByRole("button", { name: "Uzyj mojego szablonu", exact: true }).click();
+  await page.locator("#applyDescriptionTemplate").click();
   assert.equal(await page.locator('[data-description-token="title"]').count(), 1);
   assert.equal(await page.locator('[data-description-token="vehicle"]').count(), 1);
   const publication = await page.evaluate(() => buildDescriptionModel().sections[0].items.find(i => i.type === "TEXT").content);
@@ -125,10 +127,35 @@ try {
   const freshPage = await browser.newPage();
   await freshPage.goto(`http://127.0.0.1:${server.address().port}`);
   await freshPage.evaluate(() => { window.confirm = () => true; titleInput.value = "Tytul innej aukcji"; summaryCard.classList.remove("hidden"); updateSummary(); });
-  await freshPage.getByRole("button", { name: "Uzyj mojego szablonu", exact: true }).click();
+  await freshPage.locator("#applyDescriptionTemplate").click();
   assert.equal(await freshPage.locator('[data-description-token="title"]').textContent(), "TYTUL INNEJ AUKCJI");
   assert.ok((await freshPage.locator("#descriptionVisualEditor").innerText()).includes("Wstep"));
+  assert.ok((await freshPage.locator("#descriptionTemplateSelect").innerText()).includes("Moj pierwszy szablon"));
   await freshPage.close();
+  await page.locator("#descriptionVisualEditor").fill("Drugi opis");
+  await page.locator("#descriptionTemplateName").fill("Drugi szablon");
+  preferenceFailure = true;
+  await page.locator("#saveDescriptionTemplate").click();
+  await page.waitForFunction(() => document.querySelector("#descriptionTemplateStatus").textContent.includes("Nie zapisano"));
+  assert.equal(JSON.parse(savedTemplate).templates.length, 1);
+  preferenceFailure = false;
+  await page.locator("#saveDescriptionTemplate").click();
+  await page.waitForFunction(() => document.querySelector("#descriptionTemplateStatus").textContent.includes("Zapisano szablon: Drugi"));
+  assert.equal(JSON.parse(savedTemplate).templates.length, 2);
+  const firstTemplateId = JSON.parse(savedTemplate).templates[0].id;
+  await page.locator("#descriptionTemplateSelect").selectOption(firstTemplateId);
+  await page.locator("#applyDescriptionTemplate").click();
+  assert.ok((await page.locator("#descriptionVisualEditor").innerText()).includes("Wstep"));
+  await page.locator("#titleInput").fill("SILNICZEK SZYBY VW Golf 5Q0959801B");
+  await page.locator("#partNumber").fill("5Q0959801B");
+  await page.locator("#descriptionVisualEditor").click();
+  await page.getByRole("button", { name: "Wstaw czesc + numer bez auta", exact: true }).click();
+  assert.equal(await page.locator('[data-description-token="part"]').textContent(), "SILNICZEK SZYBY 5Q0959801B");
+  const partOutput = await page.evaluate(() => buildDescriptionModel().sections[0].items.find(i => i.type === "TEXT").content);
+  assert.ok(partOutput.includes("SILNICZEK SZYBY 5Q0959801B"));
+  assert.ok(!partOutput.includes("{{CZESC}}"));
+  await page.locator("#descriptionTemplates").screenshot({ path: fileURLToPath(new URL("../outputs/approved-check/description-templates.png", import.meta.url)) });
+  await page.locator(".description-panel").screenshot({ path: fileURLToPath(new URL("../outputs/approved-check/description-editor.png", import.meta.url)) });
   const legacy = await page.evaluate(() => buildProductDescriptionForPublish({ title: "Stara oferta", descriptionText: "Moje stare uwagi" }, []).sections[0].items[0].content);
   assert.ok(legacy.includes("STARA OFERTA")); assert.ok(legacy.includes("Moje stare uwagi"));
   await page.evaluate(() => {

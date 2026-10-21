@@ -15,7 +15,7 @@
       if (!Array.isArray(product.photoNames) || product.photoNames.some(name => typeof name !== "string" || name.length > 1000)) throw new Error("Nieprawidlowa lista zdjec.");
       return product;
     });
-    if (payload.vehicles && (!Array.isArray(payload.vehicles) || payload.vehicles.length > 1000 || payload.vehicles.some(v => !v || [v.id, v.short, v.full, v.manufacturer].some(x => x != null && typeof x !== "string")))) throw new Error("Nieprawidlowa lista aut.");
+    if (payload.vehicles && (!Array.isArray(payload.vehicles) || payload.vehicles.length > 1000 || payload.vehicles.some(v => !v || [v.id, v.short, v.full, v.manufacturer, v.buttonLabel].some(x => x != null && typeof x !== "string")))) throw new Error("Nieprawidlowa lista aut.");
     if (payload.draft) {
       if (typeof payload.draft !== "object" || Array.isArray(payload.draft)) throw new Error("Nieprawidlowy formularz sesji.");
       const draft = { ...payload.draft, stock: Number.isInteger(Number(payload.draft.stock)) && Number(payload.draft.stock) > 0 ? Number(payload.draft.stock) : 1, photoNames: payload.draft.photoNames || [] };

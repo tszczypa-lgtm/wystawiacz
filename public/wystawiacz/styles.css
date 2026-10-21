@@ -247,6 +247,13 @@ textarea { resize: vertical; line-height: 1.45; }
 .description-toolbar button { padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: #17202a; font-size: 13px; cursor: pointer; }
 .description-toolbar button:hover { border-color: #ff5a00; background: #fff2e8; }
 #descriptionTextInput[hidden] { display: none !important; }
+.description-templates { margin: 16px 0; padding: 18px; border: 1px solid #d8dce3; border-radius: 14px; background: #fff; }
+.template-choose-row, .template-save-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; align-items: center; }
+.description-templates select, .description-templates input { min-width: 180px; flex: 1; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; font: inherit; }
+.description-templates button { width: auto; padding: 10px 14px; }
+.description-templates button:disabled { opacity: .5; cursor: not-allowed; }
+.description-templates p { margin: 10px 0 0; font-size: 13px; color: #536171; }
+.description-toolbar .description-format-button { min-width: 34px; padding: 6px; font-weight: 900; font-size: 17px; border-color: transparent; background: #eef1f5; }
 .description-editor { margin-top: 14px; }
 .search-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; padding: 12px 0; }
 .search-actions span { color: var(--muted); font-size: 12px; }

@@ -52,6 +52,7 @@ const loadSessionInput = document.querySelector("#loadSessionInput");
 const vehicleManufacturerInput = document.querySelector("#vehicleManufacturerInput");
 const vehicleManufacturerOptions = document.querySelector("#vehicleManufacturerOptions");
 const vehicleShortInput = document.querySelector("#vehicleShortInput");
+const vehicleButtonLabelInput = document.querySelector("#vehicleButtonLabelInput");
 const vehicleFullInput = document.querySelector("#vehicleFullInput");
 const addVehicleButton = document.querySelector("#addVehicleButton");
 const vehicleList = document.querySelector("#vehicleList");
@@ -172,7 +173,7 @@ function renderBatchToolbar() {
 
 const titleEditor = window.TitleEditor.mount();
 const cloudSessions = window.CloudSessions.mount({ snapshot: sessionSnapshot, restore: restoreSessionPayload, status: sessionStatus });
-const descriptionEditor = window.DescriptionEditor.mount({ state, input: descriptionTextInput, vehicleInput: vehicleFullInput, selectedVehicle: () => getSelectedVehicle() || (state.descriptionVehicleFull ? { full: state.descriptionVehicleFull } : null), titleInput, notify: showToast });
+const descriptionEditor = window.DescriptionEditor.mount({ state, input: descriptionTextInput, vehicleInput: vehicleFullInput, selectedVehicle: () => getSelectedVehicle() || (state.descriptionVehicleFull ? { full: state.descriptionVehicleFull } : null), titleInput, partNumberInput: partNumber, notify: showToast });
 const catalogLink = window.CatalogLink.mount({
   getContext: () => ({ number: partNumber.value.trim(), categoryId: state.categoryId, productId: activeProductId }),
   request: (path) => apiRequest(path)
@@ -1672,7 +1673,7 @@ function renderDescriptionPreview() {
 }
 
 function buildDescriptionModel() {
-  const lines = window.DescriptionEditor.descriptionHtml(state.descriptionText, titleInput.value.trim(), getSelectedVehicle() || { full: state.descriptionVehicleFull || "" }, state.descriptionFullLayout);
+  const lines = window.DescriptionEditor.descriptionHtml(state.descriptionText, titleInput.value.trim(), getSelectedVehicle() || { full: state.descriptionVehicleFull || "" }, state.descriptionFullLayout, partNumber.value);
   return {
     sections: [
       {
@@ -1690,7 +1691,7 @@ function buildDescriptionModel() {
 
 function buildAllegroDescription(imageUrls) {
   const mainImageUrl = imageUrls[0] || "";
-  const text = window.DescriptionEditor.descriptionHtml(state.descriptionText, titleInput.value.trim(), getSelectedVehicle() || { full: state.descriptionVehicleFull || "" }, state.descriptionFullLayout);
+  const text = window.DescriptionEditor.descriptionHtml(state.descriptionText, titleInput.value.trim(), getSelectedVehicle() || { full: state.descriptionVehicleFull || "" }, state.descriptionFullLayout, partNumber.value);
   return {
     sections: [
       {
@@ -1718,6 +1719,7 @@ function resetVehicleEditor() {
   editingVehicleId = null;
   vehicleManufacturerInput.value = "";
   vehicleShortInput.value = "";
+  vehicleButtonLabelInput.value = "";
   vehicleFullInput.value = "";
   addVehicleButton.textContent = "Dodaj auto";
   document.getElementById("cancelVehicleEditButton").classList.add("hidden");
@@ -1726,6 +1728,7 @@ function resetVehicleEditor() {
 function addVehicle() {
   const manufacturer = normalizeManufacturerName(vehicleManufacturerInput.value);
   const short = vehicleShortInput.value.trim();
+  const buttonLabel = vehicleButtonLabelInput.value.trim();
   const full = vehicleFullInput.value.trim();
   if (!manufacturer || !short || !full) {
     showToast("Wpisz producenta OE, skrót oraz pełny opis auta.");
@@ -1743,9 +1746,9 @@ function addVehicle() {
       titleInput.value = titleInput.value.replace(new RegExp(`\\s*${escapeRegExp(existing.short)}\\s*`, "i"), " ").trim();
       state.selectedVehicleId = "";
     }
-    Object.assign(existing, { manufacturer, short, full });
+    Object.assign(existing, { manufacturer, short, full, buttonLabel });
     if (selected) useVehicle(existing.id);
-  } else state.vehicles.push({ id: crypto.randomUUID(), manufacturer, short, full });
+  } else state.vehicles.push({ id: crypto.randomUUID(), manufacturer, short, full, buttonLabel });
   resetVehicleEditor();
   renderVehicles();
   showToast(existing ? "Zapisano zmiany auta." : "Auto dodane do listy sesji.");
@@ -1760,6 +1763,7 @@ function renderVehicles() {
           <button type="button" data-remove-vehicle-id="${escapeHtml(vehicle.id)}" aria-label="Usuń auto">Usuń</button>
         </span>
         <strong>${escapeHtml(vehicle.manufacturer || "OE")}</strong> ${escapeHtml(vehicle.short)}
+        <small>Przycisk: ${escapeHtml(vehicle.buttonLabel || vehicle.short)}</small>
         <span class="vehicle-description">${escapeHtml(vehicle.full)}</span>
       </span>`).join("")
     : "<small>Lista aut jest pusta.</small>";
@@ -1778,6 +1782,7 @@ function renderVehicles() {
       editingVehicleId = vehicle.id;
       vehicleManufacturerInput.value = vehicle.manufacturer;
       vehicleShortInput.value = vehicle.short;
+      vehicleButtonLabelInput.value = vehicle.buttonLabel || "";
       vehicleFullInput.value = vehicle.full;
       addVehicleButton.textContent = "Zapisz zmiany";
       document.getElementById("cancelVehicleEditButton").classList.remove("hidden");
@@ -1791,7 +1796,7 @@ function renderVehicleButtons() {
   vehicleButtons.innerHTML = state.vehicles.length
     ? state.vehicles.map((vehicle) => `
       <button class="vehicle-use-button ${vehicle.id === state.selectedVehicleId ? "active" : ""}" type="button" data-use-vehicle-id="${escapeHtml(vehicle.id)}" title="${escapeHtml([vehicle.manufacturer, vehicle.full].filter(Boolean).join(" - "))}">
-        ${escapeHtml(vehicle.short)}
+        ${escapeHtml(vehicle.buttonLabel || vehicle.short)}
       </button>`).join("")
     : "<small>Najpierw dodaj auta do listy sesji.</small>";
   vehicleButtons.querySelectorAll("[data-use-vehicle-id]").forEach((button) => {
@@ -1826,6 +1831,7 @@ function normalizeVehicle(vehicle) {
     id: vehicle?.id || crypto.randomUUID(),
     manufacturer,
     short,
+    buttonLabel: typeof vehicle?.buttonLabel === "string" ? vehicle.buttonLabel.slice(0, 40) : "",
     full
   };
 }
@@ -1928,6 +1934,7 @@ function applyDefaultAfterSalesToProduct(product) {
 
 function validateProductBeforePublish(product) {
   if (product.catalogLinkRequested && !product.catalogProduct) return "Wybierz produkt z katalogu albo odznacz Lacz z katalogiem.";
+  if (product.descriptionText?.includes("{{CZESC}}") && !window.DescriptionEditor.partTitle(product.title, state.vehicles.find(v => v.id === product.selectedVehicleId), product.enteredPartNumber)) return "Nie rozpoznano nazwy czesci bez auta. Wybierz auto z listy lub zastap blok w opisie wlasnym tekstem.";
   if (!state.allegroConnected) return "Najpierw połącz konto Allegro na świeżej wersji programu.";
   if (!product.title) return "Brakuje tytułu.";
   const titleError = window.TitleEditor.error(product.title);
@@ -2152,7 +2159,7 @@ function buildAfterSalesServices(product) {
 function buildProductDescriptionForPublish(product, imageUrls) {
   const mainImageUrl = imageUrls[0] || "";
   const vehicle = state.vehicles.find(item => item.id === product.selectedVehicleId) || { full: product.descriptionVehicleFull || "" };
-  const text = window.DescriptionEditor.descriptionHtml(product.descriptionText || "Część używana 100% sprawna", product.title, vehicle, product.descriptionFullLayout === true);
+  const text = window.DescriptionEditor.descriptionHtml(product.descriptionText || "Część używana 100% sprawna", product.title, vehicle, product.descriptionFullLayout === true, product.enteredPartNumber);
   return {
     sections: [
       {

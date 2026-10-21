@@ -17,16 +17,25 @@ export async function handleWorkspaceApi(request: Request, env: AccountEnv) {
       const raw = await request.text();
       if (raw.length > 50000) return reply({ message: "Szablon jest zbyt dlugi." }, 413);
       const input = JSON.parse(raw);
-      if (typeof input.descriptionTemplate !== "string" || input.descriptionTemplate.length > 20000) return reply({ message: "Nieprawidlowy szablon. Maksymalnie 20000 znakow." }, 400);
+      if (typeof input.descriptionTemplate !== "string" || input.descriptionTemplate.length > 20000) return reply({ message: "Szablony przekraczaja limit 20000 znakow. Skroc opisy lub usun nieuzywane szablony." }, 400);
       let templateText = input.descriptionTemplate;
       let template;
       try { template = JSON.parse(templateText); } catch { /* Legacy templates are plain text. */ }
-      if (template?.format === "wystawiacz-description-v2") {
+      if (template?.format === "wystawiacz-description-templates-v3") {
+        if (!Array.isArray(template.templates) || template.templates.length > 20 || template.templates.length < 1) return reply({ message: "Zapisz od 1 do 20 szablonow." }, 400);
+        const ids = new Set();
+        for (const entry of template.templates) {
+          if (!entry || !uuid.test(entry.id) || ids.has(entry.id) || typeof entry.name !== "string" || !entry.name.trim() || entry.name.length > 80 || typeof entry.text !== "string") return reply({ message: "Nieprawidlowa nazwa lub tresc szablonu." }, 400);
+          ids.add(entry.id);
+          if (["{{AUTO}}", "{{TYTUL}}", "{{CZESC}}"].some(marker => entry.text.split(marker).length > 2)) return reply({ message: "W szablonie kazdy blok automatyczny moze wystapic tylko raz." }, 400);
+        }
+        if (!ids.has(template.selectedId)) return reply({ message: "Wybierz zapisany szablon." }, 400);
+      } else if (template?.format === "wystawiacz-description-v2") {
         if (typeof template.text !== "string") return reply({ message: "Brak tekstu szablonu." }, 400);
         templateText = template.text;
       }
-      if (templateText.split("{{AUTO}}").length > 2 || templateText.split("{{TYTUL}}").length > 2) return reply({ message: "Szablon moze miec jeden blok auta i jeden tytul." }, 400);
-      await context.db("workspace_preferences?on_conflict=owner_id", { method: "POST", headers: { Prefer: "resolution=merge-duplicates" }, body: JSON.stringify({ owner_id: context.user.id, description_template: input.descriptionTemplate }) });
+      if (template?.format !== "wystawiacz-description-templates-v3" && ["{{AUTO}}", "{{TYTUL}}", "{{CZESC}}"].some(marker => templateText.split(marker).length > 2)) return reply({ message: "Kazdy blok automatyczny moze wystapic tylko raz." }, 400);
+      await context.db("workspace_preferences?on_conflict=owner_id", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify({ owner_id: context.user.id, description_template: input.descriptionTemplate }) });
       return reply({ ok: true });
     }
     if (request.method === "GET" && path === "/sessions") return reply({ sessions: await context.db(`workspace_sessions?owner_id=eq.${context.user.id}&select=id,name,revision,updated_at&order=updated_at.desc&limit=100`) });

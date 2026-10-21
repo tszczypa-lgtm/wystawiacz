@@ -25,7 +25,8 @@ globalThis.fetch = async (input, options = {}) => {
   if (url.includes("/rest/v1/workspace_preferences")) {
     if (options.method === "POST") {
       const body = JSON.parse(options.body); assert.equal(body.owner_id, owner); storedDescriptionTemplate = body.description_template;
-      return Response.json({});
+      assert.ok(options.headers.Prefer.includes("return=representation"), "PostgREST upsert must return JSON, not an empty 201 response");
+      return Response.json([{ description_template: storedDescriptionTemplate }], { status: 201 });
     }
     return Response.json([{ description_template: storedDescriptionTemplate }]);
   }
@@ -78,6 +79,13 @@ try {
   const duplicateTitle = JSON.stringify({ format: "wystawiacz-description-v2", text: "{{TYTUL}}\n{{TYTUL}}" });
   assert.equal((await handleWorkspaceApi(request("/api/workspace/preferences", "PUT", { descriptionTemplate: duplicateTitle }), env)).status, 400);
   assert.equal((await handleWorkspaceApi(request("/api/workspace/preferences", "PUT", { descriptionTemplate: "Stary opis\n{{AUTO}}" }), env)).status, 200);
+  const templates = { format: "wystawiacz-description-templates-v3", selectedId: owner, templates: [
+    { id: owner, name: "Pierwszy", text: "{{TYTUL}}\n{{AUTO}}" }, { id: other, name: "Drugi", text: "{{CZESC}}\n{{AUTO}}" },
+  ] };
+  assert.equal((await handleWorkspaceApi(request("/api/workspace/preferences", "PUT", { descriptionTemplate: JSON.stringify(templates) }), env)).status, 200);
+  assert.equal((await (await handleWorkspaceApi(request("/api/workspace/preferences"), env)).json()).descriptionTemplate, JSON.stringify(templates));
+  assert.equal((await handleWorkspaceApi(request("/api/workspace/preferences", "PUT", { descriptionTemplate: JSON.stringify({ ...templates, selectedId: "invalid" }) }), env)).status, 400);
+  assert.equal((await handleWorkspaceApi(request("/api/workspace/preferences", "PUT", { descriptionTemplate: JSON.stringify({ ...templates, templates: [templates.templates[0], templates.templates[0]] }) }), env)).status, 400);
   const payload = { id: productId, revision: 1, payload: { format: "wystawiacz-allegro-session", products: [{ photoNames: [], image: "not stored" }] } };
   assert.equal((await handleWorkspaceApi(request("/api/workspace/session", "PUT", payload, { Origin: "https://evil.test" }), env)).status, 403);
   assert.equal((await handleWorkspaceApi(request("/api/workspace/session", "PUT", payload), env)).status, 409);
