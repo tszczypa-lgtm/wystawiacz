@@ -6,7 +6,7 @@
   try {
     const saved = localStorage.getItem("wystawiacz-catalog-number-mode");
     if (["title", "number", "off"].includes(saved)) mode = saved;
-    suffix.value = Array.from(localStorage.getItem("wystawiacz-catalog-number-suffix") || "").slice(0, 4).join("");
+    suffix.value = Array.from(localStorage.getItem("wystawiacz-catalog-number-suffix") || "").slice(0, 10).join("");
   } catch {}
   function refresh() {
     full.checked = mode === "title";
@@ -24,7 +24,7 @@
   full.addEventListener("change", () => { mode = full.checked ? "title" : "off"; changed(); });
   number.addEventListener("change", () => { mode = number.checked ? "number" : "off"; changed(); });
   suffix.addEventListener("input", () => {
-    suffix.value = Array.from(suffix.value).slice(0, 4).join("");
+    suffix.value = Array.from(suffix.value).slice(0, 10).join("");
     changed();
   });
   window.CatalogNumberOptions = {

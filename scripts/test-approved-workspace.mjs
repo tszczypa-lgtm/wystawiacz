@@ -22,6 +22,14 @@ const server = createServer(async (req, res) => {
       else { saved = JSON.parse(raw); data = { revision: saved.revision + 1 }; }
     }
     if (path === "/api/workspace/sessions") data = { sessions: saved ? [{ id: saved.id, name: saved.payload.name, updated_at: new Date().toISOString() }] : [] };
+    if (path === "/api/workspace/price-comparison") {
+      const number = new URL(req.url, "http://test.local").searchParams.get("number");
+      data = { number, results: [{ source: "Otomoto", status: "ok", checkedAt: new Date().toISOString(), count: 3, message: "Min. z pobranych ofert", lowest: { title: `Pompa ${number}`, url: "https://www.otomoto.pl/czesci/oferta/test-ID123.html", amount: 42.5, currency: "PLN" } }, { source: "OLX", status: "blocked", message: "Serwis blokuje automatyczny odczyt." }] };
+    }
+    if (path === "/api/allegro/shipping-rates") data = { shippingRates: [
+      { id: "own-small", name: "Maly", features: { managedByAllegro: false, isFulfillment: false } }, { id: "own-large", name: "Duzy" },
+      { id: "fulfillment", name: "One Fulfillment", features: { isFulfillment: true } }, { id: "managed", name: "Gotowy Allegro", features: { managedByAllegro: true } },
+    ] };
     if (path === "/api/workspace/session" && req.method === "GET") data = { payload: saved.payload, revision: saved.revision + 1 };
     if (path === "/api/allegro/own-offers") data = { offers: [{ id: "123456789", name: "Pompa ABS BMW F40 1234567" }, { id: "987654321", name: "Pompa ABS BMW F40 1234567A" }] };
     if (path === "/api/allegro/own-offers/123456789") data = { id: "123456789", name: "Pompa ABS BMW F40 1234567", category: { id: "123" }, stock: { available: 2, unit: "PAIR" }, sellingMode: { price: { amount: "500.00" } }, delivery: { shippingRates: { id: "shipping" } }, afterSalesServices: { returnPolicy: { id: "return" }, impliedWarranty: { id: "claim" } }, description: { sections: [{ items: [{ type: "TEXT", content: "<p>Moj opis</p>" }] }] }, productSet: [{ product: { parameters: [] }, marketedBeforeGPSRObligation: true }] };
@@ -90,6 +98,17 @@ try {
   await page.locator("#partNumber").fill("");
   await page.evaluate(() => { state.requiredParameters = []; });
   await page.locator("#titleInput").fill("Pompa ABS");
+  const side = name => page.locator("#titleSideButtons button").filter({ hasText: new RegExp(`^${name}$`) });
+  const frontBox = await side("przód").boundingBox(), rearBox = await side("tył").boundingBox(), leftBox = await side("lewy").boundingBox(), rightBox = await side("prawy").boundingBox();
+  assert.ok(frontBox.y < leftBox.y && leftBox.y < rearBox.y);
+  assert.ok(leftBox.x < frontBox.x && frontBox.x < rightBox.x);
+  assert.ok((await side("lewy przód").boundingBox()).x < frontBox.x);
+  await page.evaluate(() => loadShippingRates());
+  assert.equal(await page.locator("#shippingRateInput").isVisible(), false);
+  assert.equal(await page.locator("[data-shipping-rate-id]").count(), 2);
+  await page.locator('[data-shipping-rate-id="own-large"]').click();
+  assert.equal(await page.locator("#shippingRateInput").inputValue(), "own-large");
+  assert.equal(await page.locator('[data-shipping-rate-id="own-large"]').getAttribute("aria-pressed"), "true");
   await page.locator('[data-use-vehicle-id="a"]').click();
   assert.equal(await page.locator("#descriptionTextInput").isVisible(), false);
   assert.equal(await page.locator("#descriptionPreviewTitle").count(), 0);
@@ -200,6 +219,16 @@ try {
   await page.locator("#descriptionVisualEditor").click();
   await page.getByRole("button", { name: "Wstaw czesc + numer bez auta", exact: true }).click();
   assert.equal(await page.locator('[data-description-token="part"]').textContent(), "SILNICZEK SZYBY 5Q0959801B");
+  await page.locator('[data-description-token="part"]').click();
+  await page.getByRole("button", { name: "Pogrubienie", exact: true }).click();
+  assert.ok((await page.locator("#descriptionTextInput").inputValue()).includes("**{{CZESC}}**"));
+  assert.ok((await page.evaluate(() => buildDescriptionModel().sections[0].items.find(i => i.type === "TEXT").content)).includes("<b>SILNICZEK SZYBY 5Q0959801B</b>"));
+  await page.locator("#titleInput").fill("silniczek szyby VW Golf 5Q0959801B");
+  assert.equal(await page.locator('[data-description-token="part"]').evaluate(chip => Boolean(chip.closest("b,strong"))), true, "Dynamic refresh preserves bold block formatting");
+  await page.locator('[data-description-token="part"]').click();
+  await page.getByRole("button", { name: "Pogrubienie", exact: true }).click();
+  assert.ok(!(await page.locator("#descriptionTextInput").inputValue()).includes("**{{CZESC}}**"));
+  assert.ok(!(await page.locator("#descriptionTextInput").inputValue()).includes("****"));
   const partOutput = await page.evaluate(() => buildDescriptionModel().sections[0].items.find(i => i.type === "TEXT").content);
   assert.ok(partOutput.includes("SILNICZEK SZYBY 5Q0959801B"));
   assert.ok(!partOutput.includes("{{CZESC}}"));
@@ -263,15 +292,20 @@ try {
     await row.locator("input").check(); await row.locator("button").first().click();
     assert.equal(new URL(await page.evaluate(() => window.opened.at(-1)[0])).searchParams.get("search[order]"), "filter_float_price:asc");
   }
-  await page.locator("#priceUsedInput").check();
+  assert.equal(await page.locator("#priceUsedInput").count(), 0);
   await page.locator("#searchAllegroPartButton").click();
-  assert.equal(new URL(await page.evaluate(() => window.opened.at(-1)[0])).searchParams.get("stan"), "używane");
+  assert.equal(new URL(await page.evaluate(() => window.opened.at(-1)[0])).searchParams.has("stan"), false);
+  await page.locator("#checkMarketPrices").click();
+  await page.waitForSelector('[data-price-source="Otomoto"] a');
+  assert.ok((await page.locator('[data-price-source="Otomoto"]').innerText()).includes("42,50"));
+  assert.ok((await page.locator('[data-price-source="OLX"]').innerText()).includes("blokuje"));
+  await page.locator('[data-price-source="Otomoto"] button').click();
+  assert.equal(await page.locator("#priceInput").inputValue(), "42.50");
   await mkdir(new URL("../outputs/approved-check/", import.meta.url), { recursive: true });
   await page.screenshot({ path: fileURLToPath(new URL("../outputs/approved-check/workspace.png", import.meta.url)), fullPage: true });
   conflict = false;
   await page.reload();
   assert.equal(await page.locator(".cloud-session-controls input").isChecked(), true, "Autosave stays enabled after reload");
-  assert.equal(await page.locator("#priceUsedInput").isChecked(), true);
   const writesBefore = writes;
   await page.locator("#titleInput").fill("Nowy opis po odswiezeniu");
   await page.waitForFunction(() => document.querySelector("#sessionStatus").textContent.includes("Zapisano na serwerze"));

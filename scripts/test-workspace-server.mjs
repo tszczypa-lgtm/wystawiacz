@@ -5,7 +5,8 @@ const moduleUrl = source => `data:text/javascript;base64,${Buffer.from(ts.transp
 const validation = moduleUrl(await readFile(new URL("../lib/account-validation.ts", import.meta.url), "utf8"));
 const account = moduleUrl((await readFile(new URL("../lib/account-api.ts", import.meta.url), "utf8")).replace('"./account-validation"', JSON.stringify(validation)));
 const { accountAccess } = await import(account);
-const { handleWorkspaceApi } = await import(moduleUrl((await readFile(new URL("../lib/workspace-api.ts", import.meta.url), "utf8")).replace('"./account-api"', JSON.stringify(account))));
+const pricing = moduleUrl(await readFile(new URL("../lib/price-comparison.ts", import.meta.url), "utf8"));
+const { handleWorkspaceApi } = await import(moduleUrl((await readFile(new URL("../lib/workspace-api.ts", import.meta.url), "utf8")).replace('"./account-api"', JSON.stringify(account)).replace('"./price-comparison"', JSON.stringify(pricing))));
 const { handleAllegroApi, sealConnection } = await import(moduleUrl(await readFile(new URL("../lib/allegro-api.ts", import.meta.url), "utf8")));
 const owner = "00000000-0000-0000-0000-000000000001", other = "00000000-0000-0000-0000-000000000002";
 const productId = "10000000-0000-0000-0000-000000000001";
@@ -54,6 +55,7 @@ globalThis.fetch = async (input, options = {}) => {
   }
   if (url.includes("/auth/oauth/token")) return Response.json({ access_token: "new-seller", refresh_token: "refresh", expires_in: 3600 });
   if (url.endsWith("/me")) return Response.json({ id: new Headers(options.headers).get("Authorization") === "Bearer new-seller" ? "987" : "123" });
+  if (url.includes("/sale/shipping-rates?seller.id=")) { assert.ok(url.endsWith("seller.id=123")); return Response.json({ shippingRates: [{ id: "own", name: "Moj cennik", features: { managedByAllegro: false, isFulfillment: false } }] }); }
   if (url.includes("/sale/offers?offer.id=")) return Response.json({ offers: [] });
   if (url.includes("/sale/offers?external.id=")) return Response.json({ offers: recovered ? [{ id: "123456789" }] : [] });
   if (url.includes("/sale/offers?name=")) return Response.json({ offers: [{ id: "123456789", name: "Pompa 1234567" }] });
@@ -71,6 +73,8 @@ try {
   assert.equal(accountAccess({ ...trial, trial_until: "2020-01-01" }, true).allowed, false);
   assert.equal(accountAccess({ ...trial, suspended: true }, true, true).allowed, false);
   assert.equal((await handleWorkspaceApi(request("/api/workspace/sessions?owner_id=" + other), env)).status, 200);
+  assert.equal((await handleWorkspaceApi(request("/api/workspace/price-comparison?number=https://evil.test"), env)).status, 400);
+  assert.equal((await handleAllegroApi(request("/api/allegro/shipping-rates"), env)).status, 200);
   assert.equal((await handleWorkspaceApi(request(`/api/workspace/session?id=${productId}`), env)).status, 404);
   assert.equal((await handleWorkspaceApi(request("/api/workspace/session?id=bad"), env)).status, 400);
   const visualTemplate = JSON.stringify({ format: "wystawiacz-description-v2", text: "Uwagi\n{{TYTUL}}\n{{AUTO}}" });

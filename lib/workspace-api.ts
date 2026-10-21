@@ -1,4 +1,5 @@
 import { accountContext, type AccountEnv } from "./account-api";
+import { searchPriceComparison } from "./price-comparison";
 const uuid = /^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i;
 
 export async function handleWorkspaceApi(request: Request, env: AccountEnv) {
@@ -8,6 +9,10 @@ export async function handleWorkspaceApi(request: Request, env: AccountEnv) {
     if (context.account.suspended) return reply({ message: "Konto zawieszone." }, 403);
     const url = new URL(request.url);
     const path = url.pathname.slice("/api/workspace".length);
+    if (path === "/price-comparison" && request.method === "GET") {
+      const result = await searchPriceComparison(context.user.id, url.searchParams.get("number") || "");
+      return "error" in result ? reply({ message: result.error }, result.status) : reply(result);
+    }
     if (path === "/preferences" && request.method === "GET") {
       const rows = await context.db(`workspace_preferences?owner_id=eq.${context.user.id}&select=description_template`) as { description_template: string }[];
       return reply({ descriptionTemplate: rows[0]?.description_template ?? null });

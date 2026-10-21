@@ -3,6 +3,7 @@
     mount({ number, title, notify }) {
       const actions = document.querySelector(".search-actions");
       const grid = document.createElement("div"); grid.className = "price-search-table";
+      const quotes = new Map();
       function option(text, key) {
         const label = document.createElement("label"); label.className = "price-search-sort";
         const input = document.createElement("input"); input.type = "checkbox"; label.append(input, text);
@@ -18,7 +19,6 @@
         if (sort) { sort.lastChild.textContent = " Od najniższej"; filters.append(sort); }
         if (name === "Allegro") {
           const poland = document.getElementById("priceShippingPolandInput").closest("label"); poland.lastChild.textContent = " Z Polski"; filters.append(poland);
-          filters.append(document.getElementById("priceUsedInput").closest("label"));
         }
         if (name === "Ovoko") { const hint = document.createElement("small"); hint.textContent = "Cenę i stan filtruj w Ovoko"; hint.title = "W wynikach Ovoko wybierz Najpierw najtańsze oraz stan Używany. Nie mamy potwierdzonego linku sortowania."; filters.append(hint); }
         for (const [index, getter] of [number, title].entries()) {
@@ -27,21 +27,66 @@
           button.setAttribute("aria-label", `${name}: ${index ? "po tytule" : "po numerze"}`);
           if (!ids.length) button.onclick = () => {
             const query = getter().trim(); if (!query) { notify("Brakuje tekstu do wyszukania."); return; }
-            const url = name === "Ovoko" ? new URL("https://ovoko.pl/szukaj") : name === "Otomoto" ? new URL("https://www.otomoto.pl/czesci") : new URL(`https://www.olx.pl/motoryzacja/czesci-samochodowe/q-${encodeURIComponent(query)}/`);
+            const url = name === "Ovoko" ? new URL("https://ovoko.pl/szukaj") : name === "Otomoto" ? new URL(`https://www.otomoto.pl/czesci/q-${encodeURIComponent(query)}`) : new URL(`https://www.olx.pl/motoryzacja/czesci-samochodowe/q-${encodeURIComponent(query)}/`);
             if (name === "Ovoko") { url.searchParams.set("q", query); if (!index) url.searchParams.set("exact", "1"); }
-            if (name === "Otomoto") url.searchParams.set("search[filter_string_query]", query);
             if (sort?.querySelector("input").checked) url.searchParams.set("search[order]", "filter_float_price:asc");
             window.open(url.href, "_blank", "noopener,noreferrer");
           };
           row.append(button);
         }
-        row.append(filters); grid.append(row);
+        row.append(filters);
+        if (name !== "Google") { const quote = document.createElement("div"); quote.className = "price-quote"; quote.dataset.priceSource = name; quote.setAttribute("role", "status"); row.append(quote); quotes.set(name, quote); }
+        grid.append(row);
       }
       actions.querySelector("span").after(grid);
+      const check = document.createElement("button"); check.type = "button"; check.id = "checkMarketPrices"; check.className = "secondary-button"; check.textContent = "Sprawdź najniższe ceny";
+      const heading = document.createElement("div"); heading.className = "price-search-heading";
+      const label = actions.querySelector("span"); label.before(heading); heading.append(label, check);
       actions.querySelectorAll(".price-search-group").forEach(node => node.remove());
       const hint = document.createElement("small"); hint.className = "price-comparison-hint";
       hint.textContent = "Porównuj ten sam numer i stronę: część używana, sprawna, kompletna. Dolicz dostawę; najtańsza oferta nie zawsze dotyczy sprawnej części.";
       actions.append(hint);
+      let current = "", revision = 0, timer, controller;
+      const normalized = () => number().replace(/[ .\/-]/g, "").toUpperCase();
+      function clear(message) { for (const quote of quotes.values()) quote.replaceChildren(document.createTextNode(message)); }
+      async function loadPrices() {
+        const query = normalized();
+        if (!/^[A-Z0-9]{5,32}$/.test(query) || !/\d/.test(query)) { clear("Wpisz pełny numer części, aby pobrać ceny."); return; }
+        clearTimeout(timer); controller?.abort(); const activeController = new AbortController(); controller = activeController; const requestId = ++revision;
+        clear("Pobieram cenę..."); check.disabled = true;
+        try {
+          const token = await window.getWystawiaczToken();
+          if (requestId !== revision) return;
+          const response = await fetch(`/api/workspace/price-comparison?number=${encodeURIComponent(query)}`, { headers: { Authorization: `Bearer ${token}` }, signal: activeController.signal });
+          const data = await response.json(); if (!response.ok) throw Error(data.message || "Nie udało się odczytać cen.");
+          if (requestId !== revision || query !== normalized()) return;
+          clear("Serwis nie zwrócił ceny.");
+          for (const result of Array.isArray(data.results) ? data.results : []) {
+            const quote = quotes.get(result.source); if (!quote) continue;
+            quote.textContent = result.message || "Brak ceny.";
+            if (result.status !== "ok" || result.lowest?.currency !== "PLN" || !Number.isFinite(result.lowest?.amount) || result.lowest.amount <= 0) continue;
+            const allowed = { Allegro: "allegro.pl", Ovoko: "ovoko.pl", Otomoto: "otomoto.pl", OLX: "olx.pl" }[result.source];
+            let url; try { url = new URL(result.lowest.url); } catch { continue; }
+            if (url.protocol !== "https:" || url.username || url.password || !(url.hostname === allowed || url.hostname.endsWith(`.${allowed}`))) continue;
+            const link = document.createElement("a"); link.href = url.href; link.target = "_blank"; link.rel = "noopener noreferrer";
+            link.textContent = new Intl.NumberFormat("pl-PL", { style: "currency", currency: "PLN" }).format(result.lowest.amount);
+            link.title = `${result.lowest.title}\n${result.message}\nSprawdzono: ${result.checkedAt}`;
+            const count = document.createElement("small"); count.textContent = `min. z ${result.count} pobranych ofert · bez dostawy`;
+            const use = document.createElement("button"); use.type = "button"; use.textContent = "Użyj ceny";
+            use.onclick = () => { if (query !== normalized()) return; const input = document.querySelector("#priceInput"); input.value = result.lowest.amount.toFixed(2); input.dispatchEvent(new Event("input", { bubbles: true })); };
+            quote.replaceChildren(link, count, use);
+          }
+        } catch (error) { if (requestId === revision && error.name !== "AbortError") clear(error.message); }
+        finally { if (requestId === revision) check.disabled = false; }
+      }
+      function refresh() {
+        const query = normalized(); if (query === current) return;
+        current = query; revision++; controller?.abort(); clearTimeout(timer); check.disabled = false;
+        clear(query ? "Czekam na pełny numer..." : "Wpisz numer części, aby pobrać ceny.");
+        if (/^[A-Z0-9]{5,32}$/.test(query) && /\d/.test(query)) timer = setTimeout(loadPrices, 1600);
+      }
+      document.getElementById("partNumber").addEventListener("input", refresh);
+      check.onclick = loadPrices; window.PriceSearch.refresh = refresh; refresh();
     }
   };
 })();

@@ -179,8 +179,9 @@ try {
   assert.equal(await catalog.inputValue(), "5Q0919275B ABCD");
   assert.equal(await oe.inputValue(), "5Q0919275B", "OE stays the real part number");
   assert.equal(await page.locator("#titleInput").inputValue(), originalTitle, "Auction title is not modified");
-  await page.locator("#catalogNumberSuffix").fill("ABCDE");
-  assert.equal(await page.locator("#catalogNumberSuffix").inputValue(), "ABCD");
+  await page.locator("#catalogNumberSuffix").fill("ABCDEFGHIJK");
+  assert.equal(await page.locator("#catalogNumberSuffix").inputValue(), "ABCDEFGHIJ");
+  assert.equal(await catalog.inputValue(), "5Q0919275B ABCDEFGHIJ");
   await page.locator("#catalogNumberWithSuffix").uncheck();
   await catalog.fill("Manual catalog value");
   await catalog.dispatchEvent("change");

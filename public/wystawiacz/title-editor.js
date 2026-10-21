@@ -47,6 +47,7 @@
     input.addEventListener("focus", () => { hasCaret = true; });
     for (const side of ["przód", "tył", "lewy", "prawy", "lewy przód", "prawy przód", "lewy tył", "prawy tył"]) {
       const button = document.createElement("button"); button.type = "button"; button.textContent = side;
+      button.style.gridArea = ({ "przód": "front", "tył": "rear", "lewy": "left", "prawy": "right", "lewy przód": "frontLeft", "prawy przód": "frontRight", "lewy tył": "rearLeft", "prawy tył": "rearRight" })[side];
       button.addEventListener("mousedown", event => event.preventDefault());
       button.onclick = () => {
         let start = input.selectionStart, end = input.selectionEnd;
@@ -67,6 +68,7 @@
       };
       sides?.append(button);
     }
+    const car = document.createElement("span"); car.className = "side-diagram-car"; car.setAttribute("aria-hidden", "true"); car.textContent = "AUTO"; sides?.append(car);
     refresh();
     return { refresh };
   }

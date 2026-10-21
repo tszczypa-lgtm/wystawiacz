@@ -253,8 +253,12 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
         return json(await remote(`/sale/products/${id}?language=pl-PL`));
       }
       if (path === "/title-suggestions") return json(await searchTitleSuggestions(url.searchParams.get("number") || "", user.id, env, remote));
+      if (path === "/shipping-rates") {
+        const seller = await remote("/me");
+        return json(await remote(`/sale/shipping-rates?seller.id=${encodeURIComponent(seller.id)}`));
+      }
       if (path === "/health") return json({ ok: true, connected: Boolean(connection?.accessToken), build: "2026-06-02.35", mode: "web" });
-      const routes: Record<string, string> = { "/me": "/me", "/shipping-rates": "/sale/shipping-rates", "/responsible-producers": "/sale/responsible-producers", "/responsible-persons": "/sale/responsible-persons" };
+      const routes: Record<string, string> = { "/me": "/me", "/responsible-producers": "/sale/responsible-producers", "/responsible-persons": "/sale/responsible-persons" };
       if (routes[path]) return json(await remote(routes[path]));
       if (["/return-policies", "/implied-warranties", "/warranties"].includes(path)) {
         const seller = await remote("/me");

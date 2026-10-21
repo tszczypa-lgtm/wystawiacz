@@ -115,6 +115,11 @@
 .price-brand-olx { color: #004d50; background: #d6f5f1; }
 .price-brand-google { color: #3268c4; background: #eef4ff; }
 .price-site-filters { display: flex; flex-wrap: wrap; gap: 5px 12px; min-width: 0; }
+.price-search-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex-basis: 100%; }
+.price-quote { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 5px 9px; font-size: 10px; color: var(--muted); margin: 0 0 5px 76px; }
+.price-quote a { color: var(--orange-dark); font-weight: 800; font-size: 15px; }
+.price-quote button { padding: 4px 7px; border: 1px solid var(--line); border-radius: 6px; background: #fff; cursor: pointer; font: inherit; }
+#checkMarketPrices { width: auto; font-size: 12px; padding: 7px 10px; }
 .price-site-filters .price-search-sort, .price-site-filters small { font-size: 10px; }
 .price-comparison-hint { flex-basis: 100%; max-width: 660px; font-size: 11px; color: var(--muted); }
 .pricing-final-row { max-width: 320px; padding: 14px; margin: 14px 0 18px; border: 2px solid var(--orange); border-radius: 12px; background: #fff7ed; }
@@ -138,9 +143,15 @@
 #descriptionExpressionForm { display: grid; gap: 6px; margin: 8px 0; }
 #descriptionExpressionForm input, #descriptionExpressionForm textarea { width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 7px; padding: 7px; font: inherit; font-size: 12px; }
 .expression-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-.title-side-buttons { display: flex; flex-wrap: wrap; gap: 5px; margin: 4px 0 14px; align-items: center; }
-.title-side-buttons small { width: 100%; color: var(--muted); font-size: 11px; }
+.title-side-buttons { display: grid; width: min(100%, 360px); grid-template-columns: 1fr 1fr 1fr; grid-template-areas: "label label label" "frontLeft front frontRight" "left car right" "rearLeft rear rearRight"; gap: 5px; margin: 4px 0 14px; align-items: center; }
+.title-side-buttons small { grid-area: label; color: var(--muted); font-size: 11px; }
+.side-diagram-car { grid-area: car; justify-self: center; display: grid; place-items: center; width: 42px; height: 60px; border: 2px solid #aab5c5; border-radius: 15px 15px 9px 9px; background: linear-gradient(#e3e9f1 20%,#f8fafc 20% 75%,#e3e9f1 75%); font-size: 9px; color: #64748b; letter-spacing: 1px; }
 .title-side-buttons button { width: auto; border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 11px; background: #fff; color: var(--ink); cursor: pointer; }
+.shipping-rate-buttons { display: flex; flex-wrap: wrap; gap: 7px; font-size: 12px; color: var(--muted); }
+.shipping-rate-buttons button { width: auto; padding: 8px 12px; font-size: 12px; }
+.shipping-rate-buttons button[aria-pressed="true"] { border-color: var(--orange); background: #fff1e5; color: var(--orange-dark); }
+#shippingRateInput[hidden] { display: none; }
+#catalogNumberSuffix { width: 130px; }
 .title-side-buttons button:hover, .template-buttons button:hover { border-color: var(--orange); background: #fff7ed; }
 #descriptionTemplateForm[hidden], #descriptionExpressionForm[hidden] { display: none; }
 .after-sales-row { gap: 8px; }

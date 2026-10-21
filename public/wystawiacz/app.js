@@ -106,9 +106,6 @@ try { priceSortLowestInput.checked = localStorage.getItem(priceSortStorageKey) =
 const priceShippingPolandInput = document.querySelector("#priceShippingPolandInput");
 const priceShippingStorageKey = "wystawiacz-price-shipping-poland";
 try { priceShippingPolandInput.checked = localStorage.getItem(priceShippingStorageKey) === "true"; } catch {}
-const priceUsedInput = document.querySelector("#priceUsedInput");
-try { priceUsedInput.checked = localStorage.getItem("wystawiacz-price-used") === "true"; } catch {}
-priceUsedInput.addEventListener("change", () => { try { localStorage.setItem("wystawiacz-price-used", String(priceUsedInput.checked)); } catch {} });
 const productList = document.querySelector("#productList");
 const emptyState = document.querySelector("#emptyState");
 const toast = document.querySelector("#toast");
@@ -398,7 +395,6 @@ function openAllegroSearch(query) {
   const url = new URL("https://allegro.pl/listing");
   if (priceSortLowestInput.checked) url.searchParams.set("order", "p");
   if (priceShippingPolandInput.checked) url.searchParams.set("miejsce-wysylki", "polska");
-  if (priceUsedInput.checked) url.searchParams.set("stan", "używane");
   url.searchParams.set("string", "");
   openSearch(url.href, query);
 }
@@ -644,6 +640,8 @@ function renderPhotos() {
 function updateSummary() {
   titleEditor.refresh();
   summaryTitle.textContent = titleInput.value.trim() || "Brak tytułu";
+  renderShippingRateButtons();
+  window.PriceSearch.refresh?.();
   renderDescriptionPreview();
   detectProductDetails();
   if (state.requiredParameters.length) {
@@ -755,6 +753,7 @@ function resetForm() {
   responsiblePersonInput.value = "";
   safetyInformationInput.value = "";
   if (state.shippingRates.length) shippingRateInput.value = state.shippingRates[0].id;
+  renderShippingRateButtons();
   renderAfterSalesInputs();
   suggestionPanel.classList.add("hidden");
   summaryCard.classList.add("hidden");
@@ -1271,13 +1270,30 @@ async function refreshConnectedAccountInfo() {
 async function loadShippingRates() {
   try {
     const result = await apiRequest("/api/shipping-rates");
-    state.shippingRates = result.shippingRates || [];
+    const selected = shippingRateInput.value;
+    state.shippingRates = (result.shippingRates || []).filter(rate => !rate.features?.isFulfillment && !rate.features?.managedByAllegro && !/one\s*fulfill?ment/i.test(rate.name || ""));
     shippingRateInput.innerHTML = state.shippingRates.length
       ? state.shippingRates.map((rate) => `<option value="${escapeHtml(rate.id)}">${escapeHtml(fixEncoding(rate.name))}</option>`).join("")
-      : '<option value="">Brak zapisanych profili wysyłki</option>';
+      : '<option value="">Brak Twoich własnych profili wysyłki</option>';
+    if (state.shippingRates.some(rate => rate.id === selected)) shippingRateInput.value = selected;
   } catch (error) {
     shippingRateInput.innerHTML = `<option value="">Nie udało się pobrać profili</option>`;
     showToast(`Profile wysyłki: ${error.message}`);
+  }
+  renderShippingRateButtons();
+}
+
+function renderShippingRateButtons() {
+  const container = document.getElementById("shippingRateButtons");
+  if (!container) return;
+  container.replaceChildren();
+  const rates = state.shippingRates.filter(rate => !rate.features?.isFulfillment && !rate.features?.managedByAllegro && !/one\s*fulfill?ment/i.test(rate.name || ""));
+  if (!rates.length) { container.textContent = shippingRateInput.options[0]?.textContent || "Brak Twoich profili wysyłki."; return; }
+  for (const rate of rates) {
+    const button = document.createElement("button"); button.type = "button"; button.className = "secondary-button"; button.textContent = fixEncoding(rate.name); button.dataset.shippingRateId = rate.id;
+    button.setAttribute("aria-pressed", String(shippingRateInput.value === rate.id));
+    button.onclick = () => { shippingRateInput.value = rate.id; shippingRateInput.dispatchEvent(new Event("change", { bubbles: true })); renderShippingRateButtons(); };
+    container.append(button);
   }
 }
 

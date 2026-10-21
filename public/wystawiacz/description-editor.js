@@ -70,7 +70,7 @@
         if (["SCRIPT", "STYLE", "IFRAME", "OBJECT"].includes(node.tagName)) return "";
         if (node.tagName === "BR") return "\n";
         const text = Array.from(node.childNodes).map(serialize).join("");
-        if (["B", "STRONG"].includes(node.tagName)) return `**${text}**`;
+        if (["B", "STRONG"].includes(node.tagName)) return text ? `**${text}**` : "";
         if (node.tagName === "LI") return `- ${text.trim()}\n`;
         return ["P", "DIV", "H1", "H2", "H3", "UL", "OL"].includes(node.tagName) ? text.replace(/\n?$/, "\n") : text;
       }
@@ -115,7 +115,7 @@
       editor.addEventListener("click", event => {
         const chip = event.target.closest?.("[data-description-token]");
         if (!chip) return;
-        const range = document.createRange(); range.setStartAfter(chip); range.collapse(true);
+        const range = document.createRange(); range.selectNode(chip);
         editor.focus(); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); remember();
       });
       editor.addEventListener("paste", event => {
@@ -126,7 +126,35 @@
         const button = document.createElement("button"); button.type = "button"; button.textContent = label;
         button.addEventListener("mousedown", event => event.preventDefault()); button.onclick = action; bar.append(button); return button;
       }
-      const boldButton = button("B", () => { restore(); document.execCommand("bold"); commit(); });
+      function setTokenBold(chip, bold) {
+        let wrapper = chip.closest("b,strong");
+        if (bold) {
+          if (wrapper && editor.contains(wrapper)) return;
+          wrapper = document.createElement("b"); chip.replaceWith(wrapper); wrapper.append(chip); return;
+        }
+        // Split an enclosing bold run so formatting this block does not change its neighbours.
+        while (wrapper && editor.contains(wrapper)) {
+          const before = document.createRange(); before.selectNodeContents(wrapper); before.setEndBefore(chip);
+          const left = before.extractContents();
+          const after = document.createRange(); after.selectNodeContents(wrapper); after.setStartAfter(chip);
+          const right = after.extractContents(), replacement = document.createDocumentFragment();
+          if (left.childNodes.length) { const b = wrapper.cloneNode(false); b.append(left); replacement.append(b); }
+          replacement.append(chip);
+          if (right.childNodes.length) { const b = wrapper.cloneNode(false); b.append(right); replacement.append(b); }
+          wrapper.replaceWith(replacement); wrapper = chip.closest("b,strong");
+        }
+      }
+      const boldButton = button("B", () => {
+        const range = restore();
+        const tokens = range.collapsed ? [] : [...editor.querySelectorAll("[data-description-token]")].filter(chip => range.intersectsNode(chip));
+        const onlyToken = tokens.length === 1 && range.toString().replace(/\u200b/g, "").trim() === tokens[0].textContent.trim();
+        const bold = onlyToken ? !tokens[0].closest("b,strong") : !document.queryCommandState("bold");
+        if (!onlyToken) document.execCommand("bold");
+        for (const chip of tokens) setTokenBold(chip, bold);
+        if (onlyToken) { const selected = document.createRange(); selected.selectNode(tokens[0]); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(selected); }
+        commit();
+      });
+      editor.addEventListener("keydown", event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "b") { event.preventDefault(); boldButton.click(); } });
       boldButton.className = "description-format-button"; boldButton.setAttribute("aria-label", "Pogrubienie"); boldButton.title = "Pogrubienie zaznaczonego tekstu (Ctrl+B)";
       function insertToken(kind) {
         const existing = editor.querySelector(`[data-description-token="${kind}"]`);
