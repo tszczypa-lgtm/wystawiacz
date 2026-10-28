@@ -16,7 +16,7 @@ export function BillingPanel() {
   const [checking, setChecking] = useState(false);
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [requestEarlyStart, setRequestEarlyStart] = useState(false);
-  const [tpay, setTpay] = useState<{ enabled: boolean; sandbox: boolean; issue?: string } | null>(null);
+  const [tpay, setTpay] = useState<{ enabled: boolean; sandbox: boolean; canCheckout: boolean; issue?: string } | null>(null);
   async function refresh() {
     const result = await accountRequest<AccountInfo>("/me");
     setInfo(result);
@@ -28,7 +28,7 @@ export function BillingPanel() {
     void accountRequest<AccountInfo>("/me").then(result => {
       if (mounted) { setInfo(result); setCompany(companyForForm(result.account.company)); }
     }).catch(error => { if (mounted) setMessage(error.message); });
-    void accountRequest<{ enabled: boolean; sandbox: boolean; issue?: string }>("/tpay/status").then(result => {
+    void accountRequest<{ enabled: boolean; sandbox: boolean; canCheckout: boolean; issue?: string }>("/tpay/status").then(result => {
       if (mounted) setTpay(result);
     }).catch(() => { if (mounted) setMessage("Nie udalo sie odczytac konfiguracji Tpay. Odswiez strone; jesli blad zostaje, administrator powinien sprawdzic wdrozenie."); });
     return () => { mounted = false; };
@@ -78,12 +78,12 @@ export function BillingPanel() {
         {!info.price && info.plannedPrice && <p className="mt-5 text-xl font-bold">{tpay?.enabled ? "Dostep: 500 zl brutto za miesiac. Bez automatycznego odnawiania." : "Planowany abonament: 500 zl brutto / miesiac. BLIK zostanie uruchomiony po konfiguracji Tpay."}</p>}
         {tpay?.enabled && tpay.sandbox && <p className="mt-4 text-amber-200">Tryb testowy Tpay: bez prawdziwych oplat i bez przedluzania dostepu produkcyjnego.</p>}
         {info.isAdmin && tpay?.issue && <p role="status" className="mt-4 text-amber-200">Tpay: {tpay.issue}</p>}
-        {tpay?.enabled && tpay.sandbox && !info.isAdmin && <p className="mt-4 text-amber-200">Przycisk testu Tpay jest dostepny tylko na koncie administratora. Przelacz konto Wystawiacza, nie konto Allegro.</p>}
+        {tpay?.enabled && tpay.sandbox && !tpay.canCheckout && !info.account.suspended && <p className="mt-4 text-amber-200">Test Tpay wymaga upowaznienia konta przez administratora. Nie wymaga nadawania uprawnien administratora ani podlaczania konta Allegro.</p>}
         {info.account.trial_until && Date.parse(info.account.trial_until) > Date.now() && Date.parse(info.account.trial_until) - Date.now() <= 3 * 86400000 && <p className="mt-4 text-amber-200">Okres probny konczy sie w ciagu 3 dni. Sesje i wystawione aukcje nie zostana usuniete.</p>}
         {!info.billingEnabled && !tpay?.enabled && <p className="mt-4 text-white/60">{info.billingIssue ? "Zakup chwilowo niedostępny. Administrator musi sprawdzić konfigurację płatności." : "Zakup abonamentu nie jest jeszcze uruchomiony. Nie pobieramy opłaty za rejestrację."}</p>}
-        {tpay?.enabled && !info.account.suspended && (!tpay.sandbox || info.isAdmin) && <CheckoutAcceptance sandbox={tpay.sandbox} disabled={busy} acceptTerms={acceptTerms} requestEarlyStart={requestEarlyStart} onTerms={setAcceptTerms} onEarlyStart={setRequestEarlyStart} />}
+        {tpay?.canCheckout && <CheckoutAcceptance sandbox={tpay.sandbox} disabled={busy} acceptTerms={acceptTerms} requestEarlyStart={requestEarlyStart} onTerms={setAcceptTerms} onEarlyStart={setRequestEarlyStart} />}
         <div className="mt-5 flex flex-wrap gap-3">
-          {tpay?.enabled && !info.account.suspended && (!tpay.sandbox || info.isAdmin) && <button disabled={busy || !acceptTerms || !requestEarlyStart} onClick={tpayPayment} className="rounded-xl bg-[#ff5a00] px-5 py-3 font-bold disabled:opacity-50">{tpay.sandbox ? "Test zamowienia i platnosci Tpay" : "Zamawiam i place 500 zl"}</button>}
+          {tpay?.canCheckout && <button disabled={busy || !acceptTerms || !requestEarlyStart} onClick={tpayPayment} className="rounded-xl bg-[#ff5a00] px-5 py-3 font-bold disabled:opacity-50">{tpay.sandbox ? "Test zamowienia i platnosci Tpay" : "Zamawiam i place 500 zl"}</button>}
           {info.billingEnabled && !info.account.suspended && !info.isAdmin && info.account.access_mode !== "free" && info.account.subscription_status === "none" && <button disabled={busy} onClick={() => payment("/checkout")} className="rounded-xl bg-[#ff5a00] px-5 py-3 font-bold disabled:opacity-50">Kup abonament</button>}
           {info.billingEnabled && !info.account.suspended && ["canceled", "incomplete_expired"].includes(info.account.subscription_status) && <button disabled={busy} onClick={() => payment("/checkout")} className="rounded-xl bg-[#ff5a00] px-5 py-3 font-bold disabled:opacity-50">Wznów abonament</button>}
           {info.hasCustomer && <button disabled={busy} onClick={() => payment("/portal")} className="rounded-xl border border-white/20 px-5 py-3 font-bold disabled:opacity-50">Płatności, dokumenty i anulowanie</button>}

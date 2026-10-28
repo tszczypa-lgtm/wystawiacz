@@ -8,12 +8,22 @@ export type TpayEnv = AccountEnv & {
   TPAY_ENABLED?: string; TPAY_ENVIRONMENT?: string; TPAY_LIVE_APPROVED?: string;
   TPAY_CLIENT_ID?: string; TPAY_CLIENT_SECRET?: string;
   TPAY_MERCHANT_ID?: string; TPAY_SECURITY_CODE?: string;
+  TPAY_SANDBOX_REVIEWER_IDS?: string; TPAY_SANDBOX_REVIEWER_UNTIL?: string;
 };
 class PaymentError extends Error {
   constructor(public status: number, message: string, public code = "TPAY_ERROR") { super(message); }
 }
 const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { "Cache-Control": "no-store" } });
 const uuid = /^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i;
+function sandboxReviewer(env: TpayEnv, ownerId: string) {
+  if (env.TPAY_ENVIRONMENT !== "sandbox" || !uuid.test(ownerId)) return false;
+  const until = Date.parse(env.TPAY_SANDBOX_REVIEWER_UNTIL || "");
+  if (!Number.isFinite(until) || until <= Date.now()) return false;
+  return (env.TPAY_SANDBOX_REVIEWER_IDS || "").split(",").some(value => {
+    const id = value.trim();
+    return uuid.test(id) && id.toLowerCase() === ownerId.toLowerCase();
+  });
+}
 export function tpayConfig(env: TpayEnv) {
   const sandbox = env.TPAY_ENVIRONMENT === "sandbox";
   if (!sandbox && env.TPAY_ENVIRONMENT !== "production") throw new PaymentError(503, "Nie wybrano srodowiska Tpay.");
@@ -129,7 +139,8 @@ export async function handleTpayApi(request: Request, env: TpayEnv): Promise<Res
         issue = missing.length ? `Brakuje ustawien Cloudflare: ${missing.join(", ")}.` : error instanceof PaymentError ? error.message : "Sprawdz APP_ORIGIN i konfiguracje Tpay.";
         if (env.TPAY_MERCHANT_ID && !/^\d+$/.test(env.TPAY_MERCHANT_ID)) issue = "TPAY_MERCHANT_ID musi zawierac tylko cyfry, bez spacji.";
       }
-      return json({ enabled, sandbox, amount: 50000, currency: "PLN", ...(context.isAdmin ? { issue } : {}) });
+      const canCheckout = enabled && !context.account.suspended && (!sandbox || context.isAdmin || sandboxReviewer(env, context.user.id));
+      return json({ enabled, sandbox, canCheckout, amount: 50000, currency: "PLN", ...(context.isAdmin ? { issue } : {}) });
     }
     if (path !== "/checkout" || request.method !== "POST") return json({ message: "Nieznana trasa platnosci." }, 404);
     const config = tpayConfig(env);
@@ -137,7 +148,7 @@ export async function handleTpayApi(request: Request, env: TpayEnv): Promise<Res
     if (!config.sandbox && !salesPolicy.approved) throw new PaymentError(503, "Dokumenty sprzedazy nie sa jeszcze zatwierdzone. Produkcyjne platnosci pozostaja wylaczone.");
     if (request.headers.get("Origin") !== config.origin || new URL(request.url).origin !== config.origin) throw new PaymentError(403, "Nieprawidlowa domena.");
     if (context.account.suspended) throw new PaymentError(403, "Konto zawieszone.");
-    if (config.sandbox && !context.isAdmin) throw new PaymentError(403, "Platnosci testowe sa dostepne tylko administratorowi.");
+    if (config.sandbox && !context.isAdmin && !sandboxReviewer(env, context.user.id)) throw new PaymentError(403, "Platnosci testowe sa dostepne tylko administratorowi lub upowaznionemu kontu weryfikacyjnemu.");
     if (context.account.stripe_subscription_id) throw new PaymentError(409, "Najpierw wyjasnij istniejacy abonament z administratorem.");
     if (!request.headers.get("Content-Type")?.startsWith("application/json")) throw new PaymentError(400, "Brak oswiadczen zamowienia.");
     if (Number(request.headers.get("Content-Length")) > 4096) throw new PaymentError(413, "Zbyt duzo danych.");

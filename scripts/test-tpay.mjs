@@ -136,6 +136,22 @@ try {
   admin = false;
   status = await (await handleTpayApi(request("/status"), { ...env, TPAY_SECURITY_CODE: undefined })).json();
   assert.equal(status.issue, undefined); admin = true;
+  const reviewEnv = { ...env, TPAY_SANDBOX_REVIEWER_IDS: owner, TPAY_SANDBOX_REVIEWER_UNTIL: new Date(Date.now() + 86400000).toISOString() };
+  admin = false;
+  for (const restricted of [env, { ...reviewEnv, TPAY_SANDBOX_REVIEWER_IDS: "*" }, { ...reviewEnv, TPAY_SANDBOX_REVIEWER_IDS: owner + "x" }, { ...reviewEnv, TPAY_SANDBOX_REVIEWER_IDS: "" }, { ...reviewEnv, TPAY_SANDBOX_REVIEWER_UNTIL: "" }, { ...reviewEnv, TPAY_SANDBOX_REVIEWER_UNTIL: "invalid" }, { ...reviewEnv, TPAY_SANDBOX_REVIEWER_UNTIL: "2020-01-01T00:00:00Z" }]) {
+    const denied = await (await handleTpayApi(request("/status"), restricted)).json();
+    assert.equal(denied.canCheckout, false);
+    assert.equal((await handleTpayApi(request(), restricted)).status, 403);
+  }
+  const reviewerStatus = await (await handleTpayApi(request("/status"), reviewEnv)).json();
+  assert.equal(reviewerStatus.canCheckout, true);
+  assert.equal(reviewerStatus.issue, undefined, "Reviewers never receive administrator diagnostics");
+  assert.ok(!JSON.stringify(reviewerStatus).includes(owner), "The reviewer allowlist stays server-side");
+  assert.equal((await handleTpayApi(request(), { ...reviewEnv, TPAY_ENVIRONMENT: "production", TPAY_LIVE_APPROVED: "true" })).status, 503);
+  suspended = true;
+  assert.equal((await (await handleTpayApi(request("/status"), reviewEnv)).json()).canCheckout, false);
+  assert.equal((await handleTpayApi(request(), reviewEnv)).status, 403);
+  suspended = false; admin = true;
   const rejected = Buffer.from(JSON.stringify({ alg: "RS256", x5u: "https://secure.sandbox.tpay.com.evil.test/x509/notifications-jws.pem" })).toString("base64url") + "..abc";
   await assert.rejects(verifyTpayJws(notification(), rejected, "https://secure.sandbox.tpay.com"));
   assert.equal(external, 0);
@@ -155,7 +171,9 @@ try {
   admin = false; assert.equal((await handleTpayApi(request(), env)).status, 403); admin = true;
   suspended = true; assert.equal((await handleTpayApi(request(), env)).status, 403); suspended = false;
   assert.equal(external, 0);
-  let result = await handleTpayApi(request(), env); assert.equal(result.status, 200); assert.equal((await result.json()).url, "https://secure.sandbox.tpay.com/test");
+  admin = false;
+  let result = await handleTpayApi(request(), reviewEnv); assert.equal(result.status, 200); assert.equal((await result.json()).url, "https://secure.sandbox.tpay.com/test");
+  admin = true;
   result = await handleTpayApi(request(), env); assert.equal(result.status, 200); assert.equal(transactions, 1);
   claims = 0; attached = false; lost = true;
   assert.equal((await handleTpayApi(request(), env)).status, 503);
@@ -177,4 +195,4 @@ try {
     assert.ok(!message.includes(order));
   }
 } finally { globalThis.fetch = previous; console.error = previousError; }
-console.log("Tpay tests passed: strict versioned acceptance, server-owned snapshot, legacy-order conflict, malformed/oversized input, amounts, checksum, disabled live checkout, origin, suspension, sandbox admin, reused link, uncertain creation and signed webhook (mocked HTTP; no SQL execution).");
+console.log("Tpay tests passed: strict acceptance, expiring exact-ID sandbox reviewer without admin diagnostics, disabled production, origin, suspension, reused link, uncertain creation and signed webhook (mocked HTTP; no SQL execution).");
