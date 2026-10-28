@@ -46,6 +46,11 @@ const business = renderToStaticMarkup(React.createElement(fields.CompanyFields, 
 assert.ok(personal.includes("Imię i nazwisko")); assert.ok(!personal.includes(">NIP<"));
 assert.ok(business.includes("NIP")); assert.ok(business.includes("Nazwa firmy"));
 const policy = load(path.join(root, "lib", "sales-policy.ts"));
+const historyComponent = load(path.join(root, "components", "order-history.tsx"));
+const historyHtml = renderToStaticMarkup(React.createElement(historyComponent.OrderHistory, { orders: [{ id: "test", environment: "sandbox", status: "paid", amount_grosz: 50000, currency: "PLN", transaction_title: "TR-TEST", created_at: "2026-10-28T22:56:36Z", paid_at: "2026-10-28T22:56:49Z", access_until: null, hasConfirmation: true }], busy: false, onDownload() {} }));
+assert.ok(historyHtml.includes("TEST: Platnosc potwierdzona"));
+assert.ok(historyHtml.includes("Test nie przedluza abonamentu"));
+assert.ok(historyHtml.includes("Pobierz potwierdzenie i dokumenty"));
 assert.equal(policy.salesPolicy.approved, false);
 const documents = load(path.join(root, "lib", "sales-documents.ts"));
 const terms = documents.salesDocumentText("regulamin"), privacy = documents.salesDocumentText("prywatnosc");

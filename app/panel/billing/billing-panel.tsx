@@ -7,6 +7,8 @@ import { accountDate, accountRequest, type AccountInfo } from "@/lib/account-cli
 import { LegalLinks } from "@/components/legal-links";
 import { CheckoutAcceptance } from "@/components/checkout-acceptance";
 import { checkoutPolicy } from "@/lib/checkout-policy";
+import { OrderHistory } from "@/components/order-history";
+import type { OrderSummary } from "@/lib/order-confirmation";
 
 export function BillingPanel() {
   const [info, setInfo] = useState<AccountInfo | null>(null);
@@ -14,6 +16,7 @@ export function BillingPanel() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [requestEarlyStart, setRequestEarlyStart] = useState(false);
   const [tpay, setTpay] = useState<{ enabled: boolean; sandbox: boolean; canCheckout: boolean; issue?: string } | null>(null);
@@ -21,6 +24,8 @@ export function BillingPanel() {
     const result = await accountRequest<AccountInfo>("/me");
     setInfo(result);
     setCompany(companyForForm(result.account.company));
+    const history = await accountRequest<{ orders: OrderSummary[] }>("/tpay/orders");
+    setOrders(history.orders);
     return result;
   }
   useEffect(() => {
@@ -31,8 +36,38 @@ export function BillingPanel() {
     void accountRequest<{ enabled: boolean; sandbox: boolean; canCheckout: boolean; issue?: string }>("/tpay/status").then(result => {
       if (mounted) setTpay(result);
     }).catch(() => { if (mounted) setMessage("Nie udalo sie odczytac konfiguracji Tpay. Odswiez strone; jesli blad zostaje, administrator powinien sprawdzic wdrozenie."); });
-    return () => { mounted = false; };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const returned = new URLSearchParams(window.location.search).get("tpay");
+    const returnedOrder = new URLSearchParams(window.location.search).get("order");
+    let attempts = 0;
+    async function history() {
+      try {
+        const result = await accountRequest<{ orders: OrderSummary[] }>("/tpay/orders");
+        if (!mounted) return;
+        setOrders(result.orders);
+        const current = returnedOrder ? result.orders.find(order => order.id === returnedOrder) : result.orders[0];
+        if (returned && current?.status === "paid") {
+          setMessage(current.environment === "sandbox" ? "Test zakonczony poprawnie. Tpay potwierdzil platnosc testowa; abonament i okres probny pozostaja bez zmian." : "Tpay potwierdzil platnosc. Dokumenty zamowienia znajdziesz ponizej.");
+          const updated = await accountRequest<AccountInfo>("/me");
+          if (mounted) setInfo(updated);
+        } else if (returned && (!current || ["creating", "pending"].includes(current.status))) {
+          setMessage("Czekamy na potwierdzenie operatora. Nie plac ponownie. Status odswieza sie automatycznie przez minute; potem uzyj przycisku Sprawdz status.");
+          if (++attempts < 12) timer = setTimeout(() => { if (mounted) void history(); }, 5000);
+        }
+      } catch { if (mounted) setMessage("Nie udalo sie odczytac zamowien. Nie ponawiaj zaplaty; uzyj Sprawdz status."); }
+    }
+    void history();
+    return () => { mounted = false; if (timer) clearTimeout(timer); };
   }, []);
+  async function downloadConfirmation(id: string) {
+    setBusy(true);
+    try {
+      const result = await accountRequest<{ filename: string; text: string }>(`/tpay/confirmation/${id}`);
+      const url = URL.createObjectURL(new Blob([result.text], { type: "text/plain;charset=utf-8" }));
+      const link = document.createElement("a"); link.href = url; link.download = result.filename; link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) { setMessage((error as Error).message); } finally { setBusy(false); }
+  }
   async function save(event: React.FormEvent) {
     event.preventDefault(); setBusy(true); setMessage("");
     try { const valid = validateCompany(company); await accountRequest("/company", "PUT", { company: valid }); setCompany(valid); setMessage("Dane firmy zapisane. Zmiany dotyczą przyszłych rozliczeń, nie już wystawionych dokumentów."); }
@@ -62,6 +97,8 @@ export function BillingPanel() {
     } catch (error) { setMessage((error as Error).message); setBusy(false); }
   }
   return <div className="grid gap-5">
+    {message && <p role="status" className="rounded-xl border border-amber-300/20 bg-amber-300/10 p-4 text-amber-100">{message}</p>}
+    <OrderHistory orders={orders} onDownload={downloadConfirmation} busy={busy} />
     <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
       <h1 className="text-3xl font-black">Abonament i rozliczenia</h1>
       <a href="/oferta" className="mt-3 inline-block text-sm text-[#ffb38a] underline underline-offset-4">Zakres uslugi i zasady naliczania miesiaca</a>
@@ -92,7 +129,6 @@ export function BillingPanel() {
         <p className="mt-4 text-sm text-white/50">Powrót z płatności nie oznacza jeszcze aktywacji. Darmowy dostęp lub zawieszenie konta nie anuluje automatycznie istniejącego abonamentu.</p>
       </> : <p className="mt-4 text-white/60">Ładowanie konta…</p>}
     </section>
-    {message && <p role="status" className="rounded-xl border border-amber-300/20 bg-amber-300/10 p-4 text-amber-100">{message}</p>}
     {info && <form onSubmit={save} className="rounded-3xl border border-white/10 bg-white/5 p-6">
       <CompanyFields value={company} onChange={setCompany} disabled={busy} />
       <button disabled={busy} className="mt-5 rounded-xl bg-[#ff5a00] px-5 py-3 font-bold disabled:opacity-50">Zapisz dane firmy</button>

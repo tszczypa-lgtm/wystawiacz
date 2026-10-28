@@ -42,8 +42,11 @@ Testowe rozliczenie nadal nie przedluza dostepu produkcyjnego.
 - Zmiana wersji blokuje ponowne wykorzystanie otwartego zamowienia ze starszymi
   oswiadczeniami (409). Nie oznaczac takich zamowien zbiorczo jako failed;
   kazdy przypadek trzeba sprawdzic z operatorem. Nie naruszac zaplaconych zamowien.
-- Brakuje potwierdzenia umowy z kompletem informacji i dokumentami na trwalym
-  nosniku. Sam link do zmiennej strony i wewnetrzny zapis w bazie nie wystarcza.
+- Dodano historie zamowien, pobierane potwierdzenia z historycznymi dokumentami
+  i kolejke wysylki e-mail. Wdrozenie migracji 008 oraz konfiguracja dostawcy
+  i sprawdzenie faktycznej wysylki sa opisane w `order-confirmation-deployment.md`.
+  Automatyczna poczta nie jest jeszcze potwierdzona na produkcji. Sam link do
+  zmiennej strony i wewnetrzny zapis w bazie nie wystarcza.
 - Nalezy ustalic retencje/usuwanie kont, sesji, tokenow, logow, platnosci,
   korespondencji i kopii oraz zrealizowac przyjeta procedure.
 - Trzeba zweryfikowac umowy z dostawcami, region bazy, transfery danych,

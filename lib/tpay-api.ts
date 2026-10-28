@@ -3,8 +3,10 @@ import { accountContext, type AccountEnv } from "./account-api";
 import { validateCompany } from "./account-validation";
 import { salesPolicy } from "./sales-policy";
 import { checkoutAcceptance } from "./checkout-policy";
+import { orderConfirmation, orderSummary, type ConfirmedOrder } from "./order-confirmation";
+import type { OrderMailEnv } from "./order-mail";
 
-export type TpayEnv = AccountEnv & {
+export type TpayEnv = AccountEnv & OrderMailEnv & {
   TPAY_ENABLED?: string; TPAY_ENVIRONMENT?: string; TPAY_LIVE_APPROVED?: string;
   TPAY_CLIENT_ID?: string; TPAY_CLIENT_SECRET?: string;
   TPAY_MERCHANT_ID?: string; TPAY_SECURITY_CODE?: string;
@@ -126,12 +128,23 @@ export async function handleTpayApi(request: Request, env: TpayEnv): Promise<Res
       return new Response("TRUE", { headers: { "Content-Type": "text/plain", "Cache-Control": "no-store" } });
     }
     const context = await accountContext(request, env);
+    if (request.method === "GET" && (path === "/orders" || path.startsWith("/confirmation/"))) {
+      const id = path.startsWith("/confirmation/") ? path.slice("/confirmation/".length) : null;
+      if (id !== null && !uuid.test(id)) return json({ message: "Nie znaleziono zamowienia." }, 404);
+      const rows = await context.db(`tpay_orders?owner_id=eq.${context.user.id}${id ? `&id=eq.${id}` : ""}&select=id,environment,status,amount_grosz,currency,transaction_title,created_at,paid_at,access_until,checkout_acceptance&order=created_at.desc,id.desc&limit=${id ? 1 : 10}`) as ConfirmedOrder[];
+      if (id) {
+        const order = rows[0];
+        if (!order || !["paid", "refunded"].includes(order.status)) return json({ message: "Potwierdzenie nie jest dostepne. Sprawdz status platnosci." }, 404);
+        return json({ filename: `zamowienie-${order.id}.txt`, text: orderConfirmation(order) });
+      }
+      return json({ orders: rows.map(orderSummary) });
+    }
     if (request.method === "GET" && path === "/status") {
       let enabled = false, sandbox = true;
       let issue = "";
       try {
         const config = tpayConfig(env); sandbox = config.sandbox;
-        enabled = env.TPAY_ENABLED === "true" && (sandbox || (env.TPAY_LIVE_APPROVED === "true" && salesPolicy.approved));
+        enabled = env.TPAY_ENABLED === "true" && (sandbox || (env.TPAY_LIVE_APPROVED === "true" && salesPolicy.approved && env.ORDER_MAIL_ENABLED === "true" && !!env.RESEND_API_KEY && !!env.ORDER_MAIL_FROM));
         if (!enabled) issue = !sandbox && !salesPolicy.approved ? "Dokumenty sprzedazy i obsluga zamowien konsumenckich wymagaja zatwierdzenia przed produkcja." : env.TPAY_ENABLED !== "true" ? "TPAY_ENABLED musi miec wartosc true." : "Platnosci produkcyjne nie zostaly zatwierdzone. Testy wymagaja TPAY_ENVIRONMENT=sandbox.";
       } catch (error) {
         const required = ["TPAY_CLIENT_ID", "TPAY_CLIENT_SECRET", "TPAY_MERCHANT_ID", "TPAY_SECURITY_CODE", "SUPABASE_SERVICE_ROLE_KEY", "APP_ORIGIN"] as const;
@@ -146,6 +159,7 @@ export async function handleTpayApi(request: Request, env: TpayEnv): Promise<Res
     const config = tpayConfig(env);
     if (env.TPAY_ENABLED !== "true" || (!config.sandbox && env.TPAY_LIVE_APPROVED !== "true")) throw new PaymentError(503, "Zakup przez Tpay nie jest jeszcze uruchomiony.");
     if (!config.sandbox && !salesPolicy.approved) throw new PaymentError(503, "Dokumenty sprzedazy nie sa jeszcze zatwierdzone. Produkcyjne platnosci pozostaja wylaczone.");
+    if (!config.sandbox && (env.ORDER_MAIL_ENABLED !== "true" || !env.RESEND_API_KEY || !env.ORDER_MAIL_FROM)) throw new PaymentError(503, "Wysylka potwierdzen zamowien nie jest skonfigurowana. Produkcyjne platnosci pozostaja wylaczone.");
     if (request.headers.get("Origin") !== config.origin || new URL(request.url).origin !== config.origin) throw new PaymentError(403, "Nieprawidlowa domena.");
     if (context.account.suspended) throw new PaymentError(403, "Konto zawieszone.");
     if (config.sandbox && !context.isAdmin && !sandboxReviewer(env, context.user.id)) throw new PaymentError(403, "Platnosci testowe sa dostepne tylko administratorowi lub upowaznionemu kontu weryfikacyjnemu.");
@@ -156,11 +170,12 @@ export async function handleTpayApi(request: Request, env: TpayEnv): Promise<Res
     if (Buffer.byteLength(rawAcceptance) > 4096) throw new PaymentError(413, "Zbyt duzo danych.");
     let input;
     try { input = JSON.parse(rawAcceptance); } catch { throw new PaymentError(400, "Nieprawidlowe dane zamowienia."); }
-    const acceptance = checkoutAcceptance(input, config.environment);
-    if (!acceptance) throw new PaymentError(400, "Przeczytaj aktualne podsumowanie i zaznacz osobno oba oswiadczenia. Odswiez strone, jesli zmienila sie wersja dokumentow.");
+    const accepted = checkoutAcceptance(input, config.environment);
+    if (!accepted) throw new PaymentError(400, "Przeczytaj aktualne podsumowanie i zaznacz osobno oba oswiadczenia. Odswiez strone, jesli zmienila sie wersja dokumentow.");
     let company;
     try { company = validateCompany(context.account.company); }
     catch { throw new PaymentError(400, "Uzupelnij poprawne dane firmy przed zakupem."); }
+    const acceptance = { ...accepted, buyer: { email: context.account.email, company } };
     const db = database(env);
     const claim = await db("rpc/claim_tpay_order_with_acceptance", { p_owner: context.user.id, p_environment: config.environment, p_acceptance: acceptance }) as { id: string; created: boolean; payment_url?: string };
     if (!claim.created) {
@@ -175,7 +190,7 @@ export async function handleTpayApi(request: Request, env: TpayEnv): Promise<Res
     const response = await fetch(`${config.api}/transactions`, { method: "POST", signal: AbortSignal.timeout(25000), headers: { Authorization: `Bearer ${token.access_token}`, "Content-Type": "application/json" }, body: JSON.stringify({
       amount: 500, currency: "PLN", description: "Wystawiacz by Tymo - miesiac dostepu", hiddenDescription: claim.id,
       payer: { email: context.account.email, name: company.name },
-      callbacks: { notification: { url: `${config.origin}/api/account/tpay/webhook` }, payerUrls: { success: `${config.origin}/panel/billing?tpay=return`, error: `${config.origin}/panel/billing?tpay=error` } },
+      callbacks: { notification: { url: `${config.origin}/api/account/tpay/webhook` }, payerUrls: { success: `${config.origin}/panel/billing?tpay=return&order=${claim.id}`, error: `${config.origin}/panel/billing?tpay=error&order=${claim.id}` } },
     }) });
     if (!response.ok) {
       if ([400, 401, 403, 422].includes(response.status)) await db("rpc/fail_tpay_order", { p_id: claim.id });

@@ -10,7 +10,8 @@ const policy = url(compile(await readFile(new URL("../lib/sales-policy.ts", impo
 const documents = url(compile(await readFile(new URL("../lib/sales-documents.ts", import.meta.url), "utf8")).replace('"./sales-policy"', JSON.stringify(policy)));
 const checkout = url(compile(await readFile(new URL("../lib/checkout-policy.ts", import.meta.url), "utf8")).replace('"./sales-policy"', JSON.stringify(policy)).replace('"./sales-documents"', JSON.stringify(documents)));
 const { checkoutPolicy, checkoutAcceptance } = await import(checkout);
-const source = compile(await readFile(new URL("../lib/tpay-api.ts", import.meta.url), "utf8")).replace('"./account-api"', JSON.stringify(account)).replace('"./account-validation"', JSON.stringify(validation)).replace('"./sales-policy"', JSON.stringify(policy)).replace('"./checkout-policy"', JSON.stringify(checkout));
+const confirmation = url(compile(await readFile(new URL("../lib/order-confirmation.ts", import.meta.url), "utf8")));
+const source = compile(await readFile(new URL("../lib/tpay-api.ts", import.meta.url), "utf8")).replace('"./account-api"', JSON.stringify(account)).replace('"./account-validation"', JSON.stringify(validation)).replace('"./sales-policy"', JSON.stringify(policy)).replace('"./checkout-policy"', JSON.stringify(checkout)).replace('"./order-confirmation"', JSON.stringify(confirmation));
 const { handleTpayApi, verifyNotificationFields, verifyTpayJws, amountInGrosz, paymentUrl } = await import(url(source));
 const owner = "00000000-0000-0000-0000-000000000001";
 const order = "00000000-0000-0000-0000-000000000002";
@@ -104,6 +105,7 @@ globalThis.fetch = async () => new Response(rootPem);
 await assert.rejects(verifyTpayJws(signedRaw, signedJws, "https://secure.sandbox.tpay.com"));
 let external = 0, transactions = 0, claims = 0, settlements = 0, attached = false, suspended = false, admin = true, lost = false;
 let privateCustomer = false, acceptanceConflict = false;
+let historyRows = [];
 globalThis.fetch = async (input, init = {}) => {
   const target = String(input);
   if (target.endsWith("/x509/notifications-jws.pem")) { assert.equal(init.redirect, "manual"); return new Response(leafPem); }
@@ -115,11 +117,21 @@ globalThis.fetch = async (input, init = {}) => {
   if (target.endsWith("/auth/v1/user")) return Response.json({ id: owner, email_confirmed_at: "2026-01-01" });
   if (target.includes("/customer_accounts")) return Response.json([{ owner_id: owner, email: "test@example.test", suspended, company: { name: privateCustomer ? "Jan Kowalski" : "Test", nip: privateCustomer ? "" : "5260250274", street: "Test 1", postcode: "00-001", city: "Warszawa", country: "PL", ...(privateCustomer ? { customerType: "person" } : {}) } }]);
   if (target.includes("/account_admins")) return Response.json(admin ? [{ owner_id: owner }] : []);
+  if (target.includes("/tpay_orders?")) {
+    const query = new URL(target).searchParams;
+    assert.equal(query.get("owner_id"), `eq.${owner}`);
+    assert.ok(["1", "10"].includes(query.get("limit")));
+    assert.ok(!query.get("select").includes("payment_url"));
+    const id = query.get("id");
+    return Response.json(historyRows.filter(row => !id || id === `eq.${row.id}`));
+  }
   if (target.includes("/rpc/claim_tpay_order_with_acceptance")) {
     if (acceptanceConflict) return Response.json({ code: "P0002" }, { status: 400 });
     const data = JSON.parse(init.body);
     assert.equal(data.p_owner, owner);
-    assert.deepEqual(data.p_acceptance, checkoutAcceptance(consent, "sandbox"));
+    const { buyer, ...acceptance } = data.p_acceptance;
+    assert.deepEqual(acceptance, checkoutAcceptance(consent, "sandbox"));
+    assert.equal(buyer.email, "test@example.test");
     return Response.json({ id: order, created: ++claims === 1, payment_url: attached ? "https://secure.sandbox.tpay.com/test" : null });
   }
   if (target.includes("/rpc/attach_tpay_transaction")) { attached = true; return Response.json({ ok: true }); }
@@ -135,6 +147,21 @@ globalThis.fetch = async (input, init = {}) => {
 };
 const request = (path = "/checkout", origin = env.APP_ORIGIN, body = consent) => new Request(`${env.APP_ORIGIN}/api/account/tpay${path}`, { method: path === "/status" ? "GET" : "POST", headers: { Authorization: "Bearer test-user", Origin: origin, "Content-Type": "application/json" }, ...(path === "/status" ? {} : { body: JSON.stringify(body) }) });
 try {
+  const paidOrder = { id: order, environment: "sandbox", status: "paid", amount_grosz: 50000, currency: "PLN", transaction_title: "TR-TEST-123", created_at: "2026-10-28T22:56:36Z", paid_at: "2026-10-28T22:56:49Z", access_until: null, checkout_acceptance: snapshot };
+  historyRows = [paidOrder];
+  const getOrder = path => handleTpayApi(new Request(`${env.APP_ORIGIN}/api/account/tpay${path}`, { headers: { Authorization: "Bearer test-user" } }), env);
+  const history = await (await getOrder("/orders")).json();
+  assert.equal(history.orders[0].hasConfirmation, true);
+  assert.equal(history.orders[0].checkout_acceptance, undefined);
+  const receipt = await getOrder(`/confirmation/${order}`);
+  assert.equal(receipt.headers.get("Cache-Control"), "no-store");
+  assert.match((await receipt.json()).text, /TEST ZAMOWIENIA/);
+  assert.equal((await getOrder("/confirmation/00000000-0000-0000-0000-000000000099")).status, 404);
+  assert.equal((await getOrder("/confirmation/invalid")).status, 404);
+  historyRows = [{ ...paidOrder, status: "pending" }];
+  assert.equal((await getOrder(`/confirmation/${order}`)).status, 404);
+  assert.equal((await handleTpayApi(new Request(`${env.APP_ORIGIN}/api/account/tpay/orders`), env)).status, 401);
+  historyRows = [];
   let status = await (await handleTpayApi(request("/status"), { ...env, TPAY_SECURITY_CODE: undefined })).json();
   assert.equal(status.enabled, false); assert.match(status.issue, /TPAY_SECURITY_CODE/);
   assert.ok(!JSON.stringify(status).includes(env.TPAY_CLIENT_SECRET));

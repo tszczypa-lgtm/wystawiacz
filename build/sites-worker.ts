@@ -5,10 +5,18 @@ import { handleTpayApi, type TpayEnv } from "../lib/tpay-api";
 import { handleAccountApi, protectAllegroRequest, type AccountEnv } from "../lib/account-api";
 import { runWithConnectorBinding } from "../lib/connector-context";
 import type { ConnectorBinding } from "../lib/connector-contract.mjs";
+import { deliverOrderMail, type OrderMailEnv } from "../lib/order-mail";
 
 export default {
+  async scheduled(_event: ScheduledController, env: Cloudflare.Env, ctx: ExecutionContext) {
+    ctx.waitUntil(deliverOrderMail(env as OrderMailEnv));
+  },
   async fetch(request: Request, env: Cloudflare.Env, ctx: ExecutionContext<{ CONNECTORS?: ConnectorBinding }>) {
-    if (new URL(request.url).pathname.startsWith("/api/account/tpay/")) return handleTpayApi(request, env as TpayEnv);
+    if (new URL(request.url).pathname.startsWith("/api/account/tpay/")) {
+      const response = await handleTpayApi(request, env as TpayEnv);
+      if (new URL(request.url).pathname.endsWith("/webhook") && request.method === "POST" && response.ok) ctx.waitUntil(deliverOrderMail(env as OrderMailEnv));
+      return response;
+    }
     if (new URL(request.url).pathname.startsWith("/api/workspace/")) return handleWorkspaceApi(request, env as AccountEnv);
     if (new URL(request.url).pathname.startsWith("/api/account/")) return handleAccountApi(request, env as AccountEnv);
     if (new URL(request.url).pathname.startsWith("/api/allegro/")) {
