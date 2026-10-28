@@ -1,12 +1,23 @@
 import type { ReactNode } from "react";
 import { LegalLinks } from "./legal-links";
 import { salesPolicy } from "@/lib/sales-policy";
+import { salesDocuments, salesDocumentPath, type SalesDocumentName } from "@/lib/sales-documents";
 
 export function SellerDetails() {
   return <address className="not-italic leading-7">
     <strong>{salesPolicy.seller}</strong><br />NIP: {salesPolicy.nip}<br />{salesPolicy.address}<br />
     Kontakt i reklamacje: <a className="text-[#ffb38a] underline" href={`mailto:${salesPolicy.email}`}>{salesPolicy.email}</a>
   </address>;
+}
+export function SalesDocumentPage({ name }: { name: SalesDocumentName }) {
+  const document = salesDocuments[name];
+  return <LegalPage title={document.title} draft={!salesPolicy.approved}>
+    <p>Wersja: {salesPolicy.version}. <a href={salesDocumentPath(name)} download>Pobierz tę wersję dokumentu (TXT)</a>.</p>
+    {document.sections.map(section => <section key={section.title}>
+      <h2>{section.title}</h2>
+      {section.paragraphs.map(paragraph => <p key={paragraph}>{paragraph}</p>)}
+    </section>)}
+  </LegalPage>;
 }
 export function LegalPage({ title, children, draft = false }: { title: string; children: ReactNode; draft?: boolean }) {
   return <main className="min-h-screen bg-[#0d1117] px-5 py-10 text-white">

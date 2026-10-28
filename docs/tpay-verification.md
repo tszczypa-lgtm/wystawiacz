@@ -9,7 +9,8 @@ dokumentow ani uruchomienia platnosci produkcyjnych.
    i potwierdz adres. Nie uzywaj konta wlasciciela lub pracownika.
 2. Nie dodawaj wpisu do `account_admins`. Nie lacz konta z Allegro.
    Nie umieszczaj na nim sesji ani danych klientow.
-3. Odczytaj UUID tego uzytkownika w Supabase Authentication / Users.
+3. Odczytaj UUID tego uzytkownika w Supabase Authentication / Users lub wykonaj
+   tylko odczyt z `scripts/find-tpay-reviewer.sql` dla tpaytest@tymogarage.pl.
 4. Po wdrozeniu kodu ustaw po stronie Cloudflare:
    - `TPAY_SANDBOX_REVIEWER_IDS`: dokladny UUID konta. Kilka UUID rozdziela przecinek.
    - `TPAY_SANDBOX_REVIEWER_UNTIL`: uzgodniona data konca dostepu w ISO 8601 z `Z`.
@@ -31,11 +32,16 @@ Testowe rozliczenie nadal nie przedluza dostepu produkcyjnego.
 ## Dokumenty: co trzeba zamknac przed odpowiedzia "gotowe"
 
 - `/regulamin` i `/prywatnosc` sa nadal projektami; `salesPolicy.approved=false`.
-- Akceptacja wersji regulaminu i oswiadczen jest juz zapisywana przy zamowieniu
-  przez migracje 007. Publiczny projekt regulaminu zawiera nieaktualne zdanie,
-  ze ten element nie jest jeszcze wdrozony.
-- Trzeba zatwierdzic zasady odstapienia/zwrotow i zaktualizowac teksty formularza
-  razem z nowymi wersjami dokumentow oraz checkoutu.
+- Wersja dokumentow `2026-10-28-review-2` opisuje 30 dni proby, 500 zl za miesiac,
+  brak automatycznego odnawiania i brak dobrowolnej gwarancji zwrotu. Zachowuje
+  prawa ustawowe i warunkowe rozliczenie spelnionego swiadczenia.
+- Akceptacja wersji regulaminu, oswiadczen i pelnych tresci obu dokumentow jest
+  zapisywana przy nowym zamowieniu przez istniejaca migracje 007.
+  Dziala pobieranie TXT; zrodlem strony, pliku i snapshotu jest ten sam modul.
+  Nie uzupelniamy ani nie zmieniamy historycznych oswiadczen.
+- Zmiana wersji blokuje ponowne wykorzystanie otwartego zamowienia ze starszymi
+  oswiadczeniami (409). Nie oznaczac takich zamowien zbiorczo jako failed;
+  kazdy przypadek trzeba sprawdzic z operatorem. Nie naruszac zaplaconych zamowien.
 - Brakuje potwierdzenia umowy z kompletem informacji i dokumentami na trwalym
   nosniku. Sam link do zmiennej strony i wewnetrzny zapis w bazie nie wystarcza.
 - Nalezy ustalic retencje/usuwanie kont, sesji, tokenow, logow, platnosci,
@@ -77,6 +83,10 @@ zatwierdzone i wdrozone, a konto nie zostanie sprawdzone.
 - https://prawakonsumenta.uokik.gov.pl/prawo-odstapienia-od-umowy/
 - https://prawakonsumenta.uokik.gov.pl/pytania-i-odpowiedzi/prawo-do-informacji/
 - https://eli.gov.pl/api/acts/DU/2024/1796/text.html
+- https://uodo.gov.pl/pl/676/4260
+- https://zpe.gov.pl/a/przechowywanie-dokumentacji-ksiegowej/DYeS0IGPf
+- Projekt UC169 (funkcja odstapienia w interfejsie): sprawdzic stan wdrozenia
+  przed startem, nie deklarowac istnienia niewdrozonego przycisku lub wysylki.
 
 Sprawdz aktualny stan prawny przy zatwierdzaniu; niniejsza lista nie zastepuje
 indywidualnej weryfikacji dokumentow i konfiguracji uslugi.

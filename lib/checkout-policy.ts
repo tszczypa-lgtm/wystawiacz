@@ -1,12 +1,13 @@
 import { salesPolicy } from "./sales-policy";
+import { salesDocumentText } from "./sales-documents";
 
 // Change this revision whenever the displayed checkout statements change.
 export const checkoutPolicy = {
-  version: "2026-10-15-checkout-draft-1",
+  version: "2026-10-28-checkout-review-2",
   termsVersion: salesPolicy.version,
   terms: "Akceptuje regulamin uslugi Wystawiacz by Tymo we wskazanej wersji.",
   earlyStart: "Wyraznie zadam rozpoczecia swiadczenia uslugi po potwierdzeniu platnosci, przed uplywem 14 dni od zawarcia umowy.",
-  withdrawal: "Samo rozpoczecie uslugi nie oznacza utraty prawa odstapienia. W razie odstapienia po rozpoczeciu uslugi na moje wyrazne zadanie moze byc nalezna proporcjonalna zaplata za wykonane swiadczenie. Szczegolowe zasady wymagaja zatwierdzenia przed uruchomieniem sprzedazy.",
+  withdrawal: "Samo rozpoczecie uslugi nie oznacza utraty prawa odstapienia. Konsument ma co do zasady 14 dni od zawarcia umowy na odstapienie. Przy rozpoczeciu platnej uslugi na wyrazne zadanie i spelnieniu warunkow ustawowych rozliczenie moze uwzgledniac proporcjonalna zaplate za swiadczenie spelnione do odstapienia. Bezplatna proba nie jest odplatnym okresem. Nie oferujemy dodatkowej gwarancji zwrotu za zmiane zdania; nie ogranicza to praw ustawowych ani reklamacji.",
   offer: "500 PLN brutto za jeden miesiac kalendarzowy dostepu. Bez automatycznego odnawiania. Oplaty Allegro nie sa wliczone.",
 } as const;
 
@@ -21,6 +22,10 @@ export function checkoutAcceptance(input: unknown, environment: string) {
     environment, draft: !salesPolicy.approved,
     acceptTerms: true, requestEarlyStart: true,
     statements: { terms: checkoutPolicy.terms, earlyStart: checkoutPolicy.earlyStart, withdrawal: checkoutPolicy.withdrawal, offer: checkoutPolicy.offer },
+    documents: {
+      terms: { version: salesPolicy.version, text: salesDocumentText("regulamin") },
+      privacy: { version: salesPolicy.version, text: salesDocumentText("prywatnosc") },
+    },
     seller: { name: salesPolicy.seller, nip: salesPolicy.nip, address: salesPolicy.address, email: salesPolicy.email },
   };
 }

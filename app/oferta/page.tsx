@@ -30,7 +30,7 @@ export default function OfferPage() {
           <p className="mt-4 font-bold text-emerald-300">Bez automatycznego odnawiania</p>
           <p className="mt-3 text-sm leading-7 text-white/70">Kazdy kolejny miesiac oplacasz osobno. Rejestracja nie pobiera pieniedzy ani nie zapisuje karty do cyklicznych obciazen.</p>
           <a href="/panel/billing" className="mt-6 block rounded-xl bg-[#ff5a00] px-5 py-3 text-center font-bold">Przejdz do panelu dostepu</a>
-          <p className="mt-4 text-xs leading-6 text-white/55">Prawdziwe platnosci nie sa jeszcze uruchomione. Obecny test Tpay jest dostepny tylko administratorowi i nie przyznaje platnego dostepu produkcyjnego.</p>
+          <p className="mt-4 text-xs leading-6 text-white/55">Najpierw 30 dni bezplatnego testu wedlug daty w panelu. Prawdziwe platnosci nie sa jeszcze uruchomione. Test Tpay jest dostepny administratorowi lub upowaznionemu kontu weryfikacyjnemu; nie przyznaje platnego dostepu produkcyjnego.</p>
         </aside>
       </section>
       <section className="grid gap-4 sm:grid-cols-3" aria-label="Mozliwosci programu">

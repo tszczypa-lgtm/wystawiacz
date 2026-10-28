@@ -1,5 +1,5 @@
 export const salesPolicy = {
-  version: "2026-10-15-draft-1",
+  version: "2026-10-28-review-2",
   approved: false,
   seller: "Tymo Garage Tymoteusz Szczypka",
   nip: "5482566629",

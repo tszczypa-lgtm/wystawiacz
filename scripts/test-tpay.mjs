@@ -7,7 +7,8 @@ const url = source => `data:text/javascript;base64,${Buffer.from(source).toStrin
 const validation = url(compile(await readFile(new URL("../lib/account-validation.ts", import.meta.url), "utf8")));
 const account = url(compile(await readFile(new URL("../lib/account-api.ts", import.meta.url), "utf8")).replace('"./account-validation"', JSON.stringify(validation)));
 const policy = url(compile(await readFile(new URL("../lib/sales-policy.ts", import.meta.url), "utf8")));
-const checkout = url(compile(await readFile(new URL("../lib/checkout-policy.ts", import.meta.url), "utf8")).replace('"./sales-policy"', JSON.stringify(policy)));
+const documents = url(compile(await readFile(new URL("../lib/sales-documents.ts", import.meta.url), "utf8")).replace('"./sales-policy"', JSON.stringify(policy)));
+const checkout = url(compile(await readFile(new URL("../lib/checkout-policy.ts", import.meta.url), "utf8")).replace('"./sales-policy"', JSON.stringify(policy)).replace('"./sales-documents"', JSON.stringify(documents)));
 const { checkoutPolicy, checkoutAcceptance } = await import(checkout);
 const source = compile(await readFile(new URL("../lib/tpay-api.ts", import.meta.url), "utf8")).replace('"./account-api"', JSON.stringify(account)).replace('"./account-validation"', JSON.stringify(validation)).replace('"./sales-policy"', JSON.stringify(policy)).replace('"./checkout-policy"', JSON.stringify(checkout));
 const { handleTpayApi, verifyNotificationFields, verifyTpayJws, amountInGrosz, paymentUrl } = await import(url(source));
@@ -17,6 +18,12 @@ const env = { APP_ORIGIN: "https://example.test", TPAY_ENABLED: "true", TPAY_ENV
 const consent = { version: checkoutPolicy.version, termsVersion: checkoutPolicy.termsVersion, acceptTerms: true, requestEarlyStart: true };
 for (const bad of [null, [], {}, { ...consent, acceptTerms: "true" }, { ...consent, requestEarlyStart: false }, { ...consent, version: "old" }, { ...consent, termsVersion: "old" }]) assert.equal(checkoutAcceptance(bad, "sandbox"), null);
 assert.equal(checkoutAcceptance({ ...consent, statements: "forged", recordedAt: "forged" }, "sandbox").statements.terms, checkoutPolicy.terms);
+const snapshot = checkoutAcceptance({ ...consent, documents: { terms: { text: "forged" } } }, "sandbox");
+assert.ok(snapshot.documents.terms.text.includes("Nie oferujemy dodatkowej gwarancji zwrotu"));
+assert.ok(snapshot.documents.privacy.text.includes("Administrator i kontakt"));
+assert.equal(snapshot.documents.terms.version, consent.termsVersion);
+assert.ok(!snapshot.documents.terms.text.includes("forged"));
+assert.equal(snapshot.draft, true);
 function notification(changes = {}) {
   const fields = { id: "123", tr_id: "TR-TEST-123", tr_crc: order, tr_amount: "500.00", tr_paid: "500.00", tr_currency: "PLN", tr_status: "true", tr_error: "none", test_mode: "1", ...changes };
   fields.md5sum = createHash("md5").update(fields.id + fields.tr_id + fields.tr_amount + fields.tr_crc + env.TPAY_SECURITY_CODE).digest("hex");
