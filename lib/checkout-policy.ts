@@ -3,11 +3,11 @@ import { salesDocumentText } from "./sales-documents";
 
 // Change this revision whenever the displayed checkout statements change.
 export const checkoutPolicy = {
-  version: "2026-10-28-checkout-review-2",
+  version: "2026-10-28-checkout-review-3",
   termsVersion: salesPolicy.version,
-  terms: "Akceptuje regulamin uslugi Wystawiacz by Tymo we wskazanej wersji.",
-  earlyStart: "Wyraznie zadam rozpoczecia swiadczenia uslugi po potwierdzeniu platnosci, przed uplywem 14 dni od zawarcia umowy.",
-  withdrawal: "Samo rozpoczecie uslugi nie oznacza utraty prawa odstapienia. Konsument ma co do zasady 14 dni od zawarcia umowy na odstapienie. Przy rozpoczeciu platnej uslugi na wyrazne zadanie i spelnieniu warunkow ustawowych rozliczenie moze uwzgledniac proporcjonalna zaplate za swiadczenie spelnione do odstapienia. Bezplatna proba nie jest odplatnym okresem. Nie oferujemy dodatkowej gwarancji zwrotu za zmiane zdania; nie ogranicza to praw ustawowych ani reklamacji.",
+  terms: "Akceptuję regulamin Wystawiacza by Tymo.",
+  earlyStart: "Chcę rozpocząć usługę po potwierdzeniu płatności, przed upływem 14 dni na odstąpienie.",
+  withdrawal: "Konsument ma co do zasady 14 dni od zawarcia umowy na odstąpienie. Przy wyraźnie zamówionym wcześniejszym starcie i spełnieniu warunków ustawowych wykorzystana usługa jest rozliczana proporcjonalnie. Nie jest to dodatkowa gwarancja zwrotu.",
   offer: "500 PLN brutto za jeden miesiac kalendarzowy dostepu. Bez automatycznego odnawiania. Oplaty Allegro nie sa wliczone.",
 } as const;
 

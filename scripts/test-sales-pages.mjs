@@ -80,9 +80,16 @@ const checkoutFields = load(path.join(root, "components", "checkout-acceptance.t
 const checkoutHtml = renderToStaticMarkup(React.createElement(checkoutFields.CheckoutAcceptance, { sandbox: true, disabled: false, acceptTerms: false, requestEarlyStart: false, onTerms() {}, onEarlyStart() {} }));
 assert.equal((checkoutHtml.match(/type="checkbox"/g) || []).length, 2);
 assert.ok(!checkoutHtml.includes(' checked=""'));
-assert.ok(checkoutHtml.includes("bez prawdziwej umowy i oplaty"));
+assert.ok(checkoutHtml.includes("bez prawdziwej umowy, opłaty i aktywacji"));
 assert.ok(checkoutHtml.includes('href="/regulamin"'));
-assert.ok(checkoutHtml.includes("Samo rozpoczecie uslugi nie oznacza utraty prawa odstapienia"));
+assert.ok(checkoutHtml.includes("14 dni od zawarcia umowy na odstąpienie"));
+assert.ok(checkoutHtml.includes("wykorzystana usługa jest rozliczana proporcjonalnie"));
+const disclosures = checkoutHtml.match(/<details[\s\S]*?<\/details>/g) || [];
+assert.equal(disclosures.length, 1);
+const visibleCheckout = checkoutHtml.replace(/<details[\s\S]*?<\/details>/g, "");
+assert.ok(visibleCheckout.includes("14 dni od zawarcia umowy na odstąpienie"), "Withdrawal notice stays visible, not hidden in details");
+assert.ok(visibleCheckout.includes("rozliczana proporcjonalnie"));
+assert.ok(visibleCheckout.includes("Chcę rozpocząć usługę po potwierdzeniu płatności"));
 assert.ok(checkoutHtml.includes(documents.salesDocumentPath("regulamin")));
 assert.ok(checkoutHtml.includes(documents.salesDocumentPath("prywatnosc")));
 console.log("Sales pages: public routes, seller details, draft notices, links, personal/business fields and closed production gate passed (SSR component test).");
