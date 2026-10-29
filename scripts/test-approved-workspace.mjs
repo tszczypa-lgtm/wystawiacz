@@ -296,30 +296,16 @@ try {
   assert.equal(new URL(await page.evaluate(() => window.opened.at(-1)[0])).searchParams.get("q"), "1234567");
   for (const site of ["Otomoto", "OLX"]) {
     const row = page.locator(".price-search-row").filter({ hasText: site });
-    await row.locator("input").check(); await row.locator("button").first().click();
+    await row.getByText("Od najnizszej", { exact: true }).click(); await row.locator("button").first().click();
     assert.equal(new URL(await page.evaluate(() => window.opened.at(-1)[0])).searchParams.get("search[order]"), "filter_float_price:asc");
   }
   assert.equal(await page.locator("#priceUsedInput").count(), 0);
-  await page.locator("#searchAllegroPartButton").click();
+  await page.getByRole("group", { name: "Allegro: Szukaj", exact: true }).getByText("Po numerze", { exact: true }).click();
   assert.equal(new URL(await page.evaluate(() => window.opened.at(-1)[0])).searchParams.has("stan"), false);
-  await page.locator("#checkMarketPrices").click();
-  await page.waitForSelector('[data-price-source="Otomoto"] a');
-  assert.ok((await page.locator('[data-price-source="Otomoto"]').innerText()).includes("42,50"));
-  assert.ok((await page.locator('[data-price-source="OLX"]').innerText()).includes("zablokowany"));
-  assert.equal(await page.locator('[data-price-source="Otomoto"] button').count(), 0);
-  assert.equal(await page.locator("#priceInput").inputValue(), "650", "Price comparison never changes the selling price");
-  const allegroRow = page.locator(".price-search-row").filter({ has: page.locator(".price-brand-allegro") });
-  const brand = await allegroRow.locator(".price-brand").boundingBox(), priceBox = await page.locator('[data-price-source="Allegro"]').boundingBox();
-  assert.ok(priceBox.x > brand.x + brand.width && Math.abs(priceBox.y - brand.y) < 10, "Each price box sits beside its portal");
-  await allegroRow.getByRole("button", { name: "Z przeglądarki", exact: true }).click();
-  const imported = { format: "wystawiacz-price-quotes-v1", source: "Allegro", number: "1234567", checkedAt: new Date().toISOString(), offers: [{ title: "Pompa ABS 1234567", amount: 37.5, currency: "PLN", url: "https://allegro.pl/oferta/pompa-123456789" }] };
-  await page.locator("#allegroPriceImport").fill(JSON.stringify(imported));
-  await page.locator("#importAllegroPrices").click();
-  assert.ok((await page.locator('[data-price-source="Allegro"]').innerText()).includes("37,50"));
-  assert.equal(await page.locator("#priceInput").inputValue(), "650", "Reading Allegro only fills its comparison box");
-  await page.locator("#checkMarketPrices").click();
-  await page.waitForFunction(() => !document.querySelector("#checkMarketPrices").disabled);
-  assert.ok((await page.locator('[data-price-source="Allegro"]').innerText()).includes("37,50"), "Server blocks do not replace a fresh browser reading");
+  assert.equal(await page.locator(".price-quote, #checkMarketPrices, #allegroPriceReaderDialog").count(), 0);
+  assert.equal(await page.locator(".search-actions input").count(), 0);
+  assert.equal(await page.locator("#priceInput").inputValue(), "650", "Search links never change the selling price");
+
   await mkdir(new URL("../outputs/approved-check/", import.meta.url), { recursive: true });
   await page.screenshot({ path: fileURLToPath(new URL("../outputs/approved-check/workspace.png", import.meta.url)), fullPage: true });
   conflict = false;

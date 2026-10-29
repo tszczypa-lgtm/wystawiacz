@@ -6,7 +6,7 @@
     <title>Wystawiacz Allegro</title>
     <link rel="stylesheet" href="styles.css?v=remove-list-item-7" />
     <link rel="stylesheet" href="title-suggestions.css?v=counter-colors" />
-    <link rel="stylesheet" href="workspace-layout.css?v=photo-price-boxes-6" />
+    <link rel="stylesheet" href="workspace-layout.css?v=list-prices-8" />
   </head>
   <body>
     <header class="topbar">
@@ -356,23 +356,7 @@
             </select>
           </label>
         </div>
-        <div class="search-actions">
-          <span>Sprawdź ceny i podobne oferty:</span>
-          <div class="price-search-group">
-            <div class="price-search-buttons">
-              <button id="searchAllegroPartButton" class="secondary-button" type="button">Allegro: numer części</button>
-              <button id="searchAllegroTitleButton" class="secondary-button" type="button">Allegro: tytuł bez numeru</button>
-            </div>
-            <label class="price-search-sort"><input id="priceSortLowestInput" type="checkbox" /> Allegro: od najniższej ceny</label>
-            <label class="price-search-sort"><input id="priceShippingPolandInput" type="checkbox" /> Allegro: wysyłka z Polski</label>
-          </div>
-          <div class="price-search-group">
-            <div class="price-search-buttons">
-              <button id="searchGooglePartButton" class="secondary-button" type="button">Google: numer części</button>
-              <button id="searchGoogleTitleButton" class="secondary-button" type="button">Google: tytuł bez numeru</button>
-            </div>
-          </div>
-        </div>
+        <div class="search-actions"></div>
         <div class="pricing-final-row">
           <label class="field">
             <span>Twoja cena sprzedaży</span>
@@ -406,8 +390,9 @@
         <div class="list-header">
           <div>
             <p class="eyebrow">TWOJA LISTA</p>
-            <h2>Produkty do wystawienia</h2>
+            <h2>Lista aukcji <span id="productCount">0</span></h2>
           </div>
+          <div class="list-layout-options" role="group" aria-label="Polozenie listy"><button type="button" data-list-layout="bottom" aria-pressed="true">Na dole</button><button type="button" data-list-layout="left" aria-pressed="false">Po lewej</button></div>
           <div class="list-controls">
             <button id="previousProductButton" class="secondary-button" type="button">Poprzednia aukcja</button>
             <span id="activeProductLabel">Nowa aukcja</span>
@@ -418,7 +403,7 @@
           <strong>Lista jest jeszcze pusta</strong>
           <span>Dodane produkty pojawią się tutaj.</span>
         </div>
-        <div class="product-list" id="productList"></div>
+        <div class="product-list" id="productList" role="region" aria-label="Lista aukcji" tabindex="0"></div>
       </section>
     </main>
 
@@ -472,12 +457,11 @@
     <script src="catalog-link.js?v=checkbox"></script>
     <script src="session-safety.js?v=1"></script>
     <script src="cloud-sessions.js?v=remove-list-item-7"></script>
-    <script src="own-offers.js?v=1"></script>
+    <script src="own-offers.js?v=own-prices-8"></script>
     <script src="description-editor.js?v=diagram-prices-5"></script>
     <script src="photo-upload.js?v=1"></script>
-    <script src="allegro-price-reader.js?v=photo-price-boxes-6"></script>
-    <script src="price-search.js?v=photo-price-boxes-6"></script>
-    <script src="app.js?v=remove-list-item-7"></script>
-    <script src="workspace-layout.js?v=compact1"></script>
+    <script src="price-search.js?v=buttons-8"></script>
+    <script src="app.js?v=list-prices-8"></script>
+    <script src="workspace-layout.js?v=list-layout-8"></script>
   </body>
 </html>

@@ -59,19 +59,19 @@ try {
   assert.equal((await page.locator("#vehicleButtons button").textContent()).trim(), "Golf krotko");
   assert.equal(await page.locator("#titleInput").inputValue(), "Czujnik parktronik PDC VW Golf VII 5Q0919275B");
   await page.evaluate(() => { window.searchWindows = []; window.open = (...args) => { window.searchWindows.push(args); return null; }; });
-  await page.locator("#searchGooglePartButton").click();
-  await page.locator("#searchGoogleTitleButton").click();
-  await page.locator("#searchAllegroPartButton").click();
+  await page.getByRole("group", { name: "Google: Szukaj", exact: true }).getByText("Po numerze", { exact: true }).click();
+  await page.getByRole("group", { name: "Google: Szukaj", exact: true }).getByText("Po tytule", { exact: true }).click();
+  await page.getByRole("group", { name: "Allegro: Szukaj", exact: true }).getByText("Po numerze", { exact: true }).click();
   let searches = await page.evaluate(() => window.searchWindows);
   assert.equal(new URL(searches[0][0]).searchParams.get("q"), "5Q0919275B");
   assert.equal(new URL(searches[0][0]).hostname, "www.google.com");
   assert.equal(new URL(searches[1][0]).searchParams.get("q"), "Czujnik parktronik PDC VW Golf VII");
   assert.equal(new URL(searches[2][0]).searchParams.get("order"), null);
   assert.equal(new URL(searches[2][0]).searchParams.get("miejsce-wysylki"), null);
-  await page.locator("#priceSortLowestInput").check();
-  await page.locator("#priceShippingPolandInput").check();
-  await page.locator("#searchAllegroPartButton").click();
-  await page.locator("#searchAllegroTitleButton").click();
+  await page.getByRole("group", { name: "Allegro: Kolejnosc cen", exact: true }).getByText("Od najnizszej", { exact: true }).click();
+  await page.locator(".price-brand-allegro").locator("..").getByText("Z Polski", { exact: true }).click();
+  await page.getByRole("group", { name: "Allegro: Szukaj", exact: true }).getByText("Po numerze", { exact: true }).click();
+  await page.getByRole("group", { name: "Allegro: Szukaj", exact: true }).getByText("Po tytule", { exact: true }).click();
   searches = await page.evaluate(() => window.searchWindows);
   assert.equal(new URL(searches[3][0]).searchParams.get("string"), "5Q0919275B");
   assert.equal(new URL(searches[4][0]).searchParams.get("string"), "Czujnik parktronik PDC VW Golf VII");
@@ -80,10 +80,10 @@ try {
     assert.equal(new URL(search[0]).searchParams.get("miejsce-wysylki"), "polska");
     assert.deepEqual(search.slice(1), ["_blank", "noopener,noreferrer"]);
   }
-  await page.locator("#priceShippingPolandInput").uncheck();
-  await page.locator("#searchAllegroPartButton").click();
-  await page.locator("#priceShippingPolandInput").check();
-  await page.locator("#searchGooglePartButton").click();
+  await page.locator(".price-brand-allegro").locator("..").getByText("Z Polski", { exact: true }).click();
+  await page.getByRole("group", { name: "Allegro: Szukaj", exact: true }).getByText("Po numerze", { exact: true }).click();
+  await page.locator(".price-brand-allegro").locator("..").getByText("Z Polski", { exact: true }).click();
+  await page.getByRole("group", { name: "Google: Szukaj", exact: true }).getByText("Po numerze", { exact: true }).click();
   searches = await page.evaluate(() => window.searchWindows);
   assert.equal(new URL(searches[5][0]).searchParams.get("miejsce-wysylki"), null);
   assert.equal(new URL(searches[5][0]).searchParams.get("order"), "p");
@@ -161,6 +161,10 @@ try {
     await page.keyboard.press("Escape");
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.locator('[data-list-layout="left"]').click();
+  assert.equal(await page.locator(".list-section").evaluate(node => getComputedStyle(node).position), "fixed");
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "Left list does not overlap or overflow the editor");
+  await page.locator('[data-list-layout="bottom"]').click();
   await page.evaluate(() => window.scrollTo(0, 0));
   await mkdir(new URL("../outputs/layout-check/", import.meta.url), { recursive: true });
   await page.screenshot({ path: fileURLToPath(new URL("../outputs/layout-check/workspace.png", import.meta.url)) });
@@ -280,8 +284,8 @@ try {
   await page.locator("#parametersPanel").screenshot({ path: fileURLToPath(new URL("../outputs/layout-check/parameters.png", import.meta.url)) });
   await page.locator(".description-panel").screenshot({ path: fileURLToPath(new URL("../outputs/layout-check/description.png", import.meta.url)) });
   await page.reload();
-  assert.equal(await page.locator("#priceSortLowestInput").isChecked(), true, "Price sorting preference survives reload and form resets");
-  assert.equal(await page.locator("#priceShippingPolandInput").isChecked(), true, "Poland shipping preference survives reload and form resets");
+  assert.equal(await page.getByRole("group", { name: "Allegro: Kolejnosc cen", exact: true, includeHidden: true }).getByText("Od najnizszej", { exact: true }).evaluate(node => node.getAttribute("aria-pressed") === "true"), true, "Price sorting preference survives reload and form resets");
+  assert.equal(await page.locator(".price-brand-allegro").locator("..").getByText("Z Polski", { exact: true }).evaluate(node => node.getAttribute("aria-pressed") === "true"), true, "Poland shipping preference survives reload and form resets");
   assert.equal(await page.locator("#catalogNumberWithSuffix").isChecked(), true);
   assert.equal(await page.locator("#catalogNumberSuffix").inputValue(), "X9");
   assert.equal(await page.evaluate(() => window.CatalogNumberOptions.value("1234567", "Full title")), "1234567 X9");

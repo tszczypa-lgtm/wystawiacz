@@ -96,16 +96,6 @@ const descriptionPreviewImage = document.querySelector("#descriptionPreviewImage
 const descriptionMissingImage = document.querySelector("#descriptionMissingImage");
 const descriptionPreviewText = document.querySelector("#descriptionPreviewText");
 const descriptionTextInput = document.querySelector("#descriptionTextInput");
-const searchAllegroPartButton = document.querySelector("#searchAllegroPartButton");
-const searchAllegroTitleButton = document.querySelector("#searchAllegroTitleButton");
-const searchGooglePartButton = document.querySelector("#searchGooglePartButton");
-const searchGoogleTitleButton = document.querySelector("#searchGoogleTitleButton");
-const priceSortLowestInput = document.querySelector("#priceSortLowestInput");
-const priceSortStorageKey = "wystawiacz-price-sort-lowest";
-try { priceSortLowestInput.checked = localStorage.getItem(priceSortStorageKey) === "true"; } catch {}
-const priceShippingPolandInput = document.querySelector("#priceShippingPolandInput");
-const priceShippingStorageKey = "wystawiacz-price-shipping-poland";
-try { priceShippingPolandInput.checked = localStorage.getItem(priceShippingStorageKey) === "true"; } catch {}
 const productList = document.querySelector("#productList");
 const emptyState = document.querySelector("#emptyState");
 const toast = document.querySelector("#toast");
@@ -318,6 +308,7 @@ disconnectButton.addEventListener("click", async () => {
     await apiRequest("/api/auth/logout", { method: "POST" });
   } catch (error) { showToast(error.message); return; }
   state.allegroConnected = false;
+  ownOffers.refresh(true);
   connectButton.textContent = "Połącz z Allegro";
   connectButton.disabled = false;
   disconnectButton.classList.add("hidden");
@@ -380,24 +371,6 @@ descriptionTextInput.addEventListener("input", () => {
   state.descriptionManuallyEdited = true;
   renderDescriptionPreview();
 });
-searchAllegroPartButton.addEventListener("click", () => openAllegroSearch(partNumber.value.trim()));
-searchAllegroTitleButton.addEventListener("click", () => openAllegroSearch(getTitleWithoutPartNumber()));
-searchGooglePartButton.addEventListener("click", () => openSearch("https://www.google.com/search?q=", partNumber.value.trim()));
-searchGoogleTitleButton.addEventListener("click", () => openSearch("https://www.google.com/search?q=", getTitleWithoutPartNumber()));
-priceSortLowestInput.addEventListener("change", () => {
-  try { localStorage.setItem(priceSortStorageKey, String(priceSortLowestInput.checked)); } catch {}
-});
-priceShippingPolandInput.addEventListener("change", () => {
-  try { localStorage.setItem(priceShippingStorageKey, String(priceShippingPolandInput.checked)); } catch {}
-});
-
-function openAllegroSearch(query) {
-  const url = new URL("https://allegro.pl/listing");
-  if (priceSortLowestInput.checked) url.searchParams.set("order", "p");
-  if (priceShippingPolandInput.checked) url.searchParams.set("miejsce-wysylki", "polska");
-  url.searchParams.set("string", "");
-  openSearch(url.href, query);
-}
 
 locationSettingsButton.addEventListener("click", () => {
   fillLocationModal();
@@ -654,6 +627,7 @@ function updateSummary() {
   summaryTitle.textContent = titleInput.value.trim() || "Brak tytułu";
   renderShippingRateButtons();
   window.PriceSearch.refresh?.();
+  ownOffers.refresh();
   renderDescriptionPreview();
   detectProductDetails();
   if (state.requiredParameters.length) {
@@ -666,14 +640,14 @@ function renderProducts() {
   renderBatchToolbar();
   emptyState.classList.toggle("hidden", state.products.length > 0);
   productList.innerHTML = state.products
-    .map((product) => `
+    .map((product, index) => `
       <article class="product-card ${product.id === activeProductId ? "active" : ""}" data-product-id="${escapeHtml(product.id)}">
         <label class="product-select"><input type="checkbox" data-select-product-id="${escapeHtml(product.id)}" aria-label="Zaznacz aukcje" ${selectedProductIds.has(product.id) ? "checked" : ""} ${product.allegroOfferId || batchPublishing ? "disabled" : ""} /></label>
         ${findPhotoUrl(product.photoNames?.[0])
           ? `<img class="product-image" src="${escapeHtml(findPhotoUrl(product.photoNames?.[0]))}" alt="" />`
           : `<div class="product-image"></div>`}
         <div>
-          <h3>${escapeHtml(product.title)}</h3>
+          <h3><span class="product-number">#${index + 1}</span> ${escapeHtml(product.title)}</h3>
           <p>${escapeHtml(product.brand || "Marka do uzupełnienia")} · Numer wpisany: ${escapeHtml(product.enteredPartNumber)} · ${escapeHtml(product.stock)} ${{ UNIT: "szt.", PAIR: "par", SET: "kpl." }[product.stockUnit] || "szt."} · ${product.photoNames?.length || 0} zdjęć</p>
           <p>Wysyłka: ${escapeHtml(product.shippingRateName || "profil do wybrania")}</p>
           <p>Zwrot: ${escapeHtml(product.returnPolicyName || "brak")} · Reklamacja: ${escapeHtml(product.impliedWarrantyName || "brak")}</p>
@@ -734,6 +708,7 @@ function renderProducts() {
     card.addEventListener("click", () => editProduct(card.dataset.productId));
   });
   updateProductNavigation();
+  document.dispatchEvent(new Event("wystawiacz-products-rendered"));
 }
 
 function removeProduct(id) {
@@ -1275,6 +1250,7 @@ async function checkConnectionStatus() {
     }
     if (!result.connected) return;
     state.allegroConnected = true;
+    ownOffers.refresh(true);
     connectionTitle.textContent = "Konto Allegro połączone";
     connectionDescription.textContent = `Konto Allegro połączone${result.sellerId ? ` · ID sprzedawcy: ${result.sellerId}` : ""}. Kategorie i szablony pobieramy bezpośrednio z Allegro.`;
     connectButton.textContent = "Połączono";
