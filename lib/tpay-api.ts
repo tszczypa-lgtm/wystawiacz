@@ -5,6 +5,7 @@ import { salesPolicy } from "./sales-policy";
 import { checkoutAcceptance } from "./checkout-policy";
 import { orderConfirmation, orderSummary, type ConfirmedOrder } from "./order-confirmation";
 import type { OrderMailEnv } from "./order-mail";
+import { orderSmtpConfig } from "./order-mail-config";
 
 export type TpayEnv = AccountEnv & OrderMailEnv & {
   TPAY_ENABLED?: string; TPAY_ENVIRONMENT?: string; TPAY_LIVE_APPROVED?: string;
@@ -144,7 +145,7 @@ export async function handleTpayApi(request: Request, env: TpayEnv): Promise<Res
       let issue = "";
       try {
         const config = tpayConfig(env); sandbox = config.sandbox;
-        enabled = env.TPAY_ENABLED === "true" && (sandbox || (env.TPAY_LIVE_APPROVED === "true" && salesPolicy.approved && env.ORDER_MAIL_ENABLED === "true" && !!env.RESEND_API_KEY && !!env.ORDER_MAIL_FROM));
+        enabled = env.TPAY_ENABLED === "true" && (sandbox || (env.TPAY_LIVE_APPROVED === "true" && salesPolicy.approved && !!orderSmtpConfig(env)));
         if (!enabled) issue = !sandbox && !salesPolicy.approved ? "Dokumenty sprzedazy i obsluga zamowien konsumenckich wymagaja zatwierdzenia przed produkcja." : env.TPAY_ENABLED !== "true" ? "TPAY_ENABLED musi miec wartosc true." : "Platnosci produkcyjne nie zostaly zatwierdzone. Testy wymagaja TPAY_ENVIRONMENT=sandbox.";
       } catch (error) {
         const required = ["TPAY_CLIENT_ID", "TPAY_CLIENT_SECRET", "TPAY_MERCHANT_ID", "TPAY_SECURITY_CODE", "SUPABASE_SERVICE_ROLE_KEY", "APP_ORIGIN"] as const;
@@ -159,7 +160,7 @@ export async function handleTpayApi(request: Request, env: TpayEnv): Promise<Res
     const config = tpayConfig(env);
     if (env.TPAY_ENABLED !== "true" || (!config.sandbox && env.TPAY_LIVE_APPROVED !== "true")) throw new PaymentError(503, "Zakup przez Tpay nie jest jeszcze uruchomiony.");
     if (!config.sandbox && !salesPolicy.approved) throw new PaymentError(503, "Dokumenty sprzedazy nie sa jeszcze zatwierdzone. Produkcyjne platnosci pozostaja wylaczone.");
-    if (!config.sandbox && (env.ORDER_MAIL_ENABLED !== "true" || !env.RESEND_API_KEY || !env.ORDER_MAIL_FROM)) throw new PaymentError(503, "Wysylka potwierdzen zamowien nie jest skonfigurowana. Produkcyjne platnosci pozostaja wylaczone.");
+    if (!config.sandbox && !orderSmtpConfig(env)) throw new PaymentError(503, "Wysylka potwierdzen zamowien nie jest skonfigurowana. Produkcyjne platnosci pozostaja wylaczone.");
     if (request.headers.get("Origin") !== config.origin || new URL(request.url).origin !== config.origin) throw new PaymentError(403, "Nieprawidlowa domena.");
     if (context.account.suspended) throw new PaymentError(403, "Konto zawieszone.");
     if (config.sandbox && !context.isAdmin && !sandboxReviewer(env, context.user.id)) throw new PaymentError(403, "Platnosci testowe sa dostepne tylko administratorowi lub upowaznionemu kontu weryfikacyjnemu.");

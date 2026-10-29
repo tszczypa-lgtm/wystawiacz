@@ -43,7 +43,7 @@ Testowe rozliczenie nadal nie przedluza dostepu produkcyjnego.
   oswiadczeniami (409). Nie oznaczac takich zamowien zbiorczo jako failed;
   kazdy przypadek trzeba sprawdzic z operatorem. Nie naruszac zaplaconych zamowien.
 - Dodano historie zamowien, pobierane potwierdzenia z historycznymi dokumentami
-  i kolejke wysylki e-mail. Wdrozenie migracji 008 oraz konfiguracja dostawcy
+  i kolejke wysylki e-mail przez home.pl. Wdrozenie migracji 008 i 009 oraz konfiguracja SMTP
   i sprawdzenie faktycznej wysylki sa opisane w `order-confirmation-deployment.md`.
   Automatyczna poczta nie jest jeszcze potwierdzona na produkcji. Sam link do
   zmiennej strony i wewnetrzny zapis w bazie nie wystarcza.

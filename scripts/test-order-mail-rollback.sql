@@ -1,4 +1,4 @@
--- Run WHOLE file in Supabase after 008. No HTTP, no persistent orders or outgoing email.
+-- Run WHOLE file in Supabase after 009. No HTTP, no persistent orders or outgoing email.
 do $$
 declare
   owner uuid;
@@ -21,6 +21,15 @@ begin
     perform public.settle_tpay_order(test_id,'sandbox','TR-LOCAL-'||replace(test_id::text,'-',''),false);
     if (select count(*) from public.order_confirmation_mail where order_id=test_id)<>1 then
       raise exception 'FAILED: duplicate mail'; end if;
+    update public.order_confirmation_mail set state='sending',attempts=1,lease=test_id where order_id=test_id;
+    perform public.fail_order_smtp_mail(test_id,test_id,true);
+    if (select state from public.order_confirmation_mail where order_id=test_id)<>'pending' then
+      raise exception 'FAILED: safe rejection not retryable'; end if;
+    update public.order_confirmation_mail set state='sending' where order_id=test_id;
+    perform public.fail_order_smtp_mail(test_id,test_id,false);
+    if (select state from public.order_confirmation_mail where order_id=test_id)<>'review' then
+      raise exception 'FAILED: ambiguous send retried'; end if;
+    if public.claim_order_mail()<>'[]'::jsonb then raise exception 'FAILED: old API retry path enabled'; end if;
     begin
       update public.order_confirmation_mail set recipient='forged@example.test' where order_id=test_id;
       raise exception using errcode='Z0002',message='FAILED: snapshot mutable';
