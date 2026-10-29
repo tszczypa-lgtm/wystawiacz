@@ -267,6 +267,10 @@ textarea { resize: vertical; line-height: 1.45; }
 .product-card.active { border-color: var(--orange); box-shadow: 0 0 0 3px rgba(255, 90, 0, .1); }
 .edit-button { padding: 8px 10px; border: 1px solid #d8dce3; border-radius: 8px; background: #fff; color: #344054; font-size: 12px; font-weight: 700; }
 .edit-button:hover { border-color: var(--orange); color: var(--orange-dark); }
+.product-row-actions { display: flex; flex-direction: column; align-items: stretch; gap: 3px; }
+.remove-product-button { align-self: flex-end; padding: 3px 7px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: #b42318; font-size: 11px; line-height: 1.4; cursor: pointer; }
+.remove-product-button:hover { border-color: #fecdca; background: #fff1f0; }
+.remove-product-button:disabled { opacity: .45; cursor: not-allowed; }
 .product-image { width: 58px; height: 58px; border-radius: 9px; object-fit: cover; background: var(--soft); }
 .product-card h3 { margin: 0 0 5px; font-size: 14px; }
 .product-card p { margin: 0; color: var(--muted); font-size: 12px; }

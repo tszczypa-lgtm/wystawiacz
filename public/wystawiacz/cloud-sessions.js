@@ -95,7 +95,9 @@
       // Establish the initial blank form after the app finishes mounting; do not create empty sessions on every visit.
       setTimeout(() => { if (!revision && !busy) previous = comparable(); }, 0);
       function autosave() { if (enabled && !paused && comparable() !== previous) void save(); }
-      document.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(autosave, 2000); });
+      function scheduleAutosave() { clearTimeout(timer); timer = setTimeout(autosave, 2000); }
+      document.addEventListener("input", scheduleAutosave);
+      document.addEventListener("wystawiacz-session-change", scheduleAutosave);
       setInterval(() => { if (!document.hidden) autosave(); }, 15000);
       document.addEventListener("visibilitychange", () => { if (document.hidden) autosave(); });
       window.addEventListener("beforeunload", event => {

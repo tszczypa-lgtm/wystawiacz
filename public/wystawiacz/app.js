@@ -688,7 +688,10 @@ function renderProducts() {
         <button class="publish-button" type="button" data-publish-product-id="${escapeHtml(product.id)}" ${product.allegroOfferId ? "disabled" : ""}>
           ${product.allegroOfferId ? "Wystawiona" : "Wystaw"}
         </button>
-        <button class="edit-button" type="button" data-product-id="${escapeHtml(product.id)}" ${publishingProducts.has(product.id) ? "disabled" : ""}>${product.allegroOfferId ? "Edytuj w Allegro" : "Edytuj"}</button>
+        <div class="product-row-actions">
+          <button class="edit-button" type="button" data-product-id="${escapeHtml(product.id)}" ${publishingProducts.has(product.id) ? "disabled" : ""}>${product.allegroOfferId ? "Edytuj w Allegro" : "Edytuj"}</button>
+          <button class="remove-product-button" type="button" data-remove-product-id="${escapeHtml(product.id)}" aria-label="Usuń z listy: ${escapeHtml(product.title)}" title="Usuń tylko z listy Wystawiacza, nie z Allegro" ${batchPublishing || publishingProducts.has(product.id) ? "disabled" : ""}>Usuń</button>
+        </div>
       </article>
     `)
     .join("");
@@ -712,6 +715,12 @@ function renderProducts() {
       editProduct(button.dataset.productId);
     });
   });
+  productList.querySelectorAll(".remove-product-button").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      removeProduct(button.dataset.removeProductId);
+    });
+  });
   productList.querySelectorAll(".product-price-input").forEach((input) => {
     input.addEventListener("click", (event) => event.stopPropagation());
     input.addEventListener("change", () => {
@@ -725,6 +734,24 @@ function renderProducts() {
     card.addEventListener("click", () => editProduct(card.dataset.productId));
   });
   updateProductNavigation();
+}
+
+function removeProduct(id) {
+  const index = state.products.findIndex(product => product.id === id);
+  if (index < 0) return false;
+  if (batchPublishing || publishingProducts.has(id)) {
+    showToast("Poczekaj na zakonczenie wystawiania przed usunieciem pozycji.");
+    return false;
+  }
+  const product = state.products[index];
+  if (!window.confirm(`Usunąć z listy: ${product.title}?\nTo nie usuwa ani nie kończy aukcji na Allegro.`)) return false;
+  state.products.splice(index, 1);
+  selectedProductIds.delete(id);
+  if (activeProductId === id) resetForm();
+  renderProducts();
+  document.dispatchEvent(new Event("wystawiacz-session-change"));
+  showToast("Usunieto pozycje z listy Wystawiacza.");
+  return true;
 }
 
 function resetForm() {
