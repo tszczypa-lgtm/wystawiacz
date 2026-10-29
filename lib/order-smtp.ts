@@ -1,7 +1,35 @@
 import nodemailer from "nodemailer";
+import { connect } from "node:tls";
+import type { SMTPTransportGetSocket } from "nodemailer/lib/smtp-transport";
 import type { orderSmtpConfig } from "./order-mail-config";
 
 export type OrderMessage = { id: string; recipient: string; subject: string; text: string; date: string };
+
+export function orderSmtpSocket(host: string, port: number): SMTPTransportGetSocket {
+  return (_options, callback) => {
+    let finished = false;
+    let socket: ReturnType<typeof connect>;
+    try { socket = connect({ host, port, servername: host, minVersion: "TLSv1.2", rejectUnauthorized: true }); }
+    catch (error) { callback(Object.assign(error instanceof Error ? error : new Error("SMTP connection failed"), { command: "CONN" })); return; }
+    const fail = (error: Error) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      socket.destroy();
+      callback(Object.assign(error, { command: "CONN" }));
+    };
+    const timer = setTimeout(() => fail(Object.assign(new Error("SMTP connection timeout"), { code: "ETIMEDOUT" })), 8000);
+    socket.once("error", fail);
+    socket.once("secureConnect", () => {
+      if (!socket.authorized) return fail(Object.assign(new Error("SMTP TLS verification failed"), { code: "ETLS" }));
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      socket.removeListener("error", fail);
+      callback(null, { connection: socket, secured: true });
+    });
+  };
+}
 
 export function smtpFailureIsRetryable(error: unknown) {
   const failure = error as { command?: string; responseCode?: number } | null;
@@ -14,6 +42,9 @@ function orderTransport(config: NonNullable<ReturnType<typeof orderSmtpConfig>>)
   const senderDomain = config.user.split("@")[1];
   return nodemailer.createTransport({
     host: config.host, port: config.port, secure: true,
+    // Nodemailer resolves the host to an IP first; Workers then validates that IP as the TLS peer.
+    // Open by hostname and pass an already verified TLS socket, retaining SNI and certificate checks.
+    getSocket: orderSmtpSocket(config.host, config.port),
     auth: { user: config.user, pass: config.password },
     tls: { servername: config.host, minVersion: "TLSv1.2", rejectUnauthorized: true },
     name: senderDomain, pool: false, logger: false, debug: false,

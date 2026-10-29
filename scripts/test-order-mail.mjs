@@ -32,6 +32,7 @@ console.error = () => {};
 nodemailer.createTransport = options => {
   assert.equal(options.host, "serwer2684289.hosting-home.pl");
   assert.equal(options.port, 465); assert.equal(options.secure, true);
+  assert.equal(typeof options.getSocket, "function", "Keep hostname during Workers TLS connection");
   assert.equal(options.tls.rejectUnauthorized, true); assert.equal(options.tls.minVersion, "TLSv1.2");
   assert.equal(options.auth.user, "biuro@tymogarage.pl");
   assert.equal(options.auth.pass, "test-password");

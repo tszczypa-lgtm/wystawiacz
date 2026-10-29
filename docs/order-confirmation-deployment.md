@@ -56,6 +56,13 @@ nie sprawdza doreczenia i nie wymaga nowej platnosci ani migracji 010.
 Wynik pokazuje kod, status SMTP oraz etap; nie zwraca hasla ani surowej odpowiedzi serwera.
 Konto testowe bez praw administratora nie moze uruchomic tego sprawdzenia.
 
+Polaczenie SMTP otwieramy przez nazwe hosta, z SNI i sprawdzeniem certyfikatu.
+Standardowe rozwiazanie hosta do IP przez Nodemailer odtworzylo w workerd blad
+ESOCKET/CONN z przyczyna `IP address mismatch`. Wlasny `getSocket` przekazuje
+Nodemailerowi juz zweryfikowane polaczenie TLS. Nie wylaczamy weryfikacji.
+`scripts/check-smtp-worker.mjs` sprawdza rzeczywisty TLS i SMTP z home.pl w lokalnym
+workerd, bez danych logowania, AUTH, wysylania maila i zmian kolejki.
+
 Opcjonalna migracja `supabase/010_order_mail_diagnostics.sql` dodaje bezpieczne pola
 ostatniego bledu do kolejki. Dla przyszlych prob mozna odczytac `last_error_code`,
 `last_smtp_status`, `last_error_stage`, `last_error_at` w Supabase. Stare bledy nie sa
