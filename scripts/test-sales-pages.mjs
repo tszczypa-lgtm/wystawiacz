@@ -35,7 +35,8 @@ for (const route of ["oferta", "kontakt", "regulamin", "prywatnosc"]) {
     assert.ok(html.includes("mailto:biuro@tymogarage.pl"));
   }
   if (["regulamin", "prywatnosc"].includes(route)) {
-    assert.ok(html.includes("Projekt do zatwierdzenia"));
+    assert.ok(!html.includes("Projekt do zatwierdzenia"));
+    assert.ok(!page.metadata.title.includes("Projekt"));
     assert.equal(page.metadata.robots.index, false);
   }
 }
@@ -52,6 +53,7 @@ assert.ok(historyHtml.includes("TEST: Platnosc potwierdzona"));
 assert.ok(historyHtml.includes("Test nie przedluza abonamentu"));
 assert.ok(historyHtml.includes("Pobierz potwierdzenie i dokumenty"));
 assert.equal(policy.salesPolicy.approved, false);
+assert.equal(policy.salesPolicy.published, true);
 const documents = load(path.join(root, "lib", "sales-documents.ts"));
 const terms = documents.salesDocumentText("regulamin"), privacy = documents.salesDocumentText("prywatnosc");
 if (process.argv.includes("--write-documents")) {
@@ -68,7 +70,13 @@ assert.ok(terms.includes("Samo logowanie nie jest zrzeczeniem"));
 assert.ok(terms.includes("Wzór oświadczenia"));
 assert.ok(terms.includes("Na reklamację konsumenta odpowiadamy w terminie 14 dni"));
 assert.ok(privacy.includes("home.pl"));
-assert.ok(privacy.includes("nie deklaruje niezweryfikowanych terminów"));
+assert.ok(privacy.includes("najwyżej 3 lata po jego zamknięciu"));
+assert.ok(privacy.includes("Co miesiąc przeglądamy"));
+assert.ok(privacy.includes("potwierdzeń zamówień"));
+assert.ok(!privacy.includes("pozostaje zatwierdzenie"));
+assert.ok(!terms.includes("W modelu docelowym"));
+assert.ok(!terms.includes("Przed startem rzeczywistej sprzedaży musi"));
+assert.ok(!terms.includes("Projekt do zatwierdzenia"));
 const download = load(path.join(root, "app", "dokumenty", "[file]", "route.ts"));
 for (const name of ["regulamin", "prywatnosc"]) {
   const file = documents.salesDocumentPath(name).split("/").pop();
@@ -77,6 +85,16 @@ for (const name of ["regulamin", "prywatnosc"]) {
   assert.match(response.headers.get("Content-Type"), /text\/plain; charset=utf-8/);
   assert.match(response.headers.get("Content-Disposition"), /^attachment; filename="[a-z0-9.-]+"$/);
   assert.equal(await response.text(), documents.salesDocumentText(name));
+}
+const archived = load(path.join(root, "lib", "sales-documents-2026-10-28.ts"));
+for (const name of ["regulamin", "prywatnosc"]) {
+  const file = archived.salesDocumentPath(name).split("/").pop();
+  const response = await download.GET(new Request(`https://example.test/dokumenty/${file}`), { params: Promise.resolve({ file }) });
+  assert.equal(response.status, 200);
+  const text = await response.text();
+  assert.equal(text, archived.salesDocumentText(name));
+  assert.ok(text.includes("Projekt do zatwierdzenia"));
+  assert.notEqual(text, documents.salesDocumentText(name));
 }
 for (const file of ["regulamin-old.txt", "../.env", "regulamin-\r\nx-test: unsafe.txt"]) {
   assert.equal((await download.GET(new Request("https://example.test/dokumenty/invalid"), { params: Promise.resolve({ file }) })).status, 404);
@@ -97,4 +115,4 @@ assert.ok(visibleCheckout.includes("rozliczana proporcjonalnie"));
 assert.ok(visibleCheckout.includes("Chcę rozpocząć usługę po potwierdzeniu płatności"));
 assert.ok(checkoutHtml.includes(documents.salesDocumentPath("regulamin")));
 assert.ok(checkoutHtml.includes(documents.salesDocumentPath("prywatnosc")));
-console.log("Sales pages: public routes, seller details, draft notices, links, personal/business fields and closed production gate passed (SSR component test).");
+console.log("Sales pages: published documents, approved manual retention, links, checkout and closed production gate passed (SSR component test).");

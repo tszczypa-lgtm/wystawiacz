@@ -3,7 +3,7 @@ import { salesDocumentText } from "./sales-documents";
 
 // Change this revision whenever the displayed checkout statements change.
 export const checkoutPolicy = {
-  version: "2026-10-28-checkout-review-3",
+  version: "2026-10-30-checkout-1",
   termsVersion: salesPolicy.version,
   terms: "Akceptuję regulamin Wystawiacza by Tymo.",
   earlyStart: "Chcę rozpocząć usługę po potwierdzeniu płatności, przed upływem 14 dni na odstąpienie.",
@@ -19,7 +19,7 @@ export function checkoutAcceptance(input: unknown, environment: string) {
   // Only server-owned text and strict boolean choices are persisted, never a client snapshot.
   return {
     version: checkoutPolicy.version, termsVersion: checkoutPolicy.termsVersion,
-    environment, draft: !salesPolicy.approved,
+    environment, draft: !salesPolicy.published,
     acceptTerms: true, requestEarlyStart: true,
     statements: { terms: checkoutPolicy.terms, earlyStart: checkoutPolicy.earlyStart, withdrawal: checkoutPolicy.withdrawal, offer: checkoutPolicy.offer },
     documents: {

@@ -11,7 +11,7 @@ export function SellerDetails() {
 }
 export function SalesDocumentPage({ name }: { name: SalesDocumentName }) {
   const document = salesDocuments[name];
-  return <LegalPage title={document.title} draft={!salesPolicy.approved}>
+  return <LegalPage title={document.title} draft={!salesPolicy.published}>
     <p>Wersja: {salesPolicy.version}. <a href={salesDocumentPath(name)} download>Pobierz tę wersję dokumentu (TXT)</a>.</p>
     {document.sections.map(section => <section key={section.title}>
       <h2>{section.title}</h2>

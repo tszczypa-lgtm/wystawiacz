@@ -55,7 +55,7 @@ export default function OfferPage() {
         <div><h2 className="text-xl font-bold">Zanim zaczniesz</h2><p className="mt-3 text-sm leading-7 text-white/65">Potrzebujesz internetu i aktualnej przegladarki. Dostep do folderu zdjec zalezy od obslugi w przegladarce; polecamy aktualny Chrome lub Edge na komputerze. HEIC wymaga dekodera przegladarki; jesli plik nie jest obslugiwany, wyeksportuj JPEG.</p></div>
         <div><h2 className="text-xl font-bold">Ty zatwierdzasz oferte</h2><p className="mt-3 text-sm leading-7 text-white/65">Sprawdz dane przed kliknieciem Wystaw. Program nie gwarantuje poprawnosci podpowiedzi ani przyjecia oferty przez Allegro. Zapisuj kopie sesji JSON i zachowuj oryginaly zdjec.</p></div>
       </section>
-      <section className="mb-10 rounded-2xl border border-white/10 p-6"><h2 className="mb-4 text-xl font-bold">Sprzedawca i kontakt</h2><SellerDetails /><p className="mt-4 text-sm text-white/60">Oferta jest przygotowywana dla firm i osób prywatnych. Dokumenty sprzedaży są obecnie projektami do zatwierdzenia; płatności produkcyjne pozostają zablokowane.</p></section>
+      <section className="mb-10 rounded-2xl border border-white/10 p-6"><h2 className="mb-4 text-xl font-bold">Sprzedawca i kontakt</h2><SellerDetails /><p className="mt-4 text-sm text-white/60">Oferta dla firm i osób prywatnych. Regulamin i polityka prywatności są dostępne poniżej. Płatności produkcyjne pozostają wyłączone; obecnie można korzystać z bezpłatnej próby, a upoważnione konto może sprawdzić zamówienie testowe.</p></section>
       <footer className="flex flex-wrap justify-between gap-4 border-t border-white/10 py-6 text-sm text-white/55">
         <span>Wystawiacz by Tymo</span>
         <LegalLinks />

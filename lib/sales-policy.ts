@@ -1,5 +1,7 @@
 export const salesPolicy = {
-  version: "2026-10-28-review-2",
+  version: "2026-10-30-1",
+  published: true,
+  // Publishing documents does not approve production payments.
   approved: false,
   seller: "Tymo Garage Tymoteusz Szczypka",
   nip: "5482566629",

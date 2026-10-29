@@ -27,7 +27,7 @@ assert.ok(snapshot.documents.terms.text.includes("Nie oferujemy dodatkowej gwara
 assert.ok(snapshot.documents.privacy.text.includes("Administrator i kontakt"));
 assert.equal(snapshot.documents.terms.version, consent.termsVersion);
 assert.ok(!snapshot.documents.terms.text.includes("forged"));
-assert.equal(snapshot.draft, true);
+assert.equal(snapshot.draft, false);
 function notification(changes = {}) {
   const fields = { id: "123", tr_id: "TR-TEST-123", tr_crc: order, tr_amount: "500.00", tr_paid: "500.00", tr_currency: "PLN", tr_status: "true", tr_error: "none", test_mode: "1", ...changes };
   fields.md5sum = createHash("md5").update(fields.id + fields.tr_id + fields.tr_amount + fields.tr_crc + env.TPAY_SECURITY_CODE).digest("hex");

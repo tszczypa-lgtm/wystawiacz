@@ -20,6 +20,6 @@ export function CheckoutAcceptance({ sandbox, disabled, acceptTerms, requestEarl
         <p>Pobierz: <a className="underline" href={salesDocumentPath("regulamin")} download>regulamin TXT</a> oraz <a className="underline" href={salesDocumentPath("prywatnosc")} download>polityka prywatności TXT</a>.</p>
       </div>
     </details>
-    {sandbox && <p className="text-xs text-amber-200">Sandbox: bez prawdziwej umowy, opłaty i aktywacji. Dokumenty pozostają projektem do zatwierdzenia.</p>}
+    {sandbox && <p className="text-xs text-amber-200">Sandbox: bez prawdziwej umowy, opłaty i aktywacji. Formularz sprawdza zamówienie według opublikowanych dokumentów; nie uruchamia płatnej usługi.</p>}
   </fieldset>;
 }

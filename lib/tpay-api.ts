@@ -161,7 +161,7 @@ export async function handleTpayApi(request: Request, env: TpayEnv): Promise<Res
       try {
         const config = tpayConfig(env); sandbox = config.sandbox;
         enabled = env.TPAY_ENABLED === "true" && (sandbox || (env.TPAY_LIVE_APPROVED === "true" && salesPolicy.approved && !!orderSmtpConfig(env)));
-        if (!enabled) issue = !sandbox && !salesPolicy.approved ? "Dokumenty sprzedazy i obsluga zamowien konsumenckich wymagaja zatwierdzenia przed produkcja." : env.TPAY_ENABLED !== "true" ? "TPAY_ENABLED musi miec wartosc true." : "Platnosci produkcyjne nie zostaly zatwierdzone. Testy wymagaja TPAY_ENVIRONMENT=sandbox.";
+        if (!enabled) issue = !sandbox && !salesPolicy.approved ? "Gotowosc obslugi sprzedazy produkcyjnej wymaga osobnego zatwierdzenia. Publikacja dokumentow nie wlacza platnosci." : env.TPAY_ENABLED !== "true" ? "TPAY_ENABLED musi miec wartosc true." : "Platnosci produkcyjne nie zostaly zatwierdzone. Testy wymagaja TPAY_ENVIRONMENT=sandbox.";
       } catch (error) {
         const required = ["TPAY_CLIENT_ID", "TPAY_CLIENT_SECRET", "TPAY_MERCHANT_ID", "TPAY_SECURITY_CODE", "SUPABASE_SERVICE_ROLE_KEY", "APP_ORIGIN"] as const;
         const missing = required.filter(name => !env[name]);
@@ -174,7 +174,7 @@ export async function handleTpayApi(request: Request, env: TpayEnv): Promise<Res
     if (path !== "/checkout" || request.method !== "POST") return json({ message: "Nieznana trasa platnosci." }, 404);
     const config = tpayConfig(env);
     if (env.TPAY_ENABLED !== "true" || (!config.sandbox && env.TPAY_LIVE_APPROVED !== "true")) throw new PaymentError(503, "Zakup przez Tpay nie jest jeszcze uruchomiony.");
-    if (!config.sandbox && !salesPolicy.approved) throw new PaymentError(503, "Dokumenty sprzedazy nie sa jeszcze zatwierdzone. Produkcyjne platnosci pozostaja wylaczone.");
+    if (!config.sandbox && !salesPolicy.approved) throw new PaymentError(503, "Gotowosc obslugi sprzedazy produkcyjnej nie zostala jeszcze zatwierdzona. Produkcyjne platnosci pozostaja wylaczone.");
     if (!config.sandbox && !orderSmtpConfig(env)) throw new PaymentError(503, "Wysylka potwierdzen zamowien nie jest skonfigurowana. Produkcyjne platnosci pozostaja wylaczone.");
     if (request.headers.get("Origin") !== config.origin || new URL(request.url).origin !== config.origin) throw new PaymentError(403, "Nieprawidlowa domena.");
     if (context.account.suspended) throw new PaymentError(403, "Konto zawieszone.");
