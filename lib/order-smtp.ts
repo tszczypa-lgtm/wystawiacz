@@ -10,10 +10,9 @@ export function smtpFailureIsRetryable(error: unknown) {
   return typeof failure?.command === "string" && /^(?:CONN|EHLO|HELO|STARTTLS|AUTH(?: .*)?|MAIL FROM|RCPT TO)$/.test(failure.command);
 }
 
-export async function sendOrderSmtp(config: NonNullable<ReturnType<typeof orderSmtpConfig>>, message: OrderMessage) {
+function orderTransport(config: NonNullable<ReturnType<typeof orderSmtpConfig>>) {
   const senderDomain = config.user.split("@")[1];
-  const messageId = `<order-confirmation-${message.id}@${senderDomain}>`;
-  const transport = nodemailer.createTransport({
+  return nodemailer.createTransport({
     host: config.host, port: config.port, secure: true,
     auth: { user: config.user, pass: config.password },
     tls: { servername: config.host, minVersion: "TLSv1.2", rejectUnauthorized: true },
@@ -21,6 +20,17 @@ export async function sendOrderSmtp(config: NonNullable<ReturnType<typeof orderS
     connectionTimeout: 8000, greetingTimeout: 5000, socketTimeout: 8000, dnsTimeout: 5000,
     disableFileAccess: true, disableUrlAccess: true,
   });
+}
+
+export async function verifyOrderSmtp(config: NonNullable<ReturnType<typeof orderSmtpConfig>>) {
+  const transport = orderTransport(config);
+  try { await transport.verify(); } finally { transport.close(); }
+}
+
+export async function sendOrderSmtp(config: NonNullable<ReturnType<typeof orderSmtpConfig>>, message: OrderMessage) {
+  const senderDomain = config.user.split("@")[1];
+  const messageId = `<order-confirmation-${message.id}@${senderDomain}>`;
+  const transport = orderTransport(config);
   try {
     const result = await transport.sendMail({
       from: { name: "Wystawiacz by Tymo", address: config.user },

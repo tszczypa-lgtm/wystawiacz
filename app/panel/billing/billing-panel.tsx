@@ -96,6 +96,13 @@ export function BillingPanel() {
       window.location.assign(url.href);
     } catch (error) { setMessage((error as Error).message); setBusy(false); }
   }
+  async function checkMail() {
+    setBusy(true); setMessage("");
+    try {
+      const result = await accountRequest<{ ok: boolean; message: string }>("/tpay/mail-check", "POST");
+      setMessage(result.message);
+    } catch (error) { setMessage((error as Error).message); } finally { setBusy(false); }
+  }
   return <div className="grid gap-5">
     {message && <p role="status" className="rounded-xl border border-amber-300/20 bg-amber-300/10 p-4 text-amber-100">{message}</p>}
     <OrderHistory orders={orders} onDownload={downloadConfirmation} busy={busy} />
@@ -120,6 +127,7 @@ export function BillingPanel() {
         {!info.billingEnabled && !tpay?.enabled && <p className="mt-4 text-white/60">{info.billingIssue ? "Zakup chwilowo niedostępny. Administrator musi sprawdzić konfigurację płatności." : "Zakup abonamentu nie jest jeszcze uruchomiony. Nie pobieramy opłaty za rejestrację."}</p>}
         {tpay?.canCheckout && <CheckoutAcceptance sandbox={tpay.sandbox} disabled={busy} acceptTerms={acceptTerms} requestEarlyStart={requestEarlyStart} onTerms={setAcceptTerms} onEarlyStart={setRequestEarlyStart} />}
         <div className="mt-5 flex flex-wrap gap-3">
+          {info.isAdmin && <button disabled={busy || checking} onClick={checkMail} title="Test polaczenia i logowania SMTP bez wysylania maila" className="rounded-xl border border-white/20 px-5 py-3 disabled:opacity-50">Sprawdz poczte (bez wysylania)</button>}
           {tpay?.canCheckout && <button disabled={busy || !acceptTerms || !requestEarlyStart} onClick={tpayPayment} className="rounded-xl bg-[#ff5a00] px-5 py-3 font-bold disabled:opacity-50">{tpay.sandbox ? "Test zamowienia i platnosci Tpay" : "Zamawiam i place 500 zl"}</button>}
           {info.billingEnabled && !info.account.suspended && !info.isAdmin && info.account.access_mode !== "free" && info.account.subscription_status === "none" && <button disabled={busy} onClick={() => payment("/checkout")} className="rounded-xl bg-[#ff5a00] px-5 py-3 font-bold disabled:opacity-50">Kup abonament</button>}
           {info.billingEnabled && !info.account.suspended && ["canceled", "incomplete_expired"].includes(info.account.subscription_status) && <button disabled={busy} onClick={() => payment("/checkout")} className="rounded-xl bg-[#ff5a00] px-5 py-3 font-bold disabled:opacity-50">Wznów abonament</button>}

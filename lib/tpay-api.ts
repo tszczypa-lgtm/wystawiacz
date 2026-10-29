@@ -6,6 +6,8 @@ import { checkoutAcceptance } from "./checkout-policy";
 import { orderConfirmation, orderSummary, type ConfirmedOrder } from "./order-confirmation";
 import type { OrderMailEnv } from "./order-mail";
 import { orderSmtpConfig } from "./order-mail-config";
+import { orderMailDiagnostic } from "./order-mail-diagnostic";
+import { verifyOrderSmtp } from "./order-smtp";
 
 export type TpayEnv = AccountEnv & OrderMailEnv & {
   TPAY_ENABLED?: string; TPAY_ENVIRONMENT?: string; TPAY_LIVE_APPROVED?: string;
@@ -129,6 +131,19 @@ export async function handleTpayApi(request: Request, env: TpayEnv): Promise<Res
       return new Response("TRUE", { headers: { "Content-Type": "text/plain", "Cache-Control": "no-store" } });
     }
     const context = await accountContext(request, env);
+    if (path === "/mail-check" && request.method === "POST") {
+      if (!context.isAdmin) throw new PaymentError(403, "Sprawdzenie poczty jest dostepne tylko administratorowi.");
+      if (!env.APP_ORIGIN || request.headers.get("Origin") !== env.APP_ORIGIN || new URL(request.url).origin !== env.APP_ORIGIN) throw new PaymentError(403, "Nieprawidlowa domena.");
+      const config = orderSmtpConfig(env);
+      if (!config) return json({ ok: false, message: "Brak poprawnej konfiguracji: ORDER_MAIL_ENABLED=true oraz sekret ORDER_SMTP_PASSWORD. Sprawdz takze host i login, jezeli je zmieniono." });
+      try {
+        await verifyOrderSmtp(config);
+        return json({ ok: true, message: "Polaczenie TLS i logowanie SMTP dzialaja. Test nie wyslal zadnego maila i nie zmienil kolejki. To nie jest potwierdzenie doreczenia." });
+      } catch (error) {
+        const diagnostic = orderMailDiagnostic(error);
+        return json({ ok: false, ...diagnostic, message: `${diagnostic.hint} Kod: ${diagnostic.code}; SMTP: ${diagnostic.smtpStatus ?? "brak"}; etap: ${diagnostic.stage}.` });
+      }
+    }
     if (request.method === "GET" && (path === "/orders" || path.startsWith("/confirmation/"))) {
       const id = path.startsWith("/confirmation/") ? path.slice("/confirmation/".length) : null;
       if (id !== null && !uuid.test(id)) return json({ message: "Nie znaleziono zamowienia." }, 404);

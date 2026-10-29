@@ -2,6 +2,7 @@ import type { AccountEnv } from "./account-api";
 import { orderConfirmation, type ConfirmedOrder } from "./order-confirmation";
 import { orderSmtpConfig, type OrderMailSettings } from "./order-mail-config";
 import { sendOrderSmtp, smtpFailureIsRetryable } from "./order-smtp";
+import { orderMailDiagnostic } from "./order-mail-diagnostic";
 
 export type OrderMailEnv = AccountEnv & OrderMailSettings;
 
@@ -32,14 +33,17 @@ export async function deliverOrderMail(env: OrderMailEnv) {
         await db("finish_order_mail", { p_id: job.order_id, p_lease: job.lease, p_provider_id: messageId });
       } catch (error) {
         // SMTP has no idempotency key. Ambiguous delivery and lost DB acknowledgements need review.
-        if (!accepted) {
-          try { await db("fail_order_smtp_mail", { p_id: job.order_id, p_lease: job.lease, p_retryable: smtpFailureIsRetryable(error) }); }
-          catch { /* Expired leases move to review, never automatic resend. */ }
+        const diagnostic = accepted ? { code: "RESULT_UNRECORDED", smtpStatus: null, stage: "DATABASE" } : orderMailDiagnostic(error);
+        try {
+          await db("record_order_mail_failure", { p_id: job.order_id, p_lease: job.lease, p_retryable: !accepted && smtpFailureIsRetryable(error), p_code: diagnostic.code, p_status: diagnostic.smtpStatus, p_stage: diagnostic.stage });
+        } catch {
+          if (!accepted) {
+            try { await db("fail_order_smtp_mail", { p_id: job.order_id, p_lease: job.lease, p_retryable: smtpFailureIsRetryable(error) }); }
+            catch { /* Expired leases move to review, never automatic resend. */ }
+          }
         }
-        const failure = error as { code?: unknown; responseCode?: unknown } | null;
         console.error(JSON.stringify({ event: accepted ? "order_mail_result_unrecorded" : "order_mail_attempt_failed",
-          code: typeof failure?.code === "string" && /^[A-Z_]{2,30}$/.test(failure.code) ? failure.code : "UNKNOWN",
-          ...(typeof failure?.responseCode === "number" && Number.isInteger(failure.responseCode) ? { smtpStatus: failure.responseCode } : {}),
+          code: diagnostic.code, smtpStatus: diagnostic.smtpStatus, stage: diagnostic.stage,
         }));
       }
     }

@@ -48,6 +48,20 @@ nie sa uzupelniane dzisiejsza wersja. Dane nabywcy sa utrwalane dla nowych zamow
 Otwarte zamowienie utworzone bez nowego snapshotu moze wymagac osobnego wyjasnienia;
 nie oznaczaj zbiorczo zamowien jako nieoplacone.
 
+## Diagnostyka bez logow Cloudflare
+
+Na koncie administratora w Abonamencie jest przycisk **Sprawdz poczte (bez wysylania)**.
+Test wykonuje tylko TLS i logowanie do SMTP. Nie wysyla maila, nie zmienia kolejki,
+nie sprawdza doreczenia i nie wymaga nowej platnosci ani migracji 010.
+Wynik pokazuje kod, status SMTP oraz etap; nie zwraca hasla ani surowej odpowiedzi serwera.
+Konto testowe bez praw administratora nie moze uruchomic tego sprawdzenia.
+
+Opcjonalna migracja `supabase/010_order_mail_diagnostics.sql` dodaje bezpieczne pola
+ostatniego bledu do kolejki. Dla przyszlych prob mozna odczytac `last_error_code`,
+`last_smtp_status`, `last_error_stage`, `last_error_at` w Supabase. Stare bledy nie sa
+odtwarzane. Bez tej migracji wysylka zachowuje poprzednie bezpieczne obslugiwanie bledow.
+Migracja nie zeruje licznikow i nie ponawia zadan w stanie `review`.
+
 Nie zmieniaj `TPAY_ENVIRONMENT=sandbox`, `TPAY_LIVE_APPROVED` ani
 `salesPolicy.approved` podczas tych testow. Regulamin i prywatnosc nadal wymagaja
 zamkniecia ustalen o retencji i dostawcach oraz zatwierdzenia przed sprzedaza.

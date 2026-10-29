@@ -12,7 +12,9 @@ const checkout = url(compile(await readFile(new URL("../lib/checkout-policy.ts",
 const { checkoutPolicy, checkoutAcceptance } = await import(checkout);
 const confirmation = url(compile(await readFile(new URL("../lib/order-confirmation.ts", import.meta.url), "utf8")));
 const mailConfig = url(compile(await readFile(new URL("../lib/order-mail-config.ts", import.meta.url), "utf8")));
-const source = compile(await readFile(new URL("../lib/tpay-api.ts", import.meta.url), "utf8")).replace('"./account-api"', JSON.stringify(account)).replace('"./account-validation"', JSON.stringify(validation)).replace('"./sales-policy"', JSON.stringify(policy)).replace('"./checkout-policy"', JSON.stringify(checkout)).replace('"./order-confirmation"', JSON.stringify(confirmation)).replace('"./order-mail-config"', JSON.stringify(mailConfig));
+const mailDiagnostic = url(compile(await readFile(new URL("../lib/order-mail-diagnostic.ts", import.meta.url), "utf8")));
+const smtp = url('export async function verifyOrderSmtp() { globalThis.__smtpVerifyCalls++; if (globalThis.__smtpVerifyError) throw globalThis.__smtpVerifyError; }');
+const source = compile(await readFile(new URL("../lib/tpay-api.ts", import.meta.url), "utf8")).replace('"./account-api"', JSON.stringify(account)).replace('"./account-validation"', JSON.stringify(validation)).replace('"./sales-policy"', JSON.stringify(policy)).replace('"./checkout-policy"', JSON.stringify(checkout)).replace('"./order-confirmation"', JSON.stringify(confirmation)).replace('"./order-mail-config"', JSON.stringify(mailConfig)).replace('"./order-mail-diagnostic"', JSON.stringify(mailDiagnostic)).replace('"./order-smtp"', JSON.stringify(smtp));
 const { handleTpayApi, verifyNotificationFields, verifyTpayJws, amountInGrosz, paymentUrl } = await import(url(source));
 const owner = "00000000-0000-0000-0000-000000000001";
 const order = "00000000-0000-0000-0000-000000000002";
@@ -148,6 +150,22 @@ globalThis.fetch = async (input, init = {}) => {
 };
 const request = (path = "/checkout", origin = env.APP_ORIGIN, body = consent) => new Request(`${env.APP_ORIGIN}/api/account/tpay${path}`, { method: path === "/status" ? "GET" : "POST", headers: { Authorization: "Bearer test-user", Origin: origin, "Content-Type": "application/json" }, ...(path === "/status" ? {} : { body: JSON.stringify(body) }) });
 try {
+  globalThis.__smtpVerifyCalls = 0;
+  const mailEnv = { ...env, ORDER_MAIL_ENABLED: "true", ORDER_SMTP_PASSWORD: "private-smtp-secret" };
+  assert.equal((await handleTpayApi(request("/mail-check"), mailEnv)).status, 200);
+  assert.equal(globalThis.__smtpVerifyCalls, 1);
+  admin = false;
+  assert.equal((await handleTpayApi(request("/mail-check"), mailEnv)).status, 403);
+  admin = true;
+  assert.equal((await handleTpayApi(request("/mail-check", "https://evil.test"), mailEnv)).status, 403);
+  assert.equal(globalThis.__smtpVerifyCalls, 1, "Only same-origin admin can check SMTP");
+  assert.equal((await (await handleTpayApi(request("/mail-check"), env)).json()).ok, false);
+  globalThis.__smtpVerifyError = { code: "EAUTH", responseCode: 535, command: "AUTH PLAIN", message: "private-smtp-secret" };
+  const authFailure = await (await handleTpayApi(request("/mail-check"), mailEnv)).json();
+  assert.equal(authFailure.code, "EAUTH"); assert.equal(authFailure.smtpStatus, 535); assert.equal(authFailure.stage, "AUTH");
+  assert.ok(!JSON.stringify(authFailure).includes("private-smtp-secret"));
+  delete globalThis.__smtpVerifyError;
+  delete globalThis.__smtpVerifyCalls;
   const paidOrder = { id: order, environment: "sandbox", status: "paid", amount_grosz: 50000, currency: "PLN", transaction_title: "TR-TEST-123", created_at: "2026-10-28T22:56:36Z", paid_at: "2026-10-28T22:56:49Z", access_until: null, checkout_acceptance: snapshot };
   historyRows = [paidOrder];
   const getOrder = path => handleTpayApi(new Request(`${env.APP_ORIGIN}/api/account/tpay${path}`, { headers: { Authorization: "Bearer test-user" } }), env);
