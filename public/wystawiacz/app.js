@@ -642,12 +642,13 @@ function renderProducts() {
   productList.innerHTML = state.products
     .map((product, index) => `
       <article class="product-card ${product.id === activeProductId ? "active" : ""}" data-product-id="${escapeHtml(product.id)}">
+        <span class="product-number" aria-label="Aukcja numer ${index + 1}">#${index + 1}</span>
         <label class="product-select"><input type="checkbox" data-select-product-id="${escapeHtml(product.id)}" aria-label="Zaznacz aukcje" ${selectedProductIds.has(product.id) ? "checked" : ""} ${product.allegroOfferId || batchPublishing ? "disabled" : ""} /></label>
         ${findPhotoUrl(product.photoNames?.[0])
           ? `<img class="product-image" src="${escapeHtml(findPhotoUrl(product.photoNames?.[0]))}" alt="" />`
           : `<div class="product-image"></div>`}
         <div>
-          <h3><span class="product-number">#${index + 1}</span> ${escapeHtml(product.title)}</h3>
+          <h3>${escapeHtml(product.title)}</h3>
           <p>${escapeHtml(product.brand || "Marka do uzupełnienia")} · Numer wpisany: ${escapeHtml(product.enteredPartNumber)} · ${escapeHtml(product.stock)} ${{ UNIT: "szt.", PAIR: "par", SET: "kpl." }[product.stockUnit] || "szt."} · ${product.photoNames?.length || 0} zdjęć</p>
           <p>Wysyłka: ${escapeHtml(product.shippingRateName || "profil do wybrania")}</p>
           <p>Zwrot: ${escapeHtml(product.returnPolicyName || "brak")} · Reklamacja: ${escapeHtml(product.impliedWarrantyName || "brak")}</p>

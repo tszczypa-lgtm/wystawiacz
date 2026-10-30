@@ -34,27 +34,22 @@
         const row = document.createElement("div"); row.className = "price-search-row";
         const brand = document.createElement("strong"); brand.className = `price-brand price-brand-${site.toLowerCase()}`; brand.textContent = site; row.append(brand);
         function persist() { saved[site] = settings; try { localStorage.setItem(storageKey, JSON.stringify(saved)); } catch {} }
-        function launch() {
-          const query = (settings.mode === "number" ? number() : title()).trim();
-          if (!query) { notify("Brakuje numeru czesci lub tytulu do wyszukania."); return; }
-          window.open(searchUrl(site, query, settings), "_blank", "noopener,noreferrer");
-        }
-        function buttons(label, items, property, open) {
-          const group = document.createElement("div"); group.className = "price-button-group"; group.setAttribute("role", "group"); group.setAttribute("aria-label", `${site}: ${label}`);
-          for (const [value, text] of items) {
+        for (const [mode, label] of [["number", "Po numerze"], ["title", "Po tytule"]]) {
+          const group = document.createElement("div"); group.className = "price-button-group";
+          group.setAttribute("role", "group"); group.setAttribute("aria-label", `${site}: ${label}`);
+          const caption = document.createElement("span"); caption.textContent = label; group.append(caption);
+          const sorts = ["Google", "Ovoko"].includes(site) ? [["default", "Szukaj"]] : [["default", "Domyslnie"], ["asc", "Od najnizszej"], ["desc", "Od najwyzszej"]];
+          for (const [order, text] of sorts) {
             const button = document.createElement("button"); button.type = "button"; button.textContent = text;
-            button.setAttribute("aria-pressed", String(settings[property] === value));
             button.onclick = () => {
-              settings[property] = value; persist();
-              for (const child of group.children) child.setAttribute("aria-pressed", String(child === button));
-              if (open) launch();
+              const query = (mode === "number" ? number() : title()).trim();
+              if (!query) { notify("Brakuje numeru czesci lub tytulu do wyszukania."); return; }
+              window.open(searchUrl(site, query, { ...settings, mode, order }), "_blank", "noopener,noreferrer");
             };
             group.append(button);
           }
           row.append(group);
         }
-        buttons("Szukaj", [["number", "Po numerze"], ["title", "Po tytule"]], "mode", true);
-        if (!["Google", "Ovoko"].includes(site)) buttons("Kolejnosc cen", [["default", "Domyslnie"], ["asc", "Od najnizszej"], ["desc", "Od najwyzszej"]], "order", false);
         if (site === "Allegro") {
           const poland = document.createElement("button"); poland.type = "button"; poland.textContent = "Z Polski";
           poland.setAttribute("aria-pressed", String(Boolean(settings.poland)));
@@ -63,7 +58,7 @@
         if (site === "Ovoko") { const note = document.createElement("small"); note.textContent = "Sortowanie wybierz na Ovoko"; row.append(note); }
         grid.append(row);
       }
-      const hint = document.createElement("small"); hint.textContent = "Wybierz kolejnosc, potem Po numerze lub Po tytule. Cene sprzedazy wpisujesz samodzielnie."; actions.append(hint);
+      const hint = document.createElement("small"); hint.textContent = "Kazdy przycisk od razu otwiera portal. Wybierz wyszukiwanie po numerze lub po tytule i kolejnosc cen."; actions.append(hint);
     },
     refresh() {}
   };

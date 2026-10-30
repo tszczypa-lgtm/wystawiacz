@@ -250,6 +250,7 @@ try {
     state.selectedVehicleId = "";
   });
   await page.locator("#partNumber").fill("1234567");
+  await page.locator(".own-offers-panel summary").click();
   await page.waitForSelector(".own-offers-panel button");
   assert.equal(await page.locator(".own-offers-panel button").count(), 1, "A suffix variant must not match the complete part number");
   await page.locator(".own-offers-panel button").click();
@@ -296,11 +297,11 @@ try {
   assert.equal(new URL(await page.evaluate(() => window.opened.at(-1)[0])).searchParams.get("q"), "1234567");
   for (const site of ["Otomoto", "OLX"]) {
     const row = page.locator(".price-search-row").filter({ hasText: site });
-    await row.getByText("Od najnizszej", { exact: true }).click(); await row.locator("button").first().click();
+    await row.getByRole("group", { name: `${site}: Po numerze`, exact: true }).getByText("Od najnizszej", { exact: true }).click();
     assert.equal(new URL(await page.evaluate(() => window.opened.at(-1)[0])).searchParams.get("search[order]"), "filter_float_price:asc");
   }
   assert.equal(await page.locator("#priceUsedInput").count(), 0);
-  await page.getByRole("group", { name: "Allegro: Szukaj", exact: true }).getByText("Po numerze", { exact: true }).click();
+  await page.getByRole("group", { name: "Allegro: Po numerze", exact: true }).getByText("Domyslnie", { exact: true }).click();
   assert.equal(new URL(await page.evaluate(() => window.opened.at(-1)[0])).searchParams.has("stan"), false);
   assert.equal(await page.locator(".price-quote, #checkMarketPrices, #allegroPriceReaderDialog").count(), 0);
   assert.equal(await page.locator(".search-actions input").count(), 0);
