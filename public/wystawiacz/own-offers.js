@@ -25,10 +25,20 @@
         window.open(url.href, "_blank", "noopener,noreferrer");
       };
       function showPrices(matches, total, number) {
-        const count = matches.filter(offer => /^\d+$/.test(String(offer.id))).length;
+        const offers = matches.filter(offer => /^\d+$/.test(String(offer.id)));
+        const count = offers.length;
         matchedNumber = number;
         edit.disabled = false;
         message.textContent = `Pasujace aktywne aukcje: ${count}`;
+        const amounts = offers.map(offer => offer.sellingMode?.price)
+          .filter(price => price?.currency === "PLN" && typeof price.amount === "string" && price.amount.trim() !== "" && Number.isFinite(Number(price.amount)) && Number(price.amount) > 0)
+          .map(price => Number(price.amount));
+        if (amounts.length) {
+          const format = value => new Intl.NumberFormat("pl-PL", { style: "currency", currency: "PLN" }).format(value);
+          const low = Math.min(...amounts), high = Math.max(...amounts);
+          message.textContent += low === high ? ` · Cena: ${format(low)}` : ` · Ceny: ${format(low)} – ${format(high)}`;
+          if (amounts.length < count) message.textContent += " (nie wszystkie ceny sa dostepne w PLN)";
+        } else if (count) message.textContent += " · Brak danych o cenie w PLN";
         if (total >= 100) message.textContent += " (sprawdzono pierwsze 100 wynikow)";
         message.title = "Licznik dotyczy pelnego numeru. Wyszukiwarka Allegro moze znalezc takze podobne numery.";
       }

@@ -184,6 +184,9 @@
 .cloud-session-list { display: grid; gap: 12px; margin: 16px 0; }
 .price-button-group { display: inline-flex; flex-wrap: wrap; align-items: center; padding: 4px; gap: 3px; border: 1px solid var(--line); border-radius: 8px; background: #f7f8fa; }
 .price-button-group > span { font-size: 10px; font-weight: 800; padding: 0 5px; color: var(--ink); }
+.price-checkbox-group { display: flex; flex-wrap: wrap; align-items: center; gap: 7px 12px; font-size: 11px; }
+.price-checkbox-group label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
+.price-checkbox-group input { width: auto; margin: 0; accent-color: var(--orange); }
 .own-offers-panel summary { font-size: 12px; cursor: pointer; }
 .own-offers-panel:not([open]) > button { display: none; }
 .price-search-row button, .list-layout-options button, .own-prices-panel button, .own-price-dialog button { width: auto; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); font: inherit; font-size: 11px; }
@@ -220,17 +223,18 @@
   body.auction-list-left .list-header h2 { font-size: 17px; }
   body.auction-list-left .list-header .eyebrow { display: none; }
   body.auction-list-left #productList { flex: 1; min-height: 0; max-height: none; }
-  body.auction-list-left .product-card { grid-template-columns: 30px minmax(0,1fr) 66px; gap: 6px; padding: 9px 6px 9px 56px; }
+  body.auction-list-left .product-card { grid-template-columns: minmax(0,1fr) 70px; grid-template-rows: auto; gap: 8px; min-height: 147px; padding: 9px 6px 9px 56px; align-items: start; }
   body.auction-list-left .product-select { top: 47px; left: 20px; }
-  body.auction-list-left .product-image { width: 34px; height: 34px; }
+  body.auction-list-left .product-image { position: absolute; top: 76px; left: 10px; width: 36px; height: 36px; }
+  body.auction-list-left .product-card > div:not(.product-image):not(.product-price):not(.product-row-actions) { grid-column: 1; grid-row: 1; }
   body.auction-list-left .product-card h3 { font-size: 11px; margin-bottom: 4px; }
   body.auction-list-left .product-card p { font-size: 10px; }
   body.auction-list-left .product-card p:nth-of-type(n+2):not(.publish-error) { display: none; }
-  body.auction-list-left .product-price { padding: 0; }
+  body.auction-list-left .product-price { padding: 0; grid-column: 2; grid-row: 1; align-self: start; }
   body.auction-list-left .product-price-input { width: 65px; padding: 5px 2px; font-size: 11px; }
   body.auction-list-left .product-price span { font-size: 9px; overflow-wrap: anywhere; }
-  body.auction-list-left .publish-button { grid-column: 2; padding: 5px; width: auto; font-size: 11px; }
-  body.auction-list-left .product-row-actions { grid-column: 3; }
+  body.auction-list-left .publish-button { grid-column: 2; grid-row: 1; margin-top: 51px; align-self: start; padding: 5px; width: 100%; font-size: 11px; }
+  body.auction-list-left .product-row-actions { grid-column: 2; grid-row: 1; margin-top: 83px; align-self: start; }
   body.auction-list-left .edit-button { padding: 4px; font-size: 10px; }
   body.auction-list-left .batch-toolbar { margin: 0; gap: 4px; }
   body.auction-list-left .batch-toolbar button { font-size: 10px; padding: 5px; }

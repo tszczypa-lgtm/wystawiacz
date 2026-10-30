@@ -34,31 +34,42 @@
         const row = document.createElement("div"); row.className = "price-search-row";
         const brand = document.createElement("strong"); brand.className = `price-brand price-brand-${site.toLowerCase()}`; brand.textContent = site; row.append(brand);
         function persist() { saved[site] = settings; try { localStorage.setItem(storageKey, JSON.stringify(saved)); } catch {} }
+        const searchButtons = document.createElement("div"); searchButtons.className = "price-button-group";
+        searchButtons.setAttribute("role", "group"); searchButtons.setAttribute("aria-label", `${site}: Szukaj`);
         for (const [mode, label] of [["number", "Po numerze"], ["title", "Po tytule"]]) {
-          const group = document.createElement("div"); group.className = "price-button-group";
-          group.setAttribute("role", "group"); group.setAttribute("aria-label", `${site}: ${label}`);
-          const caption = document.createElement("span"); caption.textContent = label; group.append(caption);
-          const sorts = ["Google", "Ovoko"].includes(site) ? [["default", "Szukaj"]] : [["default", "Domyslnie"], ["asc", "Od najnizszej"], ["desc", "Od najwyzszej"]];
-          for (const [order, text] of sorts) {
-            const button = document.createElement("button"); button.type = "button"; button.textContent = text;
-            button.onclick = () => {
-              const query = (mode === "number" ? number() : title()).trim();
-              if (!query) { notify("Brakuje numeru czesci lub tytulu do wyszukania."); return; }
-              window.open(searchUrl(site, query, { ...settings, mode, order }), "_blank", "noopener,noreferrer");
-            };
-            group.append(button);
+          const button = document.createElement("button"); button.type = "button"; button.textContent = label;
+          button.onclick = () => {
+            const query = (mode === "number" ? number() : title()).trim();
+            if (!query) { notify("Brakuje numeru czesci lub tytulu do wyszukania."); return; }
+            window.open(searchUrl(site, query, { ...settings, mode }), "_blank", "noopener,noreferrer");
+          };
+          searchButtons.append(button);
+        }
+        row.append(searchButtons);
+        const filters = document.createElement("div"); filters.className = "price-checkbox-group";
+        filters.setAttribute("role", "group"); filters.setAttribute("aria-label", `${site}: Filtry`);
+        const sorting = [];
+        function checkbox(text, checked, change) {
+          const label = document.createElement("label"), input = document.createElement("input");
+          input.type = "checkbox"; input.checked = checked; input.onchange = () => change(input.checked);
+          label.append(input, text); filters.append(label); return input;
+        }
+        if (!["Google", "Ovoko"].includes(site)) {
+          for (const [order, text] of [["asc", "Od najnizszej"], ["desc", "Od najwyzszej"]]) {
+            const input = checkbox(text, settings.order === order, checked => {
+              settings.order = checked ? order : "default";
+              for (const [value, control] of sorting) control.checked = settings.order === value;
+              persist();
+            });
+            sorting.push([order, input]);
           }
-          row.append(group);
         }
-        if (site === "Allegro") {
-          const poland = document.createElement("button"); poland.type = "button"; poland.textContent = "Z Polski";
-          poland.setAttribute("aria-pressed", String(Boolean(settings.poland)));
-          poland.onclick = () => { settings.poland = !settings.poland; poland.setAttribute("aria-pressed", String(settings.poland)); persist(); }; row.append(poland);
-        }
+        if (site === "Allegro") checkbox("Wysylka z Polski", Boolean(settings.poland), checked => { settings.poland = checked; persist(); });
+        if (filters.children.length) row.append(filters);
         if (site === "Ovoko") { const note = document.createElement("small"); note.textContent = "Sortowanie wybierz na Ovoko"; row.append(note); }
         grid.append(row);
       }
-      const hint = document.createElement("small"); hint.textContent = "Kazdy przycisk od razu otwiera portal. Wybierz wyszukiwanie po numerze lub po tytule i kolejnosc cen."; actions.append(hint);
+      const hint = document.createElement("small"); hint.textContent = "Wybierz filtry i kliknij Po numerze lub Po tytule. Ostatni wybor filtrow zostaje zapamietany."; actions.append(hint);
     },
     refresh() {}
   };

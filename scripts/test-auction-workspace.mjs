@@ -41,7 +41,7 @@ try {
       numberInput: document.querySelector("#partNumber"), connected: () => true,
       request: async path => {
         reads.push(path);
-        return { offers: [
+        return { offers: window.testOffers || [
           { id: "123", name: "Pompa ABS 1234567", sellingMode: { price: { amount: "150.50", currency: "PLN" } } },
           { id: "456", name: "Pompa 1234567", sellingMode: { price: { amount: "175", currency: "PLN" } } },
           { id: "789", name: "Pompa 1234567A", sellingMode: { price: { amount: "10", currency: "PLN" } } },
@@ -69,16 +69,19 @@ try {
   await page.waitForFunction(() => document.querySelector(".own-prices-panel p").textContent.includes("aukcje: 2"));
   assert.equal(await page.locator(".own-price-list, .own-price-dialog, .own-price-choice").count(), 0);
   assert.equal(await page.locator(".price-quote").count(), 0);
-  assert.equal(await page.locator(".search-actions input").count(), 0);
+  assert.equal(await page.locator(".search-actions input").count(), 7);
   assert.equal(await page.locator(".product-card h3 .product-number").count(), 0);
   const numberBox = await page.locator(".product-number").first().boundingBox();
   const titleBox = await page.locator(".product-card h3").first().boundingBox();
   assert.ok(numberBox.x + numberBox.width < titleBox.x);
-  await page.getByRole("group", { name: "Allegro: Po numerze", exact: true }).getByText("Od najwyzszej").click();
+  assert.match(await page.locator(".own-prices-panel p").textContent(), /150,50.*175,00/);
+  await page.getByRole("group", { name: "Allegro: Filtry", exact: true }).getByLabel("Od najwyzszej").check();
+  await page.getByRole("group", { name: "Allegro: Szukaj", exact: true }).getByText("Po numerze").click();
   let opened = await page.evaluate(() => opened);
   assert.equal(new URL(opened.at(-1)[0]).searchParams.get("order"), "pd");
   assert.equal(new URL(opened.at(-1)[0]).searchParams.get("string"), "1234567");
-  await page.getByRole("group", { name: "OLX: Po tytule", exact: true }).getByText("Od najnizszej").click();
+  await page.getByRole("group", { name: "OLX: Filtry", exact: true }).getByLabel("Od najnizszej").check();
+  await page.getByRole("group", { name: "OLX: Szukaj", exact: true }).getByText("Po tytule").click();
   opened = await page.evaluate(() => opened);
   assert.equal(new URL(opened.at(-1)[0]).searchParams.get("search[order]"), "filter_float_price:asc");
   assert.match(new URL(opened.at(-1)[0]).pathname, /Pompa%20ABS/);
@@ -96,6 +99,21 @@ try {
   assert.ok(await page.getByRole("button", { name: "Otworz Asortyment Allegro", exact: true }).isDisabled());
   await page.locator("#partNumber").fill("1234567");
   await page.waitForFunction(() => document.querySelector(".own-prices-panel p").textContent.includes("aukcje: 2"));
+  await page.evaluate(() => {
+    testOffers = [{ id: "123", name: "Pompa 1234567", sellingMode: { price: { amount: "150.50", currency: "PLN" } } }];
+    pricing.refresh(true);
+  });
+  await page.waitForFunction(() => document.querySelector(".own-prices-panel p").textContent.includes("aukcje: 1"));
+  const single = await page.locator(".own-prices-panel p").textContent();
+  assert.match(single, /Cena: 150,50/);
+  assert.ok(!single.includes("Ceny:"));
+  const allegroFilters = page.getByRole("group", { name: "Allegro: Filtry", exact: true });
+  await allegroFilters.getByLabel("Od najnizszej").check();
+  assert.equal(await allegroFilters.getByLabel("Od najwyzszej").isChecked(), false);
+  await allegroFilters.getByLabel("Wysylka z Polski").check();
+  await page.evaluate(() => PriceSearch.mount({ number: () => document.querySelector("#partNumber").value, title: () => "Pompa ABS", notify() {} }));
+  assert.equal(await page.getByRole("group", { name: "Allegro: Filtry", exact: true }).getByLabel("Od najnizszej").isChecked(), true);
+  assert.equal(await page.getByRole("group", { name: "Allegro: Filtry", exact: true }).getByLabel("Wysylka z Polski").isChecked(), true);
   await mkdir(new URL("../outputs/workspace-preview/", import.meta.url), { recursive: true });
   await page.locator(".search-actions").screenshot({ path: fileURLToPath(new URL("../outputs/workspace-preview/search.png", import.meta.url)) });
   await page.locator('[data-list-layout="left"]').click();
