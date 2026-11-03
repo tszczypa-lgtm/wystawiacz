@@ -131,6 +131,24 @@ export async function handleTpayApi(request: Request, env: TpayEnv): Promise<Res
       return new Response("TRUE", { headers: { "Content-Type": "text/plain", "Cache-Control": "no-store" } });
     }
     const context = await accountContext(request, env);
+    if (path === "/connection-check" && request.method === "POST") {
+      if (!context.isAdmin) throw new PaymentError(403, "Sprawdzenie Tpay jest dostepne tylko administratorowi.");
+      if (!env.APP_ORIGIN || request.headers.get("Origin") !== env.APP_ORIGIN || new URL(request.url).origin !== env.APP_ORIGIN) throw new PaymentError(403, "Nieprawidlowa domena.");
+      const config = tpayConfig(env);
+      try {
+        const response = await fetch(`${config.api}/oauth/auth`, {
+          method: "POST", redirect: "manual", signal: AbortSignal.timeout(15000),
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ client_id: env.TPAY_CLIENT_ID!, client_secret: env.TPAY_CLIENT_SECRET! }),
+        });
+        if (!response.ok) return json({ ok: false, message: `Logowanie do API Tpay nie powiodlo sie (HTTP ${response.status}). Sprawdz klucze dla srodowiska ${config.environment}. Nie utworzono transakcji.` });
+        const token = await response.json() as { access_token?: unknown };
+        if (typeof token.access_token !== "string" || !token.access_token) return json({ ok: false, message: "Tpay nie zwrocil tokenu logowania. Nie utworzono transakcji." });
+        return json({ ok: true, environment: config.environment, message: `Logowanie do API Tpay dziala. Srodowisko: ${config.environment}; skonfigurowane ID sprzedawcy: ${env.TPAY_MERCHANT_ID}. Nie utworzono transakcji, nie pobrano pieniedzy ani nie wlaczono zakupow. Ten test nie potwierdza poprawnosci kodu bezpieczenstwa, odbioru webhooka ani aktywacji konta przez Tpay.` });
+      } catch {
+        return json({ ok: false, message: "Nie udalo sie sprawdzic polaczenia z Tpay. Sprawdz siec i konfiguracje. Nie utworzono transakcji." });
+      }
+    }
     if (path === "/mail-check" && request.method === "POST") {
       if (!context.isAdmin) throw new PaymentError(403, "Sprawdzenie poczty jest dostepne tylko administratorowi.");
       if (!env.APP_ORIGIN || request.headers.get("Origin") !== env.APP_ORIGIN || new URL(request.url).origin !== env.APP_ORIGIN) throw new PaymentError(403, "Nieprawidlowa domena.");

@@ -150,6 +150,47 @@ globalThis.fetch = async (input, init = {}) => {
 };
 const request = (path = "/checkout", origin = env.APP_ORIGIN, body = consent) => new Request(`${env.APP_ORIGIN}/api/account/tpay${path}`, { method: path === "/status" ? "GET" : "POST", headers: { Authorization: "Bearer test-user", Origin: origin, "Content-Type": "application/json" }, ...(path === "/status" ? {} : { body: JSON.stringify(body) }) });
 try {
+  const baseFetch = globalThis.fetch;
+  let authChecks = 0, authStatus = 200, authThrows = false, authToken = "private-production-token";
+  const checkEnv = { ...env, TPAY_ENVIRONMENT: "production", TPAY_ENABLED: "false", TPAY_LIVE_APPROVED: "false", TPAY_MERCHANT_ID: "233323" };
+  globalThis.fetch = async (input, init = {}) => {
+    if (String(input).endsWith("/oauth/auth")) {
+      authChecks++;
+      assert.equal(String(input), "https://api.tpay.com/oauth/auth");
+      assert.equal(init.method, "POST"); assert.equal(init.redirect, "manual");
+      assert.equal(new URLSearchParams(init.body).get("client_id"), env.TPAY_CLIENT_ID);
+      assert.equal(new URLSearchParams(init.body).get("client_secret"), env.TPAY_CLIENT_SECRET);
+      if (authThrows) throw Error("private-network-secret");
+      return Response.json({ access_token: authToken, secret: "private-upstream-error" }, { status: authStatus });
+    }
+    return baseFetch(input, init);
+  };
+  const checked = await handleTpayApi(request("/connection-check"), checkEnv);
+  const diagnostic = await checked.json();
+  assert.equal(checked.headers.get("Cache-Control"), "no-store");
+  assert.equal(diagnostic.ok, true); assert.equal(diagnostic.environment, "production");
+  assert.ok(diagnostic.message.includes("233323"));
+  assert.equal(transactions, 0); assert.equal(claims, 0); assert.equal(settlements, 0);
+  assert.ok(!JSON.stringify(diagnostic).includes("private-production-token"));
+  assert.ok(!JSON.stringify(diagnostic).includes(env.TPAY_CLIENT_SECRET));
+  admin = false;
+  assert.equal((await handleTpayApi(request("/connection-check"), checkEnv)).status, 403);
+  admin = true;
+  assert.equal((await handleTpayApi(request("/connection-check", "https://evil.test"), checkEnv)).status, 403);
+  assert.equal(authChecks, 1);
+  assert.equal((await handleTpayApi(request("/connection-check"), { ...checkEnv, TPAY_CLIENT_SECRET: "" })).status, 503);
+  for (const status of [401, 403, 302, 500]) {
+    authStatus = status;
+    const failure = await (await handleTpayApi(request("/connection-check"), checkEnv)).json();
+    assert.equal(failure.ok, false); assert.ok(!JSON.stringify(failure).includes("private-upstream-error"));
+  }
+  authStatus = 200; authToken = "";
+  assert.equal((await (await handleTpayApi(request("/connection-check"), checkEnv)).json()).ok, false);
+  authThrows = true;
+  const networkFailure = await (await handleTpayApi(request("/connection-check"), checkEnv)).json();
+  assert.equal(networkFailure.ok, false); assert.ok(!JSON.stringify(networkFailure).includes("private-network-secret"));
+  assert.equal(transactions, 0); assert.equal(claims, 0); assert.equal(settlements, 0);
+  globalThis.fetch = baseFetch;
   globalThis.__smtpVerifyCalls = 0;
   const mailEnv = { ...env, ORDER_MAIL_ENABLED: "true", ORDER_SMTP_PASSWORD: "private-smtp-secret" };
   assert.equal((await handleTpayApi(request("/mail-check"), mailEnv)).status, 200);
