@@ -20,7 +20,16 @@ class PaymentError extends Error {
 }
 const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { "Cache-Control": "no-store" } });
 const uuid = /^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i;
-const configRevision = "2026-11-04.2";
+const configRevision = "2026-11-04.3";
+function tpayCredentials(env: TpayEnv) {
+  for (const name of ["TPAY_CLIENT_ID", "TPAY_CLIENT_SECRET"] as const) {
+    const value = env[name];
+    if (typeof value !== "string" || !value) throw new PaymentError(503, `Aktywne wdrozenie nie otrzymalo tekstowej wartosci ${name}.`, "TPAY_CREDENTIAL_MISSING");
+    if (value !== value.trim() || /[\r\n\t]/.test(value)) throw new PaymentError(503, `${name} zawiera spacje na brzegach lub znak nowej linii/tabulator. Popraw wartosc tego sekretu w aktywnym wdrozeniu.`, "TPAY_CREDENTIAL_WHITESPACE");
+    if (/^["'].*["']$/.test(value) || /^[*•]+$/.test(value)) throw new PaymentError(503, `${name} wyglada na wartosc w cudzyslowach lub zamaskowany tekst. Wpisz sama wartosc klucza.`, "TPAY_CREDENTIAL_FORMAT");
+  }
+  return new URLSearchParams({ client_id: env.TPAY_CLIENT_ID!, client_secret: env.TPAY_CLIENT_SECRET! });
+}
 function environmentValue(env: TpayEnv) {
   return typeof env.TPAY_ENVIRONMENT === "string" ? env.TPAY_ENVIRONMENT.trim() : "";
 }
@@ -38,6 +47,7 @@ export function tpayConfig(env: TpayEnv) {
   const sandbox = environment === "sandbox";
   if (!environment) throw new PaymentError(503, "Aktywne wdrozenie nie otrzymalo niepustej zmiennej tekstowej TPAY_ENVIRONMENT. Sprawdz ustawienia i wdrozenie Workera.", "TPAY_ENV_MISSING");
   if (!sandbox && environment !== "production") throw new PaymentError(503, "Aktywne wdrozenie otrzymalo nieprawidlowa wartosc TPAY_ENVIRONMENT. Dozwolone wartosci: production lub sandbox (malymi literami).", "TPAY_ENV_INVALID");
+  tpayCredentials(env);
   if (!env.TPAY_CLIENT_ID || !env.TPAY_CLIENT_SECRET || !/^\d+$/.test(env.TPAY_MERCHANT_ID || "") || !env.TPAY_SECURITY_CODE || !env.SUPABASE_SERVICE_ROLE_KEY) throw new PaymentError(503, "Tpay nie jest jeszcze skonfigurowany.");
   const origin = new URL(env.APP_ORIGIN || "https://invalid.local");
   if (!env.APP_ORIGIN || origin.protocol !== "https:" || origin.origin !== env.APP_ORIGIN) throw new PaymentError(503, "Nieprawidlowa domena platnosci.");
@@ -157,9 +167,14 @@ export async function handleTpayApi(request: Request, env: TpayEnv): Promise<Res
         const response = await fetch(`${config.api}/oauth/auth`, {
           method: "POST", redirect: "manual", signal: AbortSignal.timeout(15000),
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ client_id: env.TPAY_CLIENT_ID!, client_secret: env.TPAY_CLIENT_SECRET! }),
+          body: tpayCredentials(env),
         });
-        if (!response.ok) return json({ ok: false, message: `Logowanie do API Tpay nie powiodlo sie (HTTP ${response.status}). Sprawdz klucze dla srodowiska ${config.environment}. Nie utworzono transakcji.` });
+        if (!response.ok) {
+          const failure = await response.json().catch(() => null) as { error?: unknown } | null;
+          const known = ["invalid_client", "invalid_request", "unauthorized_client", "invalid_scope", "unsupported_grant_type", "access_denied", "temporarily_unavailable", "server_error"];
+          const code = typeof failure?.error === "string" && known.includes(failure.error) ? failure.error : "unclassified";
+          return json({ ok: false, code, diagnostic, message: `Tpay odrzucil logowanie: HTTP ${response.status}, kod: ${code}. Srodowisko: ${config.environment}; format obu kluczy sprawdzony. Nie utworzono transakcji. Diagnostyka: ${configRevision}.` });
+        }
         const token = await response.json() as { access_token?: unknown };
         if (typeof token.access_token !== "string" || !token.access_token) return json({ ok: false, message: "Tpay nie zwrocil tokenu logowania. Nie utworzono transakcji." });
         return json({ ok: true, environment: config.environment, diagnostic, message: `Logowanie do API Tpay dziala. Srodowisko: ${config.environment}; skonfigurowane ID sprzedawcy: ${env.TPAY_MERCHANT_ID}. Nie utworzono transakcji, nie pobrano pieniedzy ani nie wlaczono zakupow. Ten test nie potwierdza poprawnosci kodu bezpieczenstwa, odbioru webhooka ani aktywacji konta przez Tpay.` });
@@ -234,7 +249,7 @@ export async function handleTpayApi(request: Request, env: TpayEnv): Promise<Res
       if (claim.payment_url) return json({ url: paymentUrl(claim.payment_url, config.secure) });
       throw new PaymentError(409, "Platnosc jest przygotowywana lub jej wynik jest niepewny. Nie tworzymy drugiej; skontaktuj sie z administratorem.");
     }
-    const auth = await fetch(`${config.api}/oauth/auth`, { method: "POST", signal: AbortSignal.timeout(15000), headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: env.TPAY_CLIENT_ID!, client_secret: env.TPAY_CLIENT_SECRET! }) });
+    const auth = await fetch(`${config.api}/oauth/auth`, { method: "POST", redirect: "manual", signal: AbortSignal.timeout(15000), headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: tpayCredentials(env) });
     if (!auth.ok) { await db("rpc/fail_tpay_order", { p_id: claim.id }); throw new PaymentError(503, "Nie udalo sie uwierzytelnic w Tpay."); }
     const token = await auth.json() as { access_token?: string };
     if (!token.access_token) throw new PaymentError(503, "Nieprawidlowa odpowiedz Tpay.");

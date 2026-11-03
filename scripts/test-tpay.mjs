@@ -23,6 +23,11 @@ assert.equal(tpayConfig({ ...env, TPAY_ENVIRONMENT: " production\r\n" }).environ
 assert.equal(tpayConfig({ ...env, TPAY_ENVIRONMENT: " sandbox " }).sandbox, true);
 for (const value of [undefined, "", "  ", null, true, {}]) assert.throws(() => tpayConfig({ ...env, TPAY_ENVIRONMENT: value }), error => error.code === "TPAY_ENV_MISSING");
 for (const value of ["prod", "PRODUCTION", '"production"', "unknown-private-secret"]) assert.throws(() => tpayConfig({ ...env, TPAY_ENVIRONMENT: value }), error => error.code === "TPAY_ENV_INVALID" && !error.message.includes("unknown-private-secret"));
+for (const name of ["TPAY_CLIENT_ID", "TPAY_CLIENT_SECRET"]) {
+  for (const [value, code] of [[{}, "TPAY_CREDENTIAL_MISSING"], [" ", "TPAY_CREDENTIAL_WHITESPACE"], ["private-value\n", "TPAY_CREDENTIAL_WHITESPACE"], ['"private-value"', "TPAY_CREDENTIAL_FORMAT"], ["*****", "TPAY_CREDENTIAL_FORMAT"]]) {
+    assert.throws(() => tpayConfig({ ...env, [name]: value }), error => error.code === code && !error.message.includes("private-value"));
+  }
+}
 const consent = { version: checkoutPolicy.version, termsVersion: checkoutPolicy.termsVersion, acceptTerms: true, requestEarlyStart: true };
 for (const bad of [null, [], {}, { ...consent, acceptTerms: "true" }, { ...consent, requestEarlyStart: false }, { ...consent, version: "old" }, { ...consent, termsVersion: "old" }]) assert.equal(checkoutAcceptance(bad, "sandbox"), null);
 assert.equal(checkoutAcceptance({ ...consent, statements: "forged", recordedAt: "forged" }, "sandbox").statements.terms, checkoutPolicy.terms);
@@ -155,7 +160,7 @@ globalThis.fetch = async (input, init = {}) => {
 const request = (path = "/checkout", origin = env.APP_ORIGIN, body = consent) => new Request(`${env.APP_ORIGIN}/api/account/tpay${path}`, { method: path === "/status" ? "GET" : "POST", headers: { Authorization: "Bearer test-user", Origin: origin, "Content-Type": "application/json" }, ...(path === "/status" ? {} : { body: JSON.stringify(body) }) });
 try {
   const baseFetch = globalThis.fetch;
-  let authChecks = 0, authStatus = 200, authThrows = false, authToken = "private-production-token";
+  let authChecks = 0, authStatus = 200, authThrows = false, authToken = "private-production-token", oauthError = "invalid_client";
   const checkEnv = { ...env, TPAY_ENVIRONMENT: "production", TPAY_ENABLED: "false", TPAY_LIVE_APPROVED: "false", TPAY_MERCHANT_ID: "233323" };
   globalThis.fetch = async (input, init = {}) => {
     if (String(input).endsWith("/oauth/auth")) {
@@ -165,13 +170,13 @@ try {
       assert.equal(new URLSearchParams(init.body).get("client_id"), env.TPAY_CLIENT_ID);
       assert.equal(new URLSearchParams(init.body).get("client_secret"), env.TPAY_CLIENT_SECRET);
       if (authThrows) throw Error("private-network-secret");
-      return Response.json({ access_token: authToken, secret: "private-upstream-error" }, { status: authStatus });
+      return Response.json({ access_token: authToken, secret: "private-upstream-error", error: oauthError, error_description: "private-upstream-description" }, { status: authStatus });
     }
     return baseFetch(input, init);
   };
   const checked = await handleTpayApi(request("/connection-check"), checkEnv);
   const diagnostic = await checked.json();
-  assert.equal(diagnostic.diagnostic.revision, "2026-11-04.2");
+  assert.equal(diagnostic.diagnostic.revision, "2026-11-04.3");
   assert.equal(checked.headers.get("Cache-Control"), "no-store");
   assert.equal(diagnostic.ok, true); assert.equal(diagnostic.environment, "production");
   assert.ok(diagnostic.message.includes("233323"));
@@ -194,7 +199,13 @@ try {
     authStatus = status;
     const failure = await (await handleTpayApi(request("/connection-check"), checkEnv)).json();
     assert.equal(failure.ok, false); assert.ok(!JSON.stringify(failure).includes("private-upstream-error"));
+    assert.equal(failure.code, "invalid_client");
+    assert.ok(!JSON.stringify(failure).includes("private-upstream-description"));
   }
+  oauthError = "private-upstream-secret"; authStatus = 401;
+  const unclassified = await (await handleTpayApi(request("/connection-check"), checkEnv)).json();
+  assert.equal(unclassified.code, "unclassified");
+  assert.ok(!JSON.stringify(unclassified).includes("private-upstream-secret"));
   authStatus = 200; authToken = "";
   assert.equal((await (await handleTpayApi(request("/connection-check"), checkEnv)).json()).ok, false);
   authThrows = true;
