@@ -15,10 +15,14 @@ const mailConfig = url(compile(await readFile(new URL("../lib/order-mail-config.
 const mailDiagnostic = url(compile(await readFile(new URL("../lib/order-mail-diagnostic.ts", import.meta.url), "utf8")));
 const smtp = url('export async function verifyOrderSmtp() { globalThis.__smtpVerifyCalls++; if (globalThis.__smtpVerifyError) throw globalThis.__smtpVerifyError; }');
 const source = compile(await readFile(new URL("../lib/tpay-api.ts", import.meta.url), "utf8")).replace('"./account-api"', JSON.stringify(account)).replace('"./account-validation"', JSON.stringify(validation)).replace('"./sales-policy"', JSON.stringify(policy)).replace('"./checkout-policy"', JSON.stringify(checkout)).replace('"./order-confirmation"', JSON.stringify(confirmation)).replace('"./order-mail-config"', JSON.stringify(mailConfig)).replace('"./order-mail-diagnostic"', JSON.stringify(mailDiagnostic)).replace('"./order-smtp"', JSON.stringify(smtp));
-const { handleTpayApi, verifyNotificationFields, verifyTpayJws, amountInGrosz, paymentUrl } = await import(url(source));
+const { handleTpayApi, verifyNotificationFields, verifyTpayJws, amountInGrosz, paymentUrl, tpayConfig } = await import(url(source));
 const owner = "00000000-0000-0000-0000-000000000001";
 const order = "00000000-0000-0000-0000-000000000002";
 const env = { APP_ORIGIN: "https://example.test", TPAY_ENABLED: "true", TPAY_ENVIRONMENT: "sandbox", TPAY_CLIENT_ID: "test-id", TPAY_CLIENT_SECRET: "test-secret", TPAY_MERCHANT_ID: "123", TPAY_SECURITY_CODE: "test-code", SUPABASE_SERVICE_ROLE_KEY: "test-db" };
+assert.equal(tpayConfig({ ...env, TPAY_ENVIRONMENT: " production\r\n" }).environment, "production");
+assert.equal(tpayConfig({ ...env, TPAY_ENVIRONMENT: " sandbox " }).sandbox, true);
+for (const value of [undefined, "", "  ", null, true, {}]) assert.throws(() => tpayConfig({ ...env, TPAY_ENVIRONMENT: value }), error => error.code === "TPAY_ENV_MISSING");
+for (const value of ["prod", "PRODUCTION", '"production"', "unknown-private-secret"]) assert.throws(() => tpayConfig({ ...env, TPAY_ENVIRONMENT: value }), error => error.code === "TPAY_ENV_INVALID" && !error.message.includes("unknown-private-secret"));
 const consent = { version: checkoutPolicy.version, termsVersion: checkoutPolicy.termsVersion, acceptTerms: true, requestEarlyStart: true };
 for (const bad of [null, [], {}, { ...consent, acceptTerms: "true" }, { ...consent, requestEarlyStart: false }, { ...consent, version: "old" }, { ...consent, termsVersion: "old" }]) assert.equal(checkoutAcceptance(bad, "sandbox"), null);
 assert.equal(checkoutAcceptance({ ...consent, statements: "forged", recordedAt: "forged" }, "sandbox").statements.terms, checkoutPolicy.terms);
@@ -167,6 +171,7 @@ try {
   };
   const checked = await handleTpayApi(request("/connection-check"), checkEnv);
   const diagnostic = await checked.json();
+  assert.equal(diagnostic.diagnostic.revision, "2026-11-04.2");
   assert.equal(checked.headers.get("Cache-Control"), "no-store");
   assert.equal(diagnostic.ok, true); assert.equal(diagnostic.environment, "production");
   assert.ok(diagnostic.message.includes("233323"));
@@ -178,6 +183,12 @@ try {
   admin = true;
   assert.equal((await handleTpayApi(request("/connection-check", "https://evil.test"), checkEnv)).status, 403);
   assert.equal(authChecks, 1);
+  for (const [value, code, present] of [[undefined, "TPAY_ENV_MISSING", false], ["unknown-private-secret", "TPAY_ENV_INVALID", true]]) {
+    const failure = await (await handleTpayApi(request("/connection-check"), { ...checkEnv, TPAY_ENVIRONMENT: value })).json();
+    assert.equal(failure.code, code); assert.equal(failure.diagnostic.environmentBindingPresent, present);
+    assert.ok(!JSON.stringify(failure).includes("unknown-private-secret"));
+  }
+  assert.equal(authChecks, 1, "Invalid binding never reaches Tpay");
   assert.equal((await handleTpayApi(request("/connection-check"), { ...checkEnv, TPAY_CLIENT_SECRET: "" })).status, 503);
   for (const status of [401, 403, 302, 500]) {
     authStatus = status;

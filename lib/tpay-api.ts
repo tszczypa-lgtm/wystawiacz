@@ -20,8 +20,12 @@ class PaymentError extends Error {
 }
 const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { "Cache-Control": "no-store" } });
 const uuid = /^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i;
+const configRevision = "2026-11-04.2";
+function environmentValue(env: TpayEnv) {
+  return typeof env.TPAY_ENVIRONMENT === "string" ? env.TPAY_ENVIRONMENT.trim() : "";
+}
 function sandboxReviewer(env: TpayEnv, ownerId: string) {
-  if (env.TPAY_ENVIRONMENT !== "sandbox" || !uuid.test(ownerId)) return false;
+  if (environmentValue(env) !== "sandbox" || !uuid.test(ownerId)) return false;
   const until = Date.parse(env.TPAY_SANDBOX_REVIEWER_UNTIL || "");
   if (!Number.isFinite(until) || until <= Date.now()) return false;
   return (env.TPAY_SANDBOX_REVIEWER_IDS || "").split(",").some(value => {
@@ -30,8 +34,10 @@ function sandboxReviewer(env: TpayEnv, ownerId: string) {
   });
 }
 export function tpayConfig(env: TpayEnv) {
-  const sandbox = env.TPAY_ENVIRONMENT === "sandbox";
-  if (!sandbox && env.TPAY_ENVIRONMENT !== "production") throw new PaymentError(503, "Nie wybrano srodowiska Tpay.");
+  const environment = environmentValue(env);
+  const sandbox = environment === "sandbox";
+  if (!environment) throw new PaymentError(503, "Aktywne wdrozenie nie otrzymalo niepustej zmiennej tekstowej TPAY_ENVIRONMENT. Sprawdz ustawienia i wdrozenie Workera.", "TPAY_ENV_MISSING");
+  if (!sandbox && environment !== "production") throw new PaymentError(503, "Aktywne wdrozenie otrzymalo nieprawidlowa wartosc TPAY_ENVIRONMENT. Dozwolone wartosci: production lub sandbox (malymi literami).", "TPAY_ENV_INVALID");
   if (!env.TPAY_CLIENT_ID || !env.TPAY_CLIENT_SECRET || !/^\d+$/.test(env.TPAY_MERCHANT_ID || "") || !env.TPAY_SECURITY_CODE || !env.SUPABASE_SERVICE_ROLE_KEY) throw new PaymentError(503, "Tpay nie jest jeszcze skonfigurowany.");
   const origin = new URL(env.APP_ORIGIN || "https://invalid.local");
   if (!env.APP_ORIGIN || origin.protocol !== "https:" || origin.origin !== env.APP_ORIGIN) throw new PaymentError(503, "Nieprawidlowa domena platnosci.");
@@ -134,7 +140,19 @@ export async function handleTpayApi(request: Request, env: TpayEnv): Promise<Res
     if (path === "/connection-check" && request.method === "POST") {
       if (!context.isAdmin) throw new PaymentError(403, "Sprawdzenie Tpay jest dostepne tylko administratorowi.");
       if (!env.APP_ORIGIN || request.headers.get("Origin") !== env.APP_ORIGIN || new URL(request.url).origin !== env.APP_ORIGIN) throw new PaymentError(403, "Nieprawidlowa domena.");
-      const config = tpayConfig(env);
+      const value = environmentValue(env);
+      const diagnostic = {
+        revision: configRevision,
+        environmentBindingPresent: env.TPAY_ENVIRONMENT !== undefined && env.TPAY_ENVIRONMENT !== null,
+        environmentBindingType: typeof env.TPAY_ENVIRONMENT,
+        environment: value === "production" || value === "sandbox" ? value : "invalid",
+      };
+      let config: ReturnType<typeof tpayConfig>;
+      try { config = tpayConfig(env); }
+      catch (error) {
+        if (!(error instanceof PaymentError)) throw error;
+        return json({ ok: false, code: error.code, diagnostic, message: `${error.message} Diagnostyka: ${configRevision}; zmienna: ${diagnostic.environmentBindingPresent ? "obecna" : "brak"}; typ: ${diagnostic.environmentBindingType}; srodowisko: ${diagnostic.environment}.` }, error.status);
+      }
       try {
         const response = await fetch(`${config.api}/oauth/auth`, {
           method: "POST", redirect: "manual", signal: AbortSignal.timeout(15000),
@@ -144,7 +162,7 @@ export async function handleTpayApi(request: Request, env: TpayEnv): Promise<Res
         if (!response.ok) return json({ ok: false, message: `Logowanie do API Tpay nie powiodlo sie (HTTP ${response.status}). Sprawdz klucze dla srodowiska ${config.environment}. Nie utworzono transakcji.` });
         const token = await response.json() as { access_token?: unknown };
         if (typeof token.access_token !== "string" || !token.access_token) return json({ ok: false, message: "Tpay nie zwrocil tokenu logowania. Nie utworzono transakcji." });
-        return json({ ok: true, environment: config.environment, message: `Logowanie do API Tpay dziala. Srodowisko: ${config.environment}; skonfigurowane ID sprzedawcy: ${env.TPAY_MERCHANT_ID}. Nie utworzono transakcji, nie pobrano pieniedzy ani nie wlaczono zakupow. Ten test nie potwierdza poprawnosci kodu bezpieczenstwa, odbioru webhooka ani aktywacji konta przez Tpay.` });
+        return json({ ok: true, environment: config.environment, diagnostic, message: `Logowanie do API Tpay dziala. Srodowisko: ${config.environment}; skonfigurowane ID sprzedawcy: ${env.TPAY_MERCHANT_ID}. Nie utworzono transakcji, nie pobrano pieniedzy ani nie wlaczono zakupow. Ten test nie potwierdza poprawnosci kodu bezpieczenstwa, odbioru webhooka ani aktywacji konta przez Tpay.` });
       } catch {
         return json({ ok: false, message: "Nie udalo sie sprawdzic polaczenia z Tpay. Sprawdz siec i konfiguracje. Nie utworzono transakcji." });
       }
@@ -181,7 +199,7 @@ export async function handleTpayApi(request: Request, env: TpayEnv): Promise<Res
         enabled = env.TPAY_ENABLED === "true" && (sandbox || (env.TPAY_LIVE_APPROVED === "true" && salesPolicy.approved && !!orderSmtpConfig(env)));
         if (!enabled) issue = !sandbox && !salesPolicy.approved ? "Gotowosc obslugi sprzedazy produkcyjnej wymaga osobnego zatwierdzenia. Publikacja dokumentow nie wlacza platnosci." : env.TPAY_ENABLED !== "true" ? "TPAY_ENABLED musi miec wartosc true." : "Platnosci produkcyjne nie zostaly zatwierdzone. Testy wymagaja TPAY_ENVIRONMENT=sandbox.";
       } catch (error) {
-        const required = ["TPAY_CLIENT_ID", "TPAY_CLIENT_SECRET", "TPAY_MERCHANT_ID", "TPAY_SECURITY_CODE", "SUPABASE_SERVICE_ROLE_KEY", "APP_ORIGIN"] as const;
+        const required = ["TPAY_ENVIRONMENT", "TPAY_CLIENT_ID", "TPAY_CLIENT_SECRET", "TPAY_MERCHANT_ID", "TPAY_SECURITY_CODE", "SUPABASE_SERVICE_ROLE_KEY", "APP_ORIGIN"] as const;
         const missing = required.filter(name => !env[name]);
         issue = missing.length ? `Brakuje ustawien Cloudflare: ${missing.join(", ")}.` : error instanceof PaymentError ? error.message : "Sprawdz APP_ORIGIN i konfiguracje Tpay.";
         if (env.TPAY_MERCHANT_ID && !/^\d+$/.test(env.TPAY_MERCHANT_ID)) issue = "TPAY_MERCHANT_ID musi zawierac tylko cyfry, bez spacji.";
