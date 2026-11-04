@@ -773,6 +773,9 @@ function removeProductsFromList(ids) {
 function finishProductEntry() {
   if (afterProductMode === "keep") {
     activeProductId = "";
+    state.appendedPartNumber = partNumber.value.trim() || state.appendedPartNumber;
+    partNumber.value = "";
+    updatePartNumberHint();
     state.selectedPhotos = [];
     state.selectedPhotoNames = [];
     addButton.textContent = "Dodaj do listy";
