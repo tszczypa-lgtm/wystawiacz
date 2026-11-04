@@ -32,7 +32,7 @@ const server = createServer(async (req, res) => {
     ] };
     if (path === "/api/workspace/session" && req.method === "GET") data = { payload: saved.payload, revision: saved.revision + 1 };
     if (path === "/api/allegro/own-offers") data = { offers: [{ id: "123456789", name: "Pompa ABS BMW F40 1234567" }, { id: "987654321", name: "Pompa ABS BMW F40 1234567A" }] };
-    if (path === "/api/allegro/own-offers/123456789") data = { id: "123456789", name: "Pompa ABS BMW F40 1234567", category: { id: "123" }, stock: { available: 2, unit: "PAIR" }, sellingMode: { price: { amount: "500.00" } }, delivery: { shippingRates: { id: "shipping" } }, afterSalesServices: { returnPolicy: { id: "return" }, impliedWarranty: { id: "claim" } }, description: { sections: [{ items: [{ type: "TEXT", content: "<p>Moj opis</p>" }] }] }, productSet: [{ product: { parameters: [] }, marketedBeforeGPSRObligation: true }] };
+    if (path === "/api/allegro/own-offers/123456789") data = { id: "123456789", name: "Pompa ABS BMW F40 1234567", category: { id: "123" }, stock: { available: 2, unit: "PAIR" }, sellingMode: { price: { amount: "500.00" } }, delivery: { shippingRates: { id: "shipping" } }, afterSalesServices: { returnPolicy: { id: "return" }, impliedWarranty: { id: "claim" } }, description: { sections: [{ items: [{ type: "TEXT", content: "<p>Moj opis</p><p>BMW   F40<br>2019<br>2.0 diesel</p><p>Wazna uwaga bez zmian</p>" }] }] }, productSet: [{ product: { parameters: [] }, marketedBeforeGPSRObligation: true }] };
     res.end(JSON.stringify(data)); return;
   }
   try {
@@ -263,6 +263,13 @@ try {
   assert.equal(await page.evaluate(() => state.products.length), 0);
   await page.locator('[data-use-vehicle-id="b"]').click();
   assert.ok(!(await page.locator("#titleInput").inputValue()).includes("BMW"));
+  const importedDescription = await page.locator("#descriptionVisualEditor").innerText();
+  assert.ok(importedDescription.includes("VW Golf") && importedDescription.includes("2020"));
+  assert.ok(!importedDescription.includes("BMW") && !importedDescription.includes("2019"));
+  assert.ok(importedDescription.includes("Moj opis") && importedDescription.includes("Wazna uwaga bez zmian"));
+  await page.locator('[data-use-vehicle-id="a"]').click();
+  assert.ok((await page.locator("#descriptionVisualEditor").innerText()).includes("BMW F40"));
+  await page.locator('[data-use-vehicle-id="b"]').click();
   const conversion = await page.evaluate(async () => {
     const canvas = document.createElement("canvas"); canvas.width = 40; canvas.height = 20;
     const png = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
@@ -323,6 +330,66 @@ try {
     titleInput.value = "Nowa sesja podczas zapisu"; await cloudSessions.save();
   });
   assert.equal(saved.revision, 0, "A late save response cannot assign the previous session's revision to a new session");
+  await page.evaluate(async () => {
+    await loadShippingRates();
+    publishProduct = async id => {
+      const product = state.products.find(item => item.id === id);
+      product.allegroOfferId = "123456789"; product.publishStatus = "WYSTAWIONO"; renderProducts();
+    };
+    summaryCard.classList.remove("hidden");
+    state.selectedPhotoNames = ["keep.jpg"];
+    state.localPhotosByName.set("keep.jpg", { name: "keep.jpg", file: new File(["test"], "keep.jpg", { type: "image/jpeg" }), url: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" });
+    titleInput.value = "Pompa ABS 1234567"; partNumber.value = "1234567"; priceInput.value = "220"; stockInput.value = "1"; state.categoryId = "123";
+    renderPhotos();
+  });
+  await page.locator('[data-shipping-rate-id="own-large"]').click();
+  await page.locator('input[name="afterProduct"][value="keep"]').check();
+  await page.locator("#addButton").click();
+  const kept = await page.evaluate(() => ({ title: titleInput.value, number: partNumber.value, price: priceInput.value, photos: [...state.selectedPhotoNames], active: activeProductId, id: state.products.at(-1).id, savedPhotos: state.products.at(-1).photoNames, shipping: shippingRateInput.value }));
+  assert.equal(kept.title, "Pompa ABS 1234567"); assert.equal(kept.number, "1234567"); assert.equal(kept.price, "220");
+  assert.deepEqual(kept.photos, []); assert.deepEqual(kept.savedPhotos, ["keep.jpg"]); assert.equal(kept.active, "");
+  assert.equal(kept.shipping, "own-large");
+  await page.evaluate(() => { state.selectedPhotoNames = ["keep.jpg"]; });
+  await page.locator("#publishCurrentButton").click();
+  await page.waitForFunction(() => state.products.at(-1).allegroOfferId === "123456789");
+  assert.equal(await page.locator("#titleInput").inputValue(), kept.title);
+  assert.deepEqual(await page.evaluate(() => state.selectedPhotoNames), []);
+  assert.notEqual(await page.evaluate(() => state.products.at(-1).id), kept.id, "Kept fields create a new product, not an edit of the previous one");
+  await page.locator('input[name="afterProduct"][value="clear"]').check();
+  await page.evaluate(() => { state.selectedPhotoNames = ["keep.jpg"]; });
+  await page.locator("#addButton").click();
+  assert.equal(await page.locator("#titleInput").inputValue(), "");
+  assert.equal(await page.locator("#shippingRateInput").inputValue(), "own-large");
+  await page.evaluate(() => {
+    state.products[0].allegroOfferId = "123456789";
+    state.products[0].publishStatus = "WYSTAWIONO";
+    renderProducts();
+  });
+  const firstCheck = page.locator("[data-select-product-id]").first();
+  await firstCheck.check(); assert.ok(await firstCheck.isChecked());
+  assert.equal(await page.evaluate(() => activeProductId), "", "Selecting a row never opens its editor");
+  page.once("dialog", dialog => dialog.dismiss());
+  await page.locator("#removeSelectedProducts").click();
+  assert.equal(await page.locator(".product-card").count(), 3);
+  page.once("dialog", dialog => dialog.accept());
+  await page.locator("#removeSelectedProducts").click();
+  assert.equal(await page.locator(".product-card").count(), 2);
+  await page.evaluate(() => { publishingProducts.add(state.products[0].id); renderProducts(); });
+  assert.ok(await page.locator("#clearProductList").isDisabled());
+  assert.equal(await page.evaluate(() => removeProductsFromList(state.products.map(product => product.id))), false);
+  await page.evaluate(() => { publishingProducts.clear(); renderProducts(); });
+  page.once("dialog", dialog => dialog.accept());
+  await page.locator("#clearProductList").click();
+  assert.equal(await page.locator(".product-card").count(), 0);
+  assert.equal(await page.locator("#selectedProductCount").textContent(), "Zaznaczone: 0");
+  await page.reload();
+  await page.evaluate(() => loadShippingRates());
+  assert.equal(await page.locator("#shippingRateInput").inputValue(), "own-large", "Last shipping choice survives reload");
+  assert.ok(await page.locator('input[name="afterProduct"][value="clear"]').isChecked());
+  await page.evaluate(() => summaryCard.classList.remove("hidden"));
+  await page.locator('input[name="afterProduct"][value="keep"]').check();
+  await page.reload();
+  assert.ok(await page.locator('input[name="afterProduct"][value="keep"]').isChecked(), "Repeat-entry mode survives reload");
   assert.deepEqual(errors, []);
   console.log("Approved workspace: safe imports, sequential batch/skip published, external editing, vehicle block preservation, rich formatting, own-offer copy with prices/shipping and retained photos, cached JPEG conversion, conflict-safe cloud save and price links passed. No live offers/payments.");
 } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }

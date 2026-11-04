@@ -187,6 +187,12 @@
 .price-checkbox-group { display: flex; flex-wrap: wrap; align-items: center; gap: 7px 12px; font-size: 11px; }
 .price-checkbox-group label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
 .price-checkbox-group input { width: auto; margin: 0; accent-color: var(--orange); }
+.after-product-options { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 10px; margin: 10px 0; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; }
+.after-product-options legend { font-weight: 700; padding: 0 5px; }
+.after-product-options label { display: inline-flex; align-items: center; gap: 5px; }
+.after-product-options input { width: auto; margin: 0; accent-color: var(--orange); }
+.product-select { z-index: 2; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.product-select input { margin: 0; cursor: pointer; }
 .own-offers-panel summary { font-size: 12px; cursor: pointer; }
 .own-offers-panel:not([open]) > button { display: none; }
 .price-search-row button, .list-layout-options button, .own-prices-panel button, .own-price-dialog button { width: auto; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); font: inherit; font-size: 11px; }

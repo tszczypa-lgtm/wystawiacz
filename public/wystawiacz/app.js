@@ -120,6 +120,22 @@ let previewPhotoName = "";
 let categoryLocked = false;
 let allegroManufacturerOptions = [];
 const selectedProductIds = new Set();
+const afterProductInputs = [...document.querySelectorAll('input[name="afterProduct"]')];
+let afterProductMode = "clear";
+try { if (localStorage.getItem("wystawiacz-after-product") === "keep") afterProductMode = "keep"; } catch {}
+for (const input of afterProductInputs) {
+  input.checked = input.value === afterProductMode;
+  input.addEventListener("change", () => {
+    if (!input.checked) return;
+    afterProductMode = input.value;
+    try { localStorage.setItem("wystawiacz-after-product", afterProductMode); } catch {}
+  });
+}
+shippingRateInput.addEventListener("change", () => {
+  if (state.shippingRates.some(rate => rate.id === shippingRateInput.value)) {
+    try { localStorage.setItem("wystawiacz-last-shipping-rate", shippingRateInput.value); } catch {}
+  }
+});
 let batchPublishing = false;
 
 function openPublishedOffer(product) {
@@ -133,13 +149,16 @@ function renderBatchToolbar() {
     toolbar = document.createElement("div");
     toolbar.id = "batchToolbar";
     toolbar.className = "batch-toolbar";
-    toolbar.innerHTML = '<button type="button" id="selectReadyProducts">Zaznacz gotowe</button><button type="button" id="clearProductSelection">Odznacz wszystkie</button><button type="button" id="publishSelectedProducts">Wystaw zaznaczone</button><span id="batchProgress" role="status"></span>';
+    toolbar.innerHTML = '<button type="button" id="selectReadyProducts">Zaznacz gotowe</button><button type="button" id="selectAllProducts">Zaznacz wszystkie</button><button type="button" id="clearProductSelection">Odznacz wszystkie</button><button type="button" id="publishSelectedProducts">Wystaw zaznaczone</button><button type="button" id="removeSelectedProducts">Usun zaznaczone</button><button type="button" id="clearProductList">Wyczysc liste</button><span id="selectedProductCount" role="status"></span><span id="batchProgress" role="status"></span>';
     productList.before(toolbar);
     toolbar.querySelector("#selectReadyProducts").onclick = () => {
       state.products.filter(p => !p.allegroOfferId && p.publishStatus !== "WYSTAWIONO").forEach(p => selectedProductIds.add(p.id));
       renderProducts();
     };
     toolbar.querySelector("#clearProductSelection").onclick = () => { selectedProductIds.clear(); renderProducts(); };
+    toolbar.querySelector("#selectAllProducts").onclick = () => { state.products.forEach(product => selectedProductIds.add(product.id)); renderProducts(); };
+    toolbar.querySelector("#removeSelectedProducts").onclick = () => removeProductsFromList([...selectedProductIds]);
+    toolbar.querySelector("#clearProductList").onclick = () => removeProductsFromList(state.products.map(product => product.id));
     toolbar.querySelector("#publishSelectedProducts").onclick = async () => {
       if (batchPublishing) return;
       const ids = state.products.filter(p => selectedProductIds.has(p.id) && !p.allegroOfferId && p.publishStatus !== "WYSTAWIONO").map(p => p.id);
@@ -159,6 +178,11 @@ function renderBatchToolbar() {
   toolbar.querySelector("#publishSelectedProducts").disabled = batchPublishing || !state.products.some(p => selectedProductIds.has(p.id) && !p.allegroOfferId && p.publishStatus !== "WYSTAWIONO");
   toolbar.querySelector("#selectReadyProducts").disabled = batchPublishing;
   toolbar.querySelector("#clearProductSelection").disabled = batchPublishing;
+  const deletingLocked = batchPublishing || publishingProducts.size > 0;
+  toolbar.querySelector("#selectAllProducts").disabled = deletingLocked;
+  toolbar.querySelector("#removeSelectedProducts").disabled = deletingLocked || !state.products.some(product => selectedProductIds.has(product.id));
+  toolbar.querySelector("#clearProductList").disabled = deletingLocked || !state.products.length;
+  toolbar.querySelector("#selectedProductCount").textContent = `Zaznaczone: ${state.products.filter(product => selectedProductIds.has(product.id)).length}`;
 }
 
 const titleEditor = window.TitleEditor.mount();
@@ -207,12 +231,13 @@ async function applyOwnOffer(offer, number) {
   const paragraphs = (offer.description?.sections || []).flatMap(s => s.items || []).filter(i => i.type === "TEXT").flatMap(i => {
     const parsed = new DOMParser().parseFromString(i.content || "", "text/html");
     parsed.querySelectorAll("script,style,iframe").forEach(node => node.remove());
+    parsed.querySelectorAll("br").forEach(node => node.replaceWith(document.createTextNode("\n")));
     return [...parsed.body.children].map(node => node.textContent);
   });
   if (normalizeText(paragraphs[0] || "") === normalizeText(offer.name || "")) paragraphs.shift();
   const description = paragraphs.join("\n");
-  const matchingVehicle = state.vehicles.find(vehicle => vehicle.full && description.includes(vehicle.full) && description.indexOf(vehicle.full) === description.lastIndexOf(vehicle.full));
-  const blockStart = matchingVehicle ? description.indexOf(matchingVehicle.full) : -1;
+  const vehicleBlock = window.DescriptionEditor.findVehicleBlock(description, state.vehicles);
+  const matchingVehicle = vehicleBlock?.vehicle;
   const values = {};
   for (const parameter of [...(item?.product?.parameters || []), ...(offer.parameters || [])]) values[parameter.id] = parameter.valuesIds?.length ? parameter.valuesIds : parameter.values || [];
   const product = {
@@ -230,7 +255,7 @@ async function applyOwnOffer(offer, number) {
     photoNames: selectedPhotos, descriptionText: description, catalogLinkRequested: false,
     sourceVehicleTitle: offer.name || "",
     selectedVehicleId: matchingVehicle?.id || "",
-    vehicleDescriptionBlock: matchingVehicle ? { start: blockStart, end: blockStart + matchingVehicle.full.length, text: matchingVehicle.full } : null
+    vehicleDescriptionBlock: vehicleBlock ? { start: vehicleBlock.start, end: vehicleBlock.end, text: vehicleBlock.text } : null
   };
   if (activeProductId) saveActiveProductDraft();
   state.products.push(product); editProduct(product.id); state.products.pop();
@@ -574,7 +599,7 @@ function addCurrentProductToList() {
     showToast("Produkt dodany do listy.");
   }
 
-  resetForm();
+  finishProductEntry();
   renderProducts();
   return product;
 }
@@ -643,7 +668,7 @@ function renderProducts() {
     .map((product, index) => `
       <article class="product-card ${product.id === activeProductId ? "active" : ""}" data-product-id="${escapeHtml(product.id)}">
         <span class="product-number" aria-label="Aukcja numer ${index + 1}">#${index + 1}</span>
-        <label class="product-select"><input type="checkbox" data-select-product-id="${escapeHtml(product.id)}" aria-label="Zaznacz aukcje" ${selectedProductIds.has(product.id) ? "checked" : ""} ${product.allegroOfferId || batchPublishing ? "disabled" : ""} /></label>
+        <label class="product-select"><input type="checkbox" data-select-product-id="${escapeHtml(product.id)}" aria-label="Zaznacz aukcje" ${selectedProductIds.has(product.id) ? "checked" : ""} ${publishingProducts.has(product.id) || batchPublishing ? "disabled" : ""} /></label>
         ${findPhotoUrl(product.photoNames?.[0])
           ? `<img class="product-image" src="${escapeHtml(findPhotoUrl(product.photoNames?.[0]))}" alt="" />`
           : `<div class="product-image"></div>`}
@@ -730,6 +755,43 @@ function removeProduct(id) {
   return true;
 }
 
+function removeProductsFromList(ids) {
+  const removing = new Set(ids);
+  const count = state.products.filter(product => removing.has(product.id)).length;
+  if (!count) return false;
+  if (batchPublishing || publishingProducts.size) { showToast("Poczekaj na zakonczenie wystawiania."); return false; }
+  if (!window.confirm(`Usunac z listy Wystawiacza ${count} pozycji?\nTo NIE usuwa ani nie konczy aukcji na Allegro. Zdjecia w folderze pozostana.`)) return false;
+  state.products = state.products.filter(product => !removing.has(product.id));
+  for (const id of removing) selectedProductIds.delete(id);
+  if (removing.has(activeProductId)) resetForm();
+  renderProducts();
+  document.dispatchEvent(new Event("wystawiacz-session-change"));
+  showToast(`Usunieto z listy: ${count}.`);
+  return true;
+}
+
+function finishProductEntry() {
+  if (afterProductMode === "keep") {
+    activeProductId = "";
+    state.selectedPhotos = [];
+    state.selectedPhotoNames = [];
+    addButton.textContent = "Dodaj do listy";
+    renderPhotos();
+    updateProductNavigation();
+  } else resetForm();
+  document.querySelector(".photos-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  document.dispatchEvent(new Event("wystawiacz-session-change"));
+}
+
+function restoreShippingPreference(current = "") {
+  let saved = "";
+  try { saved = localStorage.getItem("wystawiacz-last-shipping-rate") || ""; } catch {}
+  const rates = state.shippingRates;
+  const choice = rates.find(rate => rate.id === saved) || rates.find(rate => rate.id === current)
+    || rates.find(rate => !isAllegroShippingRate(rate)) || rates[0];
+  shippingRateInput.value = choice?.id || "";
+}
+
 function resetForm() {
   ownOffers.clear();
   catalogLink.restore(null);
@@ -767,7 +829,7 @@ function resetForm() {
   responsibleProducerInput.value = "";
   responsiblePersonInput.value = "";
   safetyInformationInput.value = "";
-  if (state.shippingRates.length) shippingRateInput.value = (state.shippingRates.find(rate => !isAllegroShippingRate(rate)) || state.shippingRates[0]).id;
+  restoreShippingPreference(shippingRateInput.value);
   renderShippingRateButtons();
   renderAfterSalesInputs();
   suggestionPanel.classList.add("hidden");
@@ -1291,9 +1353,7 @@ async function loadShippingRates() {
     shippingRateInput.innerHTML = state.shippingRates.length
       ? state.shippingRates.map((rate) => `<option value="${escapeHtml(rate.id)}">${escapeHtml(fixEncoding(rate.name))}</option>`).join("")
       : '<option value="">Brak profili wysyłki</option>';
-    const own = state.shippingRates.find(rate => !isAllegroShippingRate(rate));
-    if (own) shippingRateInput.value = own.id;
-    if (state.shippingRates.some(rate => rate.id === selected)) shippingRateInput.value = selected;
+    restoreShippingPreference(selected);
   } catch (error) {
     shippingRateInput.innerHTML = `<option value="">Nie udało się pobrać profili</option>`;
     showToast(`Profile wysyłki: ${error.message}`);

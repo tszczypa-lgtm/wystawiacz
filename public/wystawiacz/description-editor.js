@@ -36,6 +36,23 @@
   }
   window.DescriptionEditor = {
     paragraphs, descriptionHtml, partTitle,
+    findVehicleBlock(text, vehicles) {
+      const found = [];
+      for (const vehicle of vehicles) {
+        const words = String(vehicle.full || "").trim().split(/\s+/).filter(Boolean);
+        if (!words.length) continue;
+        const pattern = new RegExp(words.map(word => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+"), "giu");
+        const matches = [...text.matchAll(pattern)].filter(match => {
+          const before = text[match.index - 1] || "", after = text[match.index + match[0].length] || "";
+          return !/[\p{L}\p{N}]/u.test(before) && !/[\p{L}\p{N}]/u.test(after);
+        });
+        if (matches.length === 1) found.push({ vehicle, start: matches[0].index, end: matches[0].index + matches[0][0].length, text: matches[0][0] });
+      }
+      // An unambiguous longest full vehicle block wins over its shorter prefix.
+      found.sort((a, b) => b.text.length - a.text.length);
+      return found.length && (!found[1] || found[0].text.length > found[1].text.length)
+        && found.every(block => block.start >= found[0].start && block.end <= found[0].end) ? found[0] : null;
+    },
     mount({ state, input, vehicleInput, selectedVehicle, titleInput, partNumberInput, notify }) {
       let template = `${titleMarker}\n\nCzęść używana 100% sprawna\n\n${marker}`;
       let savedRange = null, lastRendered = "";
