@@ -2,7 +2,7 @@ import { LogoutButton } from "./logout-button";
 import { AdminLink } from "./admin-link";
 
 export function AccountShell({ children, active }: { children: React.ReactNode; active: string }) {
-  const links = [["/panel", "Panel konta"], ["/panel/offers", "Wystawianie ofert"], ["/panel/billing", "Abonament"], ["/panel/allegro", "Allegro"], ["/panel/settings", "Ustawienia"]];
+  const links = [["/panel", "Panel konta"], ["/panel/offers", "Wystawianie ofert"], ["/panel/inventory", "Moje oferty"], ["/panel/billing", "Abonament"], ["/panel/allegro", "Allegro"], ["/panel/settings", "Ustawienia"]];
   return (
     <main className="min-h-screen bg-[#0d1117] text-white">
       <header className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 px-6 py-5">

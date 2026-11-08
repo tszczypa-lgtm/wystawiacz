@@ -39,6 +39,31 @@ type Title = { title: string; url: string };
 type TitleGroup = { source: string; titles: Title[]; message?: string; errorCode?: string };
 const titleCache = new Map<string, { until: number; result: { groups: TitleGroup[] } }>();
 const titleLimits = new Map<string, number[]>();
+export function inventoryQuery(params: URLSearchParams) {
+  const allowed = new Set(["query", "searchBy", "status", "shippingRate", "sort", "limit", "offset"]);
+  for (const name of params.keys()) if (!allowed.has(name) || params.getAll(name).length !== 1) throw new ApiError(400, "Nieprawidlowy filtr listy ofert.");
+  const query = (params.get("query") || "").trim();
+  const searchBy = params.get("searchBy") || "name";
+  const status = params.get("status") ?? "ACTIVE";
+  const shipping = params.get("shippingRate") || "";
+  const sort = params.get("sort") || "";
+  const limitText = params.get("limit") ?? "50";
+  const offsetText = params.get("offset") ?? "0";
+  if (query.length > 100 || /[\u0000-\u001f]/.test(query) || !["name", "offerId", "externalId"].includes(searchBy)
+    || !["", "ACTIVE", "ENDED", "INACTIVE", "ACTIVATING"].includes(status)
+    || (shipping && shipping !== "none" && !/^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(shipping))
+    || !["", "sellingMode.price.amount", "-sellingMode.price.amount", "stock.available", "-stock.available"].includes(sort)
+    || !["20", "50", "100"].includes(limitText) || !/^\d{1,7}$/.test(offsetText)) throw new ApiError(400, "Nieprawidlowe filtry lub numer strony.");
+  const limit = Number(limitText), offset = Number(offsetText);
+  if (offset + limit > 10000000 || (query && searchBy === "offerId" && !/^\d{1,30}$/.test(query))) throw new ApiError(400, "Nieprawidlowy numer oferty lub strony.");
+  const remote = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (query) remote.set(searchBy === "offerId" ? "offer.id" : searchBy === "externalId" ? "external.id" : "name", query);
+  if (status) remote.set("publication.status", status);
+  if (shipping === "none") remote.set("delivery.shippingRates.id.empty", "true");
+  else if (shipping) remote.set("delivery.shippingRates.id", shipping);
+  if (sort) remote.set("sort", sort);
+  return { remote, limit, offset };
+}
 export async function searchTitleSuggestions(number: string, owner: string, _env: Env, remote: (path: string, options?: RequestInit) => Promise<RemotePayload>) {
   if (!/^[A-Z0-9]{6,32}$/.test(number) || !/\d/.test(number)) throw new ApiError(400, "Wpisz poprawny, pelny numer czesci.");
   const now = Date.now();
@@ -228,7 +253,27 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
     }
     const url = new URL(request.url);
     const path = url.pathname.slice("/api/allegro".length);
+    if (path === "/inventory" && request.method !== "GET") return json({ message: "Lista ofert jest tylko do odczytu." }, 405);
     if (request.method === "GET") {
+      if (path === "/inventory") {
+        const { remote: query, limit, offset } = inventoryQuery(url.searchParams);
+        // Seller identity comes exclusively from this user's encrypted connection, never query parameters.
+        const data = await remote(`/sale/offers?${query}`, { signal: AbortSignal.timeout(15000) });
+        if (!Array.isArray(data.offers) || data.offers.length > limit || !Number.isSafeInteger(data.totalCount) || Number(data.totalCount) < 0) throw new ApiError(502, "Allegro zwrocilo niepelna liste. Sprobuj ponownie; nie zmieniono zadnej oferty.");
+        type Item = { id?: string; name?: string; primaryImage?: { url?: string }; external?: { id?: string }; publication?: { status?: string }; stock?: { available?: number }; delivery?: { shippingRates?: { id?: string } }; sellingMode?: { price?: { amount?: string; currency?: string } } };
+        const offers = (data.offers as Item[]).map(item => {
+          if (!item || typeof item.id !== "string" || !/^\d{1,30}$/.test(item.id)) throw new ApiError(502, "Allegro zwrocilo nieprawidlowe dane oferty.");
+          let image = "";
+          try { const url = new URL(item.primaryImage?.url || ""); if (url.protocol === "https:" && url.hostname.endsWith(".allegroimg.com")) image = url.href; } catch {}
+          const price = item.sellingMode?.price;
+          return { id: item.id, name: typeof item.name === "string" ? item.name : "", image,
+            externalId: typeof item.external?.id === "string" ? item.external.id : "",
+            status: item.publication?.status || "UNKNOWN", stock: Number.isSafeInteger(item.stock?.available) && Number(item.stock?.available) >= 0 ? item.stock!.available : null,
+            shippingRateId: typeof item.delivery?.shippingRates?.id === "string" ? item.delivery.shippingRates.id : null,
+            price: price && typeof price.amount === "string" && /^\d+(?:\.\d+)?$/.test(price.amount) && /^[A-Z]{3}$/.test(price.currency || "") ? { amount: price.amount, currency: price.currency } : null };
+        });
+        return json({ offers, totalCount: data.totalCount, count: offers.length, limit, offset, fetchedAt: new Date().toISOString() });
+      }
       if (path === "/own-offers") {
         const number = url.searchParams.get("number") || "";
         if (!/^[A-Z0-9 .\/-]{3,40}$/i.test(number) || !/\d/.test(number)) throw new ApiError(400, "Wpisz numer czesci.");
