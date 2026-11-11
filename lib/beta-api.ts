@@ -3,7 +3,30 @@ import { accountContext, type AccountEnv } from "./account-api";
 export type BetaEnv = AccountEnv & { BETA_ENABLED?: string; BETA_AI_ENABLED?: string; OPENAI_API_KEY?: string };
 const limits = new Map<string, number[]>();
 const fields = ["partName", "partNumber", "side", "conditionNotes", "pricePLN", "location"] as const;
-async function boundedBody(request: Request, limit: number) {
+async function providerFailure(response: Response, stage: string) {
+  const knownCodes = new Set(["invalid_api_key", "insufficient_permissions", "model_not_found", "insufficient_quota", "billing_hard_limit_reached", "billing_not_active", "rate_limit_exceeded", "invalid_json_schema", "unsupported_parameter", "unsupported_value"]);
+  let code = "provider_error";
+  try {
+    const raw = await boundedBody(response, 16384);
+    const data = JSON.parse(new TextDecoder().decode(raw));
+    if (knownCodes.has(data?.error?.code)) code = data.error.code;
+    else if (knownCodes.has(data?.error?.type)) code = data.error.type;
+  } catch { /* Never expose raw provider responses or echoed credentials. */ }
+  let message: string;
+  if (["insufficient_quota", "billing_hard_limit_reached", "billing_not_active"].includes(code)) message = "OpenAI: brak dostepnego budzetu API. Sprawdz rozliczenia i limit wydatkow projektu OpenAI.";
+  else if (response.status === 401 || code === "invalid_api_key") message = "OpenAI odrzucilo klucz API. Sprawdz sekret OPENAI_API_KEY w Cloudflare i czy klucz jest aktywny.";
+  else if (code === "model_not_found") message = "OpenAI: model nie istnieje lub projekt nie ma do niego dostepu. Sprawdz dostep projektu do modelu.";
+  else if (response.status === 403 || code === "insufficient_permissions") message = "OpenAI: brak uprawnien. Sprawdz uprawnienia klucza i projektu do tej operacji.";
+  else if (response.status === 429) message = "OpenAI: przekroczono limit zapytan. Odczekaj chwile przed kolejna proba.";
+  else if (response.status === 400 || response.status === 422) message = "OpenAI odrzucilo format zapytania. To blad integracji do sprawdzenia, nie tresci aukcji.";
+  else if (response.status >= 500) message = "OpenAI jest chwilowo niedostepne. Sprobuj pozniej.";
+  else message = "OpenAI odrzucilo przetwarzanie komentarza. Potrzebny jest ponizszy kod diagnostyczny.";
+  const rawId = response.headers.get("x-request-id") || "";
+  const requestId = /^[a-zA-Z0-9_-]{1,160}$/.test(rawId) ? rawId : undefined;
+  console.warn("beta_ai_provider_error", { stage, providerStatus: response.status, code, requestId });
+  return { message: `${message} [${stage}; HTTP ${response.status}; ${code}${requestId ? `; ${requestId}` : ""}] Dane aukcji i nagranie pozostaly bez zmian.`, errorCode: code, providerStatus: response.status, ...(requestId ? { requestId } : {}) };
+}
+async function boundedBody(request: Pick<Request, "headers" | "body">, limit: number) {
   if (Number(request.headers.get("Content-Length")) > limit) throw new Error("size");
   const reader = request.body?.getReader();
   if (!reader) throw new Error("body");
@@ -53,7 +76,7 @@ export async function handleBetaApi(request: Request, env: BetaEnv) {
     }
     // No listing APIs, database updates or tools are available to the model.
     const response = await fetch(`https://api.openai.com/v1/${endpoint}`, { method: "POST", headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, ...(contentType ? { "Content-Type": contentType } : {}) }, body, signal: AbortSignal.timeout(60000) });
-    if (!response.ok) return reply({ message: response.status === 429 ? "Dostawca AI osiagnal limit. Nagranie zostalo lokalnie; sprobuj pozniej." : "Nie udalo sie przetworzyc komentarza przez AI. Dane aukcji pozostaly bez zmian." }, response.status === 429 ? 429 : 502);
+    if (!response.ok) return reply(await providerFailure(response, path === "/transcribe" ? "transkrypcja" : "pola"), response.status === 429 ? 429 : 502);
     if (path === "/transcribe") {
       const result = await response.json() as { text?: unknown };
       if (typeof result.text !== "string" || result.text.length > 6000) return reply({ message: "Nieprawidlowa lub zbyt dluga transkrypcja. Nagranie zostalo lokalnie." }, 502);
@@ -67,6 +90,7 @@ export async function handleBetaApi(request: Request, env: BetaEnv) {
       || (proposal.pricePLN !== null && !/^\d{1,7}(?:[.,]\d{1,2})?$/.test(proposal.pricePLN))) return reply({ message: "AI zwrocilo nieprawidlowe dane. Pola pozostaly bez zmian." }, 502);
     return reply({ proposal: Object.fromEntries([...fields, "warnings"].map(name => [name, proposal[name]])) });
   } catch (error) {
+    if (error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name)) return reply({ message: "Przekroczono czas oczekiwania na AI. Komentarz, nagranie i pola zostaly bez zmian. Sprobuj pozniej.", errorCode: "provider_timeout" }, 504);
     if (error instanceof Error && "status" in error && error.status === 401) return reply({ message: "Zaloguj sie ponownie." }, 401);
     if (error instanceof Error && error.message === "size") return reply({ message: "Przekroczono limit rozmiaru komentarza lub nagrania." }, 413);
     if (error instanceof SyntaxError) return reply({ message: "Nieprawidlowe dane. Niczego nie zmieniono." }, 400);

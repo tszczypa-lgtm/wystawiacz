@@ -15,7 +15,7 @@ function load(file) {
 }
 const { handleBetaApi } = load(path.join(root, "lib/beta-api.ts"));
 const originalFetch = globalThis.fetch;
-let admin = true, suspended = false, user = 1, calls = [], invalid = false;
+let admin = true, suspended = false, user = 1, calls = [], invalid = false, providerError = null;
 const owner = () => `00000000-0000-0000-0000-${String(user).padStart(12, "0")}`;
 const env = { SUPABASE_SERVICE_ROLE_KEY: "db-key", BETA_AI_ENABLED: "true", OPENAI_API_KEY: "fixture-secret" };
 const request = (path, method = "GET", body, origin = true) => new Request(`https://beta.test/api/beta${path}`, { method, headers: { Authorization: "Bearer fixture", ...(origin ? { Origin: "https://beta.test" } : {}), ...(typeof body === "string" ? { "Content-Type": "application/json" } : {}) }, body });
@@ -26,6 +26,10 @@ globalThis.fetch = async (input, options = {}) => {
   if (url.pathname.includes("account_admins")) return Response.json(admin ? [{ owner_id: owner() }] : []);
   assert.equal(url.origin, "https://api.openai.com"); calls.push({ url, options });
   assert.equal(options.method, "POST"); assert.equal(new Headers(options.headers).get("Authorization"), "Bearer fixture-secret");
+  if (providerError) {
+    if (providerError.timeout) throw new DOMException("fixture-secret", "TimeoutError");
+    return providerError.html ? new Response("<html>fixture-secret</html>", { status: providerError.status }) : Response.json({ error: { code: providerError.code, message: "fixture-secret: private comment" } }, { status: providerError.status, headers: { "x-request-id": "req_fixture_123" } });
+  }
   if (url.pathname.endsWith("/transcriptions")) return Response.json({ text: "Pompa ABS, numer 1234567, cena 200 zl." });
   const inputBody = JSON.parse(options.body);
   assert.equal(inputBody.store, false); assert.equal(inputBody.response_format.json_schema.strict, true); assert.ok(!inputBody.tools);
@@ -53,6 +57,32 @@ try {
   user++;
   for (let i = 0; i < 6; i++) assert.equal((await handleBetaApi(request("/suggest", "POST", JSON.stringify({ comment: "Pompa" })), env)).status, 200);
   assert.equal((await handleBetaApi(request("/suggest", "POST", JSON.stringify({ comment: "Pompa" })), env)).status, 429);
+  const diagnosticCases = [
+    { status: 401, code: "invalid_api_key", expected: /OPENAI_API_KEY/ },
+    { status: 429, code: "insufficient_quota", expected: /budzetu API/ },
+    { status: 429, code: "rate_limit_exceeded", expected: /limit zapytan/ },
+    { status: 403, code: "insufficient_permissions", expected: /uprawnien/ },
+    { status: 404, code: "model_not_found", expected: /model nie istnieje/ },
+    { status: 400, code: "invalid_json_schema", expected: /format zapytania/ },
+    { status: 503, code: "fixture-secret", expected: /chwilowo niedostepne/ },
+    { status: 502, html: true, expected: /chwilowo niedostepne/ }
+  ];
+  for (const failure of diagnosticCases) {
+    user++; providerError = failure;
+    const response = await handleBetaApi(request("/suggest", "POST", JSON.stringify({ comment: "Pompa" })), env);
+    const data = await response.json();
+    assert.equal(response.status, failure.status === 429 ? 429 : 502);
+    assert.match(data.message, failure.expected);
+    assert.equal(data.providerStatus, failure.status);
+    assert.ok(!JSON.stringify(data).includes("fixture-secret") && !JSON.stringify(data).includes("private comment"), "Diagnostics never expose raw messages or keys");
+  }
+  user++; providerError = { status: 401, code: "invalid_api_key" };
+  const audioFailure = await (await handleBetaApi(request("/transcribe", "POST", form), env)).json();
+  assert.match(audioFailure.message, /transkrypcja; HTTP 401/);
+  user++; providerError = { timeout: true };
+  const timeout = await handleBetaApi(request("/suggest", "POST", JSON.stringify({ comment: "Pompa" })), env);
+  assert.equal(timeout.status, 504); assert.equal((await timeout.json()).errorCode, "provider_timeout");
+  providerError = null;
   assert.ok(calls.every(call => call.url.hostname === "api.openai.com"), "AI has no Allegro or workspace mutation capability");
   console.log("Beta API: admin-only access, kill switches, CSRF, size/rate limits, schema validation, audio and no listing mutations passed. Provider calls mocked.");
 } finally { globalThis.fetch = originalFetch; }

@@ -6,7 +6,7 @@ import { pathToFileURL, fileURLToPath } from "node:url";
 const { chromium } = await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href);
 const root = new URL("../public/wystawiacz-beta/", import.meta.url);
 const requests = [];
-let aiCalls = 0;
+let aiCalls = 0, aiFailure = false;
 const server = createServer(async (req, res) => {
   const path = new URL(req.url, "http://fixture").pathname;
   if (path.startsWith("/api/")) {
@@ -14,7 +14,7 @@ const server = createServer(async (req, res) => {
     res.setHeader("Content-Type", "application/json");
     if (path === "/api/beta/status") { res.end(JSON.stringify({ allowed: true, aiEnabled: true })); return; }
     if (path === "/api/beta/transcribe") { aiCalls++; res.end(JSON.stringify({ text: "Pompa ABS 1234567 cena 200 zl, regal B3." })); return; }
-    if (path === "/api/beta/suggest") { aiCalls++; res.end(JSON.stringify({ proposal: { partName: "Pompa ABS", partNumber: "1234567", side: "lewy przod", conditionNotes: "Pekniety uchwyt, nie sprawdzono dzialania.", pricePLN: "200", location: "B3", warnings: ["Sprawdz numer"] } })); return; }
+    if (path === "/api/beta/suggest") { aiCalls++; if (aiFailure) { res.statusCode = 502; res.end(JSON.stringify({ message: "OpenAI odrzucilo klucz API. Sprawdz sekret OPENAI_API_KEY. [pola; HTTP 401; invalid_api_key] Dane aukcji pozostaly bez zmian." })); return; } res.end(JSON.stringify({ proposal: { partName: "Pompa ABS", partNumber: "1234567", side: "lewy przod", conditionNotes: "Pekniety uchwyt, nie sprawdzono dzialania.", pricePLN: "200", location: "B3", warnings: ["Sprawdz numer"] } })); return; }
     if (path === "/api/allegro/health") { res.end(JSON.stringify({ connected: false })); return; }
     res.statusCode = 409; res.end(JSON.stringify({ message: "Fixture: brak polaczenia" })); return;
   }
@@ -121,6 +121,12 @@ try {
   await page.locator("#betaConsent").check();
   await page.locator("#betaTranscribe").click();
   await page.getByText(/Przepisano nagranie/).waitFor();
+  aiFailure = true;
+  await page.locator("#betaSuggest").click();
+  await page.locator("#betaStatus").filter({ hasText: "invalid_api_key" }).waitFor();
+  assert.equal(await page.locator("#partNumber").inputValue(), "", "Provider failure displays safe diagnostics without editing fields");
+  assert.equal(await page.locator("#betaComment").inputValue(), "Pompa ABS 1234567 cena 200 zl, regal B3.");
+  aiFailure = false;
   await page.locator("#betaSuggest").click();
   await page.locator("#betaProposal").waitFor({ state: "visible" });
   assert.equal(await page.locator("#partNumber").inputValue(), "", "AI suggestions do not silently edit fields");

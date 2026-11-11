@@ -244,7 +244,7 @@
   void window.getWystawiaczToken().then(token => fetch("/api/beta/status", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" })).then(async response => {
     if (!response.ok) throw new Error("status");
     const data = await response.json(); aiAvailable = data.aiEnabled === true;
-    aiStatus.textContent = aiAvailable ? "AI dostepne. Wysylanie komentarza wymaga Twojej zgody i klikniecia przycisku." : "AI jest wylaczone na serwerze. Mozesz dzielic zdjecia i nagrywac komentarze. Wlaczenie: BETA_AI_ENABLED=true oraz serwerowy OPENAI_API_KEY.";
+    aiStatus.textContent = aiAvailable ? "AI skonfigurowane. Klucz i dostep zostana sprawdzone przy przetwarzaniu. Wysylanie wymaga Twojej zgody." : "AI jest wylaczone na serwerze. Mozesz dzielic zdjecia i nagrywac komentarze. Wlaczenie: BETA_AI_ENABLED=true oraz serwerowy OPENAI_API_KEY.";
     sync();
   }).catch(() => { aiStatus.textContent = "Nie odczytano konfiguracji AI. Odswiez karte lub sprawdz dostep do bety. Niczego nie wyslano do AI."; sync(); });
   void openDb().then(async database => {
