@@ -144,6 +144,7 @@
 .template-heading #saveDescriptionTemplate { border-color: var(--orange); color: var(--orange-dark); }
 .template-buttons { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 7px; font-size: 11px; color: var(--muted); }
 .template-buttons button[aria-pressed="true"], .expression-heading button[aria-pressed="true"] { border-color: var(--orange); color: var(--orange-dark); background: #fff3e8; }
+.description-toolbar #descriptionVehicleBold[aria-pressed="true"] { border-color: var(--orange); color: var(--orange-dark); background: #fff3e8; font-weight: 700; }
 .description-templates #descriptionTemplateStatus { display: inline; margin: 5px 8px 0 0; font-size: 10px; }
 .description-templates #reloadDescriptionTemplates { padding: 3px; margin-top: 3px; font-size: 10px; width: auto; }
 .description-templates .template-save-row { margin: 8px 0; gap: 6px; }

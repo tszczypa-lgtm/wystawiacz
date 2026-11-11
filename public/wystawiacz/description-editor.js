@@ -29,7 +29,10 @@
   }
   function descriptionHtml(text, title, vehicle, fullLayout, number) {
     // Expand before making paragraphs: Allegro accepts paragraphs, not <br>.
-    const expandedBoldVehicle = String(text || "").replace(/\*\*\{\{AUTO\}\}\*\*/g, () => String(vehicle?.full || "").split("\n").map(line => line ? `**${line}**` : "").join("\n"));
+    // Match complete bold runs first: the end of one run and start of the next
+    // must not accidentally make an unbold vehicle block look bold.
+    const expandedBoldVehicle = String(text || "").replace(/\*\*([^*]+)\*\*/g, (run, content) => content.includes(marker)
+      ? content.replace(/\{\{AUTO\}\}/g, () => String(vehicle?.full || "")).split("\n").map(line => line ? `**${line}**` : "").join("\n") : run);
     const resolved = expandedBoldVehicle.replace(/\{\{(AUTO|TYTUL|CZESC)\}\}/g, (_match, kind) => kind === "TYTUL" ? String(title || "").toUpperCase() : kind === "CZESC" ? partTitle(title, vehicle, number) : vehicle?.full || "");
     const body = paragraphs(resolved, escape);
     return (fullLayout ? "" : `<p>${escape(String(title || "").toUpperCase())}</p>`) + body;
@@ -56,6 +59,9 @@
     mount({ state, input, vehicleInput, selectedVehicle, titleInput, partNumberInput, notify }) {
       let template = `${titleMarker}\n\nCzęść używana 100% sprawna\n\n${marker}`;
       let savedRange = null, lastRendered = "";
+      const vehicleBoldKey = "wystawiacz-description-vehicle-bold";
+      let vehicleBold = null;
+      try { const saved = localStorage.getItem(vehicleBoldKey); if (["true", "false"].includes(saved)) vehicleBold = saved === "true"; } catch {}
       let templates = [], snippets = [], selectedId = "", appliedId = "", loaded = false, saving = false, replacing = false, editingSnippet = "", editingSnippets = false;
       const templateButtons = document.getElementById("descriptionTemplateButtons"), nameInput = document.getElementById("descriptionTemplateName"), status = document.getElementById("descriptionTemplateStatus");
       const saveNew = document.getElementById("saveDescriptionTemplate"), overwrite = document.getElementById("overwriteDescriptionTemplate"), reload = document.getElementById("reloadDescriptionTemplates");
@@ -91,7 +97,7 @@
         if (node.tagName === "LI") return `- ${text.trim()}\n`;
         return ["P", "DIV", "H1", "H2", "H3", "UL", "OL"].includes(node.tagName) ? text.replace(/\n?$/, "\n") : text;
       }
-      function renderKey() { return JSON.stringify([input.value, titleInput.value, selectedVehicle()?.full || "", selectedVehicle()?.short || "", partNumberInput?.value || ""]); }
+      function renderKey() { return JSON.stringify([input.value, titleInput.value, selectedVehicle()?.full || "", selectedVehicle()?.short || "", partNumberInput?.value || "", vehicleBold]); }
       function commit() {
         input.value = Array.from(editor.childNodes).map(serialize).join("").trim();
         state.descriptionFullLayout = true; state.vehicleDescriptionBlock = null;
@@ -127,6 +133,15 @@
           node.replaceWith(fragment);
         }
         lastRendered = key; savedRange = null;
+        if (vehicleBold !== null) {
+          const chips = [...editor.querySelectorAll('[data-description-token="vehicle"]')];
+          const changed = chips.some(chip => Boolean(chip.closest("b,strong")) !== vehicleBold);
+          if (changed) {
+            for (const chip of chips) setTokenBold(chip, vehicleBold);
+            // Save actual formatting in the description, so templates and publication agree with the editor.
+            commit();
+          }
+        }
       }
       editor.addEventListener("input", commit);
       editor.addEventListener("click", event => {
@@ -187,6 +202,17 @@
       button("Wstaw tytul tutaj", () => insertToken("title"));
       button("Wstaw czesc + numer bez auta", () => insertToken("part"));
       button("Wstaw dane auta tutaj", () => insertToken("vehicle"));
+      const vehicleBoldButton = button("Dane auta: pogrubienie", () => {
+        vehicleBold = vehicleBoldButton.getAttribute("aria-pressed") !== "true";
+        vehicleBoldButton.setAttribute("aria-pressed", String(vehicleBold));
+        let remembered = true;
+        try { localStorage.setItem(vehicleBoldKey, String(vehicleBold)); } catch { remembered = false; }
+        refresh();
+        notify((vehicleBold ? "Dane auta beda automatycznie pogrubione." : "Dane auta beda wstawiane bez pogrubienia.") + (remembered ? " Zapamietano w tej przegladarce." : " Nie udalo sie zapamietac ustawienia w przegladarce."));
+      });
+      vehicleBoldButton.id = "descriptionVehicleBold";
+      vehicleBoldButton.setAttribute("aria-pressed", String(vehicleBold === true));
+      vehicleBoldButton.title = "Automatyczne pogrubienie danych auta. Ustawienie zapamietujemy w tej przegladarce; nie zmienia pozostalego tekstu.";
       const expressions = document.createElement("div"); expressions.className = "description-expressions";
       expressions.innerHTML = '<div class="expression-heading"><strong>Moje wyrazenia</strong><button type="button" id="addDescriptionExpression">+ Wyrazenie</button><button type="button" id="editDescriptionExpressions">Edytuj</button></div><div id="descriptionExpressionButtons" class="template-buttons"></div><div id="descriptionExpressionForm" hidden><input id="descriptionExpressionName" maxlength="40" placeholder="Nazwa przycisku" aria-label="Nazwa wyrazenia"><textarea id="descriptionExpressionText" rows="2" maxlength="2000" placeholder="Tekst do wstawienia w opis" aria-label="Tresc wyrazenia"></textarea><div class="expression-actions"><button type="button" id="saveDescriptionExpression">Zapisz wyrazenie</button><button type="button" id="deleteDescriptionExpression">Usun</button><button type="button" id="cancelDescriptionExpression">Anuluj</button></div></div><small id="descriptionExpressionStatus" role="status">Ustaw kursor w opisie i kliknij wyrazenie.</small>';
       bar.after(expressions);
