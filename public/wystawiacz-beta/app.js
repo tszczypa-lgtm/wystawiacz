@@ -2408,7 +2408,15 @@ function editProduct(id) {
   if (state.categoryId) loadCategoryDetails(state.categoryId);
   renderPhotos();
   renderProducts();
-  summaryCard.scrollIntoView({ behavior: "smooth", block: "start" });
+  const activeCard = [...productList.querySelectorAll(".product-card")].find(card => card.dataset.productId === id);
+  if (activeCard) {
+    const listBounds = productList.getBoundingClientRect(), cardBounds = activeCard.getBoundingClientRect();
+    const top = listBounds.top + productList.clientTop, bottom = top + productList.clientHeight;
+    if (cardBounds.top < top || cardBounds.bottom > bottom) {
+      productList.scrollTo({ top: productList.scrollTop + cardBounds.top - top, behavior: "instant" });
+    }
+  }
+  document.querySelector(".photos-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function navigateProduct(direction) {

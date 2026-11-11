@@ -208,7 +208,6 @@
       const products = groups.map((names, index) => ({ ...common, id: crypto.randomUUID(), title: `Czesc ${state.products.length + index + 1}`, enteredPartNumber: "", price: "", stock: 1, stockUnit: "UNIT", categoryId: "", category: "", parameterValues: {}, catalogProduct: null, catalogLinkRequested: false,
         photoNames: [...names], descriptionText: "{{TYTUL}}\n\nCzesc uzywana. Stan do sprawdzenia.\n\n{{AUTO}}", descriptionFullLayout: true, betaComment: "" }));
       state.products.push(...products); renderProducts(); editProduct(products[0].id); schedule();
-      document.getElementById("productList").scrollIntoView({ block: "nearest", behavior: "smooth" });
     }
   });
   const originalSnapshot = sessionSnapshot, originalRestore = restoreSessionPayload;

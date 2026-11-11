@@ -65,6 +65,23 @@ try {
   assert.equal(await page.evaluate(() => state.products.length), 2);
   assert.equal(await page.locator("#productList .product-card").count(), 2, "Groups use the existing auction list");
   assert.deepEqual(await page.evaluate(() => state.products.map(product => product.photoNames)), [["a.png", "b.png"], ["c.png", "d.png"]]);
+  await page.evaluate(() => {
+    window.betaScrollTargets = [];
+    const originalScroll = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (options) { betaScrollTargets.push(this.className || this.id); originalScroll.call(this, options); };
+    productList.style.height = "150px"; productList.style.maxHeight = "150px"; productList.style.overflowY = "auto";
+  });
+  await page.locator("#nextProductButton").click();
+  assert.equal(await page.evaluate(() => activeProductId === state.products[1].id), true);
+  assert.equal(await page.evaluate(() => productList.scrollTop > 0), true, "Next auction scrolls inside the existing list");
+  assert.ok((await page.evaluate(() => betaScrollTargets.at(-1))).includes("photos-card"), "Navigation opens photos, not the description");
+  await page.locator("#previousProductButton").click();
+  assert.equal(await page.evaluate(() => activeProductId === state.products[0].id), true);
+  assert.ok(await page.evaluate(() => productList.scrollTop <= 5), "Previous auction returns to the first row, allowing list padding");
+  await page.locator("#productList .product-card").nth(1).click();
+  assert.ok((await page.evaluate(() => betaScrollTargets.at(-1))).includes("photos-card"), "Clicking the auction card opens the photo/comment area");
+  await page.locator("#productList .edit-button").first().click();
+  await page.evaluate(() => { productList.style.height = ""; productList.style.maxHeight = ""; productList.style.overflowY = ""; });
   await page.locator("#betaComment").fill("Pierwsza czesc - pompa");
   await page.locator("#betaRecord").click();
   await page.waitForFunction(() => document.querySelector("#betaRecord").getAttribute("aria-pressed") === "true" && !document.querySelector("#betaRecord").disabled);
