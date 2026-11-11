@@ -28,6 +28,8 @@
 .beta-workflow [hidden], .beta-qr-tools [hidden], .beta-session-tools [hidden] { display: none !important; }
 .photo-choice.beta-boundary-photo { border-color: #ff5a00; position: relative; }
 .beta-separator-badge { position: absolute; bottom: 0; left: 0; right: 0; padding: 3px 2px; background: #ff5a00; color: white; font-size: 9px; line-height: 1.2; pointer-events: none; }
+.beta-boundary-notice { padding: 8px; border: 2px solid #ff5a00; border-radius: 8px; background: #fff1e5; color: #17202a; font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
+.beta-boundary-notice[hidden] { display: none !important; }
 #betaQrDialog, #betaSplitDialog { max-width: min(620px, calc(100vw - 28px)); max-height: 85vh; overflow: auto; padding: 22px; border: 1px solid #dce1e8; border-radius: 14px; color: #17202a; }
 #betaQrDialog::backdrop, #betaSplitDialog::backdrop { background: #17202a88; }
 #betaQrDialog { text-align: center; }

@@ -196,6 +196,7 @@
   }, true);
   qrControl = window.BetaQR.mount({
     state, previewName: () => previewPhotoName, allowed: writable, blocked: () => recording || pending,
+    blockReason: () => !ready ? "Najpierw kliknij Przywroc zapis bety w sekcji sesji. Chronimy poprzedni zapis przed nadpisaniem." : "Najpierw zakoncz nagranie lub przetwarzanie.",
     changed: schedule, busyChanged: sync,
     beforeScan() { if (activeProductId) saveActiveProductDraft(); },
     create(groups) {

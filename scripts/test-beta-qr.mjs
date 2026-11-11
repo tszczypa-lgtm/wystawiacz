@@ -32,7 +32,8 @@ try {
     // Intentionally shuffled camera filenames, including 2 before 10, leading/trailing repeated separators.
     for (const [name, type] of [["IMG_10.jpg", "part"], ["IMG_2.jpg", "part"], ["IMG_1.jpg", "qr"], ["IMG_0.jpg", "part"], ["IMG_11.jpg", "qr"], ["IMG_12.jpg", "part"], ["IMG_13.jpg", "part"], ["IMG_14.jpg", "foreign"], ["IMG_15.jpg", "qr"], ["IMG_16.jpg", "qr"]]) await makePhoto(name, type);
     window.fixturePreview = "IMG_13.jpg";
-    window.qrControls = BetaQR.mount({ state: fixtureState, previewName: () => fixturePreview, allowed: () => true, blocked: () => false, changed() {}, busyChanged() {}, beforeScan() {}, create(groups) { for (const names of groups) fixtureState.products.push({ id: crypto.randomUUID(), photoNames: names }); } });
+    window.fixtureAllowed = true;
+    window.qrControls = BetaQR.mount({ state: fixtureState, previewName: () => fixturePreview, allowed: () => fixtureAllowed, blocked: () => false, blockReason: () => "Najpierw przywroc zapis bety.", changed() {}, busyChanged() {}, beforeScan() {}, create(groups) { for (const names of groups) fixtureState.products.push({ id: crypto.randomUUID(), photoNames: names }); } });
     window.prints = 0; window.print = () => { window.prints++; };
   });
   await page.locator("#betaMakeQR").click();
@@ -40,6 +41,17 @@ try {
   assert.equal(decoded, "WYSTAWIACZ:BETA:SEPARATOR:1", "Printed/downloaded code is a real decodable QR");
   await page.locator("#betaPrintQR").click(); assert.equal(await page.evaluate(() => prints), 1);
   await page.locator("#betaCloseQR").click();
+  await page.evaluate(() => { fixtureAllowed = false; });
+  await page.locator("#betaManualQR").click();
+  assert.match(await page.locator("#betaQrStatus").textContent(), /Najpierw przywroc/);
+  assert.deepEqual(await page.evaluate(() => qrControls.snapshot()), []);
+  await page.evaluate(() => { fixtureAllowed = true; });
+  await page.locator("#betaManualQR").click();
+  assert.equal(await page.locator("#betaBoundaryNotice").isVisible(), true);
+  assert.match(await page.locator("#betaBoundaryNotice").textContent(), /IMG_13.jpg/);
+  assert.equal(await page.locator("#betaManualQR").getAttribute("aria-pressed"), "true");
+  await page.locator("#betaManualQR").click();
+  assert.equal(await page.locator("#betaBoundaryNotice").isVisible(), false);
   await page.locator("#betaManualQR").click();
   await page.locator("#betaSplitAI").click();
   await page.locator("#betaSplitDialog").waitFor({ state: "visible" });

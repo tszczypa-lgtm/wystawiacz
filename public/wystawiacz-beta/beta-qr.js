@@ -27,6 +27,8 @@
     const toolbar = document.createElement("div"); toolbar.className = "beta-qr-tools";
     toolbar.innerHTML = '<button id="betaMakeQR" type="button">Utworz QR</button><button id="betaSplitAI" type="button" title="Lokalny podzial calego folderu po QR i recznych separatorach. Bez wysylania zdjec do AI.">Utworz aukcje AI</button><button id="betaManualQR" type="button" aria-pressed="false" title="Wstaw lub usun separator przed biezacym zdjeciem">Dodaj separator recznie</button><button id="betaCancelSplit" type="button" hidden>Anuluj skanowanie</button><small id="betaQrStatus" role="status"></small>';
     document.querySelector(".photos-card .card-heading").after(toolbar);
+    const boundaryNotice = document.createElement("div"); boundaryNotice.className = "beta-boundary-notice"; boundaryNotice.id = "betaBoundaryNotice"; boundaryNotice.hidden = true;
+    (document.querySelector(".photo-preview") || toolbar).after(boundaryNotice);
     const el = id => document.getElementById(id);
     const report = (message, error = false) => { el("betaQrStatus").textContent = message; el("betaQrStatus").classList.toggle("error", error); };
     const qrDialog = document.createElement("dialog"); qrDialog.id = "betaQrDialog";
@@ -54,7 +56,14 @@
       el("betaManualQR").textContent = manual.has(options.previewName()) ? "Usun reczny separator" : "Dodaj separator recznie";
       el("betaManualQR").title = `Nowa aukcja przed zdjeciem: ${options.previewName() || "najpierw wybierz zdjecie"}. To znacznik podzialu, nie nowy plik.`;
       el("betaCancelSplit").hidden = !scanning;
+      boundaryNotice.hidden = !manual.has(options.previewName());
+      boundaryNotice.textContent = `SEPARATOR: od zdjecia ${options.previewName()} zaczyna sie nowa aukcja. Kliknij Utworz aukcje AI, aby podzielic zdjecia i utworzyc liste.`;
       decorate();
+    }
+    function allowed() {
+      if (options.allowed()) return true;
+      report(options.blockReason?.() || "Operacja chwilowo zablokowana. Zakoncz nagranie lub przywroc lokalny zapis bety.", true);
+      return false;
     }
     const render = renderPhotos;
     renderPhotos = function () {
@@ -68,7 +77,7 @@
     el("betaPrintQR").onclick = () => window.print();
     el("betaDownloadQR").onclick = () => { const link = document.createElement("a"); link.download = "separator-aukcji.png"; link.href = el("betaQrCanvas").toDataURL("image/png"); link.click(); };
     el("betaManualQR").onclick = () => {
-      if (!options.allowed() || scanning) return;
+      if (!allowed() || scanning) return;
       const name = options.previewName(); if (!options.state.localPhotosByName.has(name)) return;
       if (manual.has(name)) manual.delete(name); else manual.add(name);
       revision++; refresh(); options.changed();
@@ -94,7 +103,7 @@
       } finally { clearTimeout(timer); URL.revokeObjectURL(url); image.src = ""; }
     }
     async function scan() {
-      if (scanning || !options.allowed()) return;
+      if (scanning || !allowed()) return;
       options.beforeScan();
       const photos = ordered(), startSignature = signature(), startRevision = revision;
       if (!photos.length) { report("Najpierw wskaz folder zdjec.", true); return; }
@@ -138,7 +147,7 @@
     splitDialog.addEventListener("cancel", () => { preview = null; });
     document.addEventListener("keydown", event => { if (event.key === "Escape" && scanning) { cancelled = true; event.preventDefault(); } });
     el("betaConfirmSplit").onclick = () => {
-      if (!preview || !options.allowed()) return;
+      if (!preview || !allowed()) return;
       if (!sameFiles(preview.photos) || signature() !== preview.signature || revision !== preview.revision) { report("Dane zmienily sie od podgladu. Uruchom podzial ponownie; nie dodano aukcji.", true); preview = null; splitDialog.close(); return; }
       const groups = preview.groups; preview = null; splitDialog.close();
       options.create(groups);
