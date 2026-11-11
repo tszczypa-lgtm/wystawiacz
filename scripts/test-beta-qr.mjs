@@ -47,11 +47,19 @@ try {
   assert.deepEqual(await page.evaluate(() => qrControls.snapshot()), []);
   await page.evaluate(() => { fixtureAllowed = true; });
   await page.locator("#betaManualQR").click();
-  assert.equal(await page.locator("#betaBoundaryNotice").isVisible(), true);
-  assert.match(await page.locator("#betaBoundaryNotice").textContent(), /IMG_13.jpg/);
+  assert.equal(await page.locator("#betaBoundaryNotice").count(), 0);
+  assert.equal(await page.locator("#betaQrStatus").textContent(), "");
+  assert.equal(await page.evaluate(() => fixtureState.localPhotosByName.size), 11);
+  const insertedCode = await page.evaluate(async () => {
+    const photo = [...fixtureState.localPhotosByName.values()].find(photo => photo.betaSeparatorBefore === "IMG_13.jpg");
+    const bitmap = await createImageBitmap(photo.file), canvas = document.createElement("canvas"); canvas.width = bitmap.width; canvas.height = bitmap.height;
+    const ctx = canvas.getContext("2d"); ctx.drawImage(bitmap, 0, 0); const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height); bitmap.close();
+    return jsQR(pixels.data, canvas.width, canvas.height)?.data;
+  });
+  assert.equal(insertedCode, "WYSTAWIACZ:BETA:SEPARATOR:1", "Manual separator is an actual PNG containing a QR");
   assert.equal(await page.locator("#betaManualQR").getAttribute("aria-pressed"), "true");
   await page.locator("#betaManualQR").click();
-  assert.equal(await page.locator("#betaBoundaryNotice").isVisible(), false);
+  assert.equal(await page.evaluate(() => fixtureState.localPhotosByName.size), 10);
   await page.locator("#betaManualQR").click();
   await page.locator("#betaSplitAI").click();
   await page.locator("#betaSplitDialog").waitFor({ state: "visible" });
@@ -59,7 +67,7 @@ try {
   await page.locator("#betaConfirmSplit").click();
   const groups = await page.evaluate(() => fixtureState.products.map(product => product.photoNames));
   assert.deepEqual(groups, [["IMG_0.jpg"], ["IMG_2.jpg", "IMG_10.jpg"], ["IMG_12.jpg"], ["IMG_13.jpg", "IMG_14.jpg"]]);
-  assert.equal(await page.evaluate(() => fixtureState.localPhotosByName.size), 10, "Source images, including separator photos, remain intact");
+  assert.equal(await page.evaluate(() => fixtureState.localPhotosByName.size), 11, "Ten source images and one generated separator remain intact");
   await page.locator("#betaSplitAI").click();
   await page.getByText(/Brak nowych aukcji/).waitFor();
   assert.equal(await page.evaluate(() => fixtureState.products.length), 4, "Repeated processing does not duplicate or overwrite listings");

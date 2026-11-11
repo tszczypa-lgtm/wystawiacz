@@ -156,15 +156,18 @@
     try {
       const payload = window.BetaSession.snapshot();
       const photos = [...state.localPhotosByName.values()].filter(photo => persistedPhotos.get(photo.name) !== photo.file);
+      const removedPhotos = [...persistedPhotos.keys()].filter(name => !state.localPhotosByName.has(name));
       const audio = [...recordings].filter(([id, blob]) => persistedAudio.get(id) !== blob);
       await new Promise((resolve, reject) => {
         const transaction = db.transaction(["session", "photos", "audio"], "readwrite");
         transaction.objectStore("session").put({ savedAt: Date.now(), payload }, "current");
-        for (const photo of photos) transaction.objectStore("photos").put({ name: photo.name, file: photo.file }, photo.name);
+        for (const name of removedPhotos) transaction.objectStore("photos").delete(name);
+        for (const photo of photos) transaction.objectStore("photos").put({ name: photo.name, file: photo.file, ...(photo.betaSeparatorBefore ? { betaSeparatorBefore: photo.betaSeparatorBefore } : {}) }, photo.name);
         for (const [id, blob] of audio) transaction.objectStore("audio").put({ id, blob }, id);
         transaction.oncomplete = resolve; transaction.onabort = transaction.onerror = () => reject(transaction.error || new Error("Blad zapisu"));
       });
       for (const photo of photos) persistedPhotos.set(photo.name, photo.file);
+      for (const name of removedPhotos) persistedPhotos.delete(name);
       for (const [id, blob] of audio) persistedAudio.set(id, blob);
       storageStatus(`Zapisano bete lokalnie: ${new Date().toLocaleTimeString("pl-PL")}. Zdjecia i nagrania sa w pamieci tej przegladarki. Nie czysc danych witryny bez kopii.`);
     } catch { dirty = true; storageStatus("Nie zapisano bety! Mozliwy brak miejsca lub blokada pamieci. Nie zamykaj karty: wyeksportuj sesje JSON i nagrania; zachowaj oryginalny folder zdjec.", true); }
@@ -196,6 +199,7 @@
   }, true);
   qrControl = window.BetaQR.mount({
     state, previewName: () => previewPhotoName, allowed: writable, blocked: () => recording || pending,
+    selectPreview: name => { previewPhotoName = name; },
     blockReason: () => !ready ? "Najpierw kliknij Przywroc zapis bety w sekcji sesji. Chronimy poprzedni zapis przed nadpisaniem." : "Najpierw zakoncz nagranie lub przetwarzanie.",
     changed: schedule, busyChanged: sync,
     beforeScan() { if (activeProductId) saveActiveProductDraft(); },

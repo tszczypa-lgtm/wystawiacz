@@ -27,8 +27,6 @@
     const toolbar = document.createElement("div"); toolbar.className = "beta-qr-tools";
     toolbar.innerHTML = '<button id="betaMakeQR" type="button">Utworz QR</button><button id="betaSplitAI" type="button" title="Lokalny podzial calego folderu po QR i recznych separatorach. Bez wysylania zdjec do AI.">Utworz aukcje AI</button><button id="betaManualQR" type="button" aria-pressed="false" title="Wstaw lub usun separator przed biezacym zdjeciem">Dodaj separator recznie</button><button id="betaCancelSplit" type="button" hidden>Anuluj skanowanie</button><small id="betaQrStatus" role="status"></small>';
     document.querySelector(".photos-card .card-heading").after(toolbar);
-    const boundaryNotice = document.createElement("div"); boundaryNotice.className = "beta-boundary-notice"; boundaryNotice.id = "betaBoundaryNotice"; boundaryNotice.hidden = true;
-    (document.querySelector(".photo-preview") || toolbar).after(boundaryNotice);
     const el = id => document.getElementById(id);
     const report = (message, error = false) => { el("betaQrStatus").textContent = message; el("betaQrStatus").classList.toggle("error", error); };
     const qrDialog = document.createElement("dialog"); qrDialog.id = "betaQrDialog";
@@ -36,13 +34,26 @@
     const splitDialog = document.createElement("dialog"); splitDialog.id = "betaSplitDialog";
     splitDialog.innerHTML = '<h2>Sprawdz podzial zdjec</h2><p id="betaSplitSummary"></p><ol id="betaSplitPreview"></ol><small>Sprawdz zakresy zdjec: niewyrazny QR moze nie zostac rozpoznany. Zdjecia przed pierwszym separatorem tez tworza aukcje. Istniejacych aukcji i komentarzy nie nadpisujemy.</small><div class="beta-actions"><button id="betaConfirmSplit" type="button">Utworz aukcje na liscie</button><button id="betaCloseSplit" type="button">Wroc do zdjec</button></div>';
     document.body.append(qrDialog, splitDialog);
-    function ordered() { return [...options.state.localPhotosByName.values()].sort(compare); }
+    function ordered() {
+      const photos = [...options.state.localPhotosByName.values()];
+      const separators = new Map(photos.filter(photo => photo.betaSeparatorBefore).map(photo => [photo.betaSeparatorBefore, photo]));
+      return photos.filter(photo => !photo.betaSeparatorBefore).sort(compare).flatMap(photo => separators.has(photo.name) ? [separators.get(photo.name), photo] : [photo]);
+    }
+    function manualTarget() { return options.state.localPhotosByName.get(options.previewName())?.betaSeparatorBefore || options.previewName(); }
+    function addImage(before) {
+      const canvas = paint(document.createElement("canvas"));
+      const raw = atob(canvas.toDataURL("image/png").split(",")[1]);
+      const file = new File([Uint8Array.from(raw, char => char.charCodeAt(0))], `separator-${crypto.randomUUID()}.png`, { type: "image/png" });
+      const photo = { name: file.name, file, url: URL.createObjectURL(file), betaSeparatorBefore: before };
+      options.state.localPhotosByName.set(photo.name, photo); recognized.add(photo.name); cache.set(file, "separator");
+      return photo;
+    }
     function signature() { return JSON.stringify(options.state.products.map(product => [product.id, product.photoNames || []])); }
     function sameFiles(photos) { const now = ordered(); return now.length === photos.length && now.every((photo, index) => photo.name === photos[index].name && photo.file === photos[index].file); }
     function decorate() {
       document.querySelectorAll("#photoGrid [data-photo-name]").forEach(button => {
         button.querySelector(".beta-separator-badge")?.remove();
-        const name = button.dataset.photoName, text = recognized.has(name) ? "QR - separator" : manual.has(name) ? "Nowa aukcja przed tym" : "";
+        const name = button.dataset.photoName, text = recognized.has(name) || options.state.localPhotosByName.get(name)?.betaSeparatorBefore ? "SEPARATOR" : "";
         button.classList.toggle("beta-boundary-photo", Boolean(text));
         if (text) { const badge = document.createElement("span"); badge.className = "beta-separator-badge"; badge.textContent = text; button.append(badge); }
       });
@@ -52,12 +63,10 @@
       el("betaSplitAI").disabled = scanning || locked || !options.state.localPhotosByName.size;
       el("betaMakeQR").disabled = scanning || locked;
       el("betaManualQR").disabled = scanning || locked || !options.state.localPhotosByName.has(options.previewName());
-      el("betaManualQR").setAttribute("aria-pressed", String(manual.has(options.previewName())));
-      el("betaManualQR").textContent = manual.has(options.previewName()) ? "Usun reczny separator" : "Dodaj separator recznie";
-      el("betaManualQR").title = `Nowa aukcja przed zdjeciem: ${options.previewName() || "najpierw wybierz zdjecie"}. To znacznik podzialu, nie nowy plik.`;
+      el("betaManualQR").setAttribute("aria-pressed", String(manual.has(manualTarget())));
+      el("betaManualQR").textContent = manual.has(manualTarget()) ? "Usun separator" : "Wstaw zdjecie separatora";
+      el("betaManualQR").title = "Wstaw zdjecie QR przed biezacym zdjeciem";
       el("betaCancelSplit").hidden = !scanning;
-      boundaryNotice.hidden = !manual.has(options.previewName());
-      boundaryNotice.textContent = `SEPARATOR: od zdjecia ${options.previewName()} zaczyna sie nowa aukcja. Kliknij Utworz aukcje AI, aby podzielic zdjecia i utworzyc liste.`;
       decorate();
     }
     function allowed() {
@@ -71,17 +80,21 @@
       render(); refresh();
     };
     const toggle = togglePhoto;
-    togglePhoto = function (name) { if (recognized.has(name)) { report("To zdjecie separatora QR. Nie dodajemy go do aukcji."); return; } toggle(name); };
+    togglePhoto = function (name) { if (recognized.has(name) || options.state.localPhotosByName.get(name)?.betaSeparatorBefore) { options.selectPreview?.(name); renderPhotos(); return; } toggle(name); };
     el("betaMakeQR").onclick = () => { try { paint(el("betaQrCanvas")); qrDialog.showModal(); } catch (error) { report(error.message, true); } };
     el("betaCloseQR").onclick = () => qrDialog.close();
     el("betaPrintQR").onclick = () => window.print();
     el("betaDownloadQR").onclick = () => { const link = document.createElement("a"); link.download = "separator-aukcji.png"; link.href = el("betaQrCanvas").toDataURL("image/png"); link.click(); };
     el("betaManualQR").onclick = () => {
       if (!allowed() || scanning) return;
-      const name = options.previewName(); if (!options.state.localPhotosByName.has(name)) return;
-      if (manual.has(name)) manual.delete(name); else manual.add(name);
-      revision++; refresh(); options.changed();
-      report(manual.has(name) ? `Nowa aukcja zacznie sie przed: ${name}. Kliknij Utworz aukcje AI. Istniejaca lista pozostaje bez zmian.` : `Usunieto separator przed: ${name}.`);
+      const name = manualTarget(); if (!options.state.localPhotosByName.has(name)) return;
+      try {
+        if (manual.has(name)) {
+          for (const photo of options.state.localPhotosByName.values()) if (photo.betaSeparatorBefore === name) { URL.revokeObjectURL(photo.url); options.state.localPhotosByName.delete(photo.name); recognized.delete(photo.name); }
+          manual.delete(name); options.selectPreview?.(name);
+        } else { const photo = addImage(name); manual.add(name); options.selectPreview?.(photo.name); }
+        revision++; renderPhotos(); options.changed(); report("");
+      } catch (error) { report(error.message, true); }
     };
     async function decode(photo) {
       if (cache.has(photo.file)) return cache.get(photo.file);
@@ -156,7 +169,17 @@
     renderPhotos();
     return { get busy() { return scanning; }, refresh,
       snapshot() { return [...manual]; },
-      restore(names) { manual.clear(); if (Array.isArray(names)) for (const name of names.slice(0, 10000)) if (typeof name === "string" && name.length <= 1000) manual.add(name); revision++; recognized.clear(); refresh(); }
+      restore(names) {
+        manual.clear(); recognized.clear();
+        if (Array.isArray(names)) for (const name of names.slice(0, 10000)) if (typeof name === "string" && name.length <= 1000) manual.add(name);
+        const images = new Set();
+        for (const photo of options.state.localPhotosByName.values()) if (photo.betaSeparatorBefore) {
+          if (!manual.has(photo.betaSeparatorBefore)) { URL.revokeObjectURL(photo.url); options.state.localPhotosByName.delete(photo.name); }
+          else { images.add(photo.betaSeparatorBefore); recognized.add(photo.name); cache.set(photo.file, "separator"); }
+        }
+        for (const name of manual) if (!images.has(name) && options.state.localPhotosByName.has(name)) addImage(name);
+        revision++; renderPhotos();
+      }
     };
   } };
 })();

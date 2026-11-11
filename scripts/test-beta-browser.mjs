@@ -58,6 +58,12 @@ try {
   assert.equal(await page.locator(".photos-card .beta-workflow").count(), 1, "Compact comment is below photos");
   await page.evaluate(() => { previewPhotoName = "c.png"; renderPhotos(); });
   await page.locator("#betaManualQR").click();
+  assert.equal(await page.evaluate(() => state.localPhotosByName.size), 5);
+  const separatorName = await page.evaluate(() => previewPhotoName);
+  assert.equal(await page.locator("#photoPreview").getAttribute("src"), await page.evaluate(() => state.localPhotosByName.get(previewPhotoName).url));
+  assert.deepEqual(await page.evaluate(() => [...state.localPhotosByName.values()].map(photo => photo.betaSeparatorBefore || photo.name)), ["a.png", "b.png", "c.png", "c.png", "d.png"], "Generated image sits immediately before the target photo");
+  await page.locator("#photoGrid [data-photo-name]").filter({ has: page.locator(".beta-separator-badge") }).click();
+  assert.equal(await page.evaluate(name => state.selectedPhotoNames.includes(name), separatorName), false, "Separator opens as a preview but is never added to the auction");
   await page.locator("#betaSplitAI").click();
   await page.locator("#betaSplitDialog").waitFor({ state: "visible" });
   assert.equal(await page.locator("#betaSplitPreview li").count(), 2);
@@ -128,7 +134,8 @@ try {
   await page.locator("#betaRestore").click();
   await page.getByText(/Przywrocono bete wraz/).waitFor();
   assert.equal(await page.evaluate(() => state.products.length), 2);
-  assert.equal(await page.evaluate(() => state.localPhotosByName.size), 4);
+  assert.equal(await page.evaluate(() => state.localPhotosByName.size), 5);
+  assert.equal(await page.evaluate(() => [...state.localPhotosByName.values()].filter(photo => photo.betaSeparatorBefore === "c.png").length), 1, "Generated image survives restore without duplication");
   assert.deepEqual(await page.evaluate(() => BetaSession.snapshot().betaSeparators), ["c.png"], "Manual QR boundaries survive local restore");
   await page.locator("#betaAIDetails").evaluate(details => { details.open = true; });
   assert.ok(await page.locator("#betaAudio").isVisible());
@@ -158,5 +165,14 @@ try {
   await page.locator(".beta-workflow").screenshot({ path: fileURLToPath(new URL("../outputs/beta-preview/workflow.png", import.meta.url)) });
   await page.setViewportSize({ width: 390, height: 844 });
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), "Beta workflow does not overflow mobile viewport");
+  await page.evaluate(() => { previewPhotoName = [...state.localPhotosByName.values()].find(photo => photo.betaSeparatorBefore).name; renderPhotos(); });
+  await page.locator("#betaManualQR").click();
+  assert.equal(await page.evaluate(() => state.localPhotosByName.size), 4, "Removing a generated separator preserves all original photos");
+  await page.evaluate(() => BetaWorkflow.save());
+  await page.reload(); await page.locator("#betaRestore").waitFor({ state: "visible" });
+  await page.locator("#betaRestore").click(); await page.getByText(/Przywrocono bete wraz/).waitFor();
+  assert.equal(await page.evaluate(() => state.localPhotosByName.size), 4, "Removed separator does not reappear from IndexedDB");
+  assert.deepEqual(await page.evaluate(() => BetaSession.snapshot().betaSeparators), []);
+  assert.deepEqual(errors, []);
   console.log("Beta browser: real copied editor, photo grouping, per-part comments/audio, recording switch guard, AI review, IndexedDB recovery and stable storage/network isolation passed. Audio/AI mocked.");
 } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
