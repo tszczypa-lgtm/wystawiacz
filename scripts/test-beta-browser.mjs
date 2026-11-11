@@ -20,7 +20,7 @@ const server = createServer(async (req, res) => {
   }
   try {
     const name = path === "/" ? "index.html" : path.slice(1);
-    if (!/^[a-z0-9.-]+$/i.test(name)) throw Error();
+    if (!/^(?:vendor\/)?[a-z0-9.-]+$/i.test(name)) throw Error();
     let body = await readFile(new URL(name, root));
     if (name === "index.html") body = body.toString().replace('<script src="web-auth.js"></script>', '<script>window.getWystawiaczToken=async()=>"fixture";</script>');
     res.setHeader("Content-Type", name.endsWith(".js") ? "text/javascript" : name.endsWith(".css") ? "text/css" : "text/html; charset=utf-8"); res.end(body);
@@ -54,25 +54,31 @@ try {
     relinkFolderInput.files = files.files; relinkFolderInput.dispatchEvent(new Event("change", { bubbles: true }));
   });
   await page.waitForFunction(() => state.localPhotosByName.size === 4);
-  await page.evaluate(() => { togglePhoto("a.png"); togglePhoto("b.png"); });
-  await page.locator("#betaCreate").click();
-  assert.equal(await page.evaluate(() => state.products.length), 1);
+  assert.equal(await page.locator("#betaBatches,#betaNew,#betaCreate").count(), 0, "No second batch list or large creation panel");
+  assert.equal(await page.locator(".photos-card .beta-workflow").count(), 1, "Compact comment is below photos");
+  await page.evaluate(() => { previewPhotoName = "c.png"; renderPhotos(); });
+  await page.locator("#betaManualQR").click();
+  await page.locator("#betaSplitAI").click();
+  await page.locator("#betaSplitDialog").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#betaSplitPreview li").count(), 2);
+  await page.locator("#betaConfirmSplit").click();
+  assert.equal(await page.evaluate(() => state.products.length), 2);
+  assert.equal(await page.locator("#productList .product-card").count(), 2, "Groups use the existing auction list");
+  assert.deepEqual(await page.evaluate(() => state.products.map(product => product.photoNames)), [["a.png", "b.png"], ["c.png", "d.png"]]);
   await page.locator("#betaComment").fill("Pierwsza czesc - pompa");
   await page.locator("#betaRecord").click();
-  await page.waitForFunction(() => !document.querySelector("#betaStop").disabled);
-  await page.locator("#betaNew").click();
+  await page.waitForFunction(() => document.querySelector("#betaRecord").getAttribute("aria-pressed") === "true" && !document.querySelector("#betaRecord").disabled);
+  await page.locator("#productList .edit-button").nth(1).click();
   assert.equal(await page.evaluate(() => activeProductId), await page.evaluate(() => state.products[0].id), "Cannot switch parts while recording");
-  await page.locator("#betaStop").click();
+  await page.locator("#betaRecord").click();
   await page.getByText(/Nagranie zapisane przy tej aukcji/).waitFor();
-  await page.locator("#betaNew").click();
-  assert.equal(await page.evaluate(() => activeProductId), "");
+  await page.locator("#productList .edit-button").nth(1).click();
   await page.evaluate(() => { togglePhoto("a.png"); });
-  assert.deepEqual(await page.evaluate(() => state.selectedPhotoNames), [], "Photo already assigned to another part cannot be selected accidentally");
-  await page.evaluate(() => { togglePhoto("c.png"); togglePhoto("d.png"); });
-  await page.locator("#betaCreate").click();
+  assert.deepEqual(await page.evaluate(() => state.selectedPhotoNames), ["c.png", "d.png"], "Photo already assigned to another part cannot be selected accidentally");
   await page.locator("#betaComment").fill("Druga czesc");
   assert.equal(await page.evaluate(() => state.products.length), 2);
-  await page.locator("[data-beta-product]").first().click();
+  await page.locator("#productList .edit-button").first().click();
+  await page.locator("#betaAIDetails").evaluate(details => { details.open = true; });
   assert.equal(await page.locator("#betaComment").inputValue(), "Pierwsza czesc - pompa");
   assert.ok(await page.locator("#betaAudio").isVisible());
   await page.locator("#betaTranscribe").click();
@@ -91,7 +97,7 @@ try {
   assert.equal(await page.evaluate(() => state.products[1].enteredPartNumber), "");
   assert.ok(await page.locator("#publishCurrentButton").isDisabled());
   await page.locator("#addButton").click();
-  await page.locator("[data-beta-product]").first().click();
+  await page.locator("#productList .edit-button").first().click();
   assert.equal(await page.locator("#betaComment").inputValue(), "Pompa ABS 1234567 cena 200 zl, regal B3.", "Normal save-changes button preserves beta comment metadata");
   assert.ok(await page.locator("#betaAudio").isVisible());
   await page.evaluate(() => applyOwnOffer({ name: "Pompa z mojej oferty", description: { sections: [{ items: [{ type: "TEXT", content: "<p>Opis z oferty</p>" }] }] }, productSet: [], stock: { available: 1 } }, "7654321"));
@@ -106,8 +112,10 @@ try {
   await page.getByText(/Przywrocono bete wraz/).waitFor();
   assert.equal(await page.evaluate(() => state.products.length), 2);
   assert.equal(await page.evaluate(() => state.localPhotosByName.size), 4);
+  assert.deepEqual(await page.evaluate(() => BetaSession.snapshot().betaSeparators), ["c.png"], "Manual QR boundaries survive local restore");
+  await page.locator("#betaAIDetails").evaluate(details => { details.open = true; });
   assert.ok(await page.locator("#betaAudio").isVisible());
-  await page.locator("[data-beta-product]").nth(1).click();
+  await page.locator("#productList .edit-button").nth(1).click();
   assert.equal(await page.locator("#betaComment").inputValue(), "Druga czesc");
   assert.ok(await page.locator("#betaAudio").isHidden());
   const blocked = await page.evaluate(async () => {

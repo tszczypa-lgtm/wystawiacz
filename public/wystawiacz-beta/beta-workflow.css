@@ -1,21 +1,44 @@
-.beta-banner, .beta-workflow { border: 2px solid #ff8a3d; background: #fff7ed; border-radius: 12px; padding: 16px; margin: 12px 0; color: #17202a; }
-.beta-banner { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
-.beta-workflow h2 { margin: 0 0 8px; font-size: 19px; }
-.beta-actions, .beta-batches { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
-.beta-workflow button, .beta-banner button, .beta-banner a { border: 1px solid #cbd5e1; padding: 8px 10px; border-radius: 8px; background: white; color: #17202a; cursor: pointer; font: inherit; font-size: 13px; }
-.beta-workflow button[aria-pressed="true"] { border-color: #ff5a00; background: #ffedd5; font-weight: 700; }
-.beta-workflow button:disabled { cursor: not-allowed; opacity: .5; }
-.beta-workflow textarea { display: block; width: 100%; min-height: 85px; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: white; margin: 8px 0; }
-.beta-workflow small, .beta-storage-note { display: block; font-size: 12px; line-height: 1.6; }
-.beta-workflow audio { display: block; max-width: 100%; margin: 8px 0; }
-.beta-consent { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 1.5; margin: 12px 0; }
-.beta-consent input { flex: 0 0 auto; width: auto; margin-top: 3px; }
-.beta-proposal { border: 1px solid #e2b478; background: white; border-radius: 10px; padding: 12px; }
-.beta-proposal label { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0; font-size: 13px; overflow-wrap: anywhere; }
+.beta-workflow { border-top: 1px solid #dce1e8; padding-top: 10px; margin-top: 12px; color: #17202a; }
+.beta-actions, .beta-qr-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0; }
+.beta-workflow button, .beta-qr-tools button, .beta-session-tools button, #betaQrDialog button, #betaSplitDialog button { border: 1px solid #cbd5e1; padding: 7px 9px; border-radius: 8px; background: white; color: #17202a; cursor: pointer; font: inherit; font-size: 12px; }
+.beta-workflow button[aria-pressed="true"], .beta-qr-tools button[aria-pressed="true"] { border-color: #ff5a00; background: #fff1e5; }
+.beta-workflow button:disabled, .beta-qr-tools button:disabled { cursor: not-allowed; opacity: .5; }
+.beta-qr-tools #betaSplitAI { background: #ff5a00; border-color: #ff5a00; color: white; font-weight: 700; }
+.beta-qr-tools small { flex-basis: 100%; font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+.beta-comment-row { display: flex; align-items: stretch; gap: 6px; margin-top: 5px; }
+.beta-comment-row textarea { flex: 1; min-width: 0; width: 100%; min-height: 52px; padding: 8px; border: 1px solid #cbd5e1; border-radius: 8px; background: white; margin: 0; resize: vertical; font: inherit; font-size: 13px; }
+.beta-comment-row .beta-mic { flex: 0 0 38px; display: grid; place-items: center; padding: 6px; }
+.beta-mic .beta-stop-icon { display: none; }
+.beta-mic[aria-pressed="true"] svg { display: none; }
+.beta-mic[aria-pressed="true"] .beta-stop-icon { display: block; width: 12px; height: 12px; background: #b42318; border-radius: 2px; }
+.beta-workflow small, .beta-storage-note, .beta-session-tools small { display: block; font-size: 11px; line-height: 1.5; }
+.beta-workflow details { margin-top: 6px; font-size: 12px; }
+.beta-workflow summary { cursor: pointer; color: #667085; }
+.beta-workflow audio { display: block; width: 100%; max-width: 100%; height: 32px; margin: 8px 0; }
+.beta-consent { display: flex; gap: 6px; align-items: flex-start; font-size: 11px; line-height: 1.45; margin: 8px 0; }
+.beta-consent input { flex: 0 0 auto; width: auto; margin-top: 2px; }
+.beta-proposal { border: 1px solid #e2b478; background: #fffaf5; border-radius: 8px; padding: 10px; margin-top: 8px; }
+.beta-proposal label { display: flex; gap: 6px; align-items: flex-start; margin: 6px 0; font-size: 12px; overflow-wrap: anywhere; }
 .beta-proposal input { width: auto; flex: 0 0 auto; }
-.beta-status { font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
-.beta-status.error { color: #a22010; font-weight: 600; }
-.beta-batches { max-height: 150px; overflow-y: auto; }
-.beta-batches button { max-width: 100%; overflow-wrap: anywhere; }
-.beta-workflow [hidden] { display: none !important; }
+.beta-status { margin: 5px 0 0; font-size: 11px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.beta-status:empty { display: none; }
+.beta-status.error, #betaQrStatus.error { color: #a22010; font-weight: 600; }
+.beta-session-tools { width: 100%; }
+.beta-session-tools small { max-width: 70ch; }
+.beta-workflow [hidden], .beta-qr-tools [hidden], .beta-session-tools [hidden] { display: none !important; }
+.photo-choice.beta-boundary-photo { border-color: #ff5a00; position: relative; }
+.beta-separator-badge { position: absolute; bottom: 0; left: 0; right: 0; padding: 3px 2px; background: #ff5a00; color: white; font-size: 9px; line-height: 1.2; pointer-events: none; }
+#betaQrDialog, #betaSplitDialog { max-width: min(620px, calc(100vw - 28px)); max-height: 85vh; overflow: auto; padding: 22px; border: 1px solid #dce1e8; border-radius: 14px; color: #17202a; }
+#betaQrDialog::backdrop, #betaSplitDialog::backdrop { background: #17202a88; }
+#betaQrDialog { text-align: center; }
+#betaQrDialog canvas { display: block; width: min(100%, 340px); height: auto; margin: 14px auto; image-rendering: pixelated; }
+#betaQrDialog p, #betaSplitDialog p, #betaSplitDialog small { font-size: 13px; line-height: 1.5; }
+#betaSplitPreview { max-height: 36vh; overflow: auto; font-size: 13px; padding-left: 28px; }
+#betaSplitPreview li { padding: 5px 0; overflow-wrap: anywhere; }
 #connectButton, #disconnectButton { display: none !important; }
+@media print {
+  body > * { display: none !important; }
+  body > #betaQrDialog[open] { display: block !important; position: static; width: 100%; max-width: none; max-height: none; border: 0; background: white; color: black; overflow: visible; }
+  #betaQrDialog canvas { width: 100mm; }
+  #betaQrDialog .beta-actions { display: none !important; }
+}

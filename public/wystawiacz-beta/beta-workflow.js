@@ -1,30 +1,24 @@
 (function () {
-  const banner = document.createElement("section"); banner.className = "beta-banner";
-  banner.innerHTML = '<div><strong>WYSTAWIACZ BETA - bez publikacji</strong><small>Osobna kopia edytora. Dane i nagrania bety zostaja na tym komputerze. Nie zapisujemy stabilnych sesji.</small></div><a href="/panel" target="_top">Panel konta</a><a href="/panel/offers" target="_top">Stabilny Wystawiacz</a>';
-  document.querySelector(".page-shell").prepend(banner);
   document.querySelector(".brand strong").textContent = "Wystawiacz Beta";
-  const connectionLink = document.createElement("a"); connectionLink.href = "/panel/allegro"; connectionLink.target = "_blank"; connectionLink.rel = "noopener noreferrer"; connectionLink.textContent = "Polaczenie Allegro w panelu"; banner.append(connectionLink);
+  document.querySelector(".brand small").textContent = "Beta - przygotowanie, bez publikacji";
+  for (const [href, text] of [["/panel", "Panel konta"], ["/panel/offers", "Stabilny Wystawiacz"]]) { const link = document.createElement("a"); link.href = href; link.target = "_top"; link.textContent = text; document.getElementById("accountNavigation").append(link); }
   const panel = document.createElement("section"); panel.className = "beta-workflow";
-  panel.innerHTML = '<h2>1. Podziel zdjecia na aukcje</h2><small>Kliknij Nowy zestaw, zaznacz zdjecia jednej czesci w galerii i utworz aukcje. Oryginalnych plikow nie przenosimy ani nie usuwamy. QR dodamy w kolejnym etapie.</small><div class="beta-actions"><button id="betaNew" type="button">Nowy zestaw</button><button id="betaCreate" type="button">Utworz aukcje z zaznaczonych zdjec</button><button id="betaSave" type="button">Zapisz bete na komputerze</button><button id="betaRestore" type="button" hidden>Przywroc zapis bety</button></div><p id="betaStorageStatus" class="beta-status" role="status"></p><div id="betaBatches" class="beta-batches" aria-label="Aukcje ze zdjec"></div><h2>2. Komentarz do wybranej aukcji</h2><p id="betaCurrent"></p><textarea id="betaComment" maxlength="6000" placeholder="Napisz lub nagraj: co to za czesc, numer, strona, stan, uszkodzenia, cena, regal..." aria-label="Komentarz do aukcji beta"></textarea><div class="beta-actions"><button id="betaRecord" type="button">Nagraj komentarz</button><button id="betaStop" type="button" disabled>Zatrzymaj nagranie</button><button id="betaDownloadAudio" type="button" disabled>Zapisz nagranie do pliku</button></div><audio id="betaAudio" controls hidden></audio><label class="beta-consent"><input id="betaConsent" type="checkbox"><span>Zgadzam sie wyslac wybrany komentarz lub nagranie do OpenAI w celu transkrypcji i przygotowania pol. Nie wysylamy zdjec. Nie nagrywaj danych klientow ani hasel. Usluga API moze generowac koszty.</span></label><div class="beta-actions"><button id="betaTranscribe" type="button">Przepisz nagranie</button><button id="betaSuggest" type="button">AI: przygotuj pola z komentarza</button><button id="betaCancelAI" type="button" disabled>Anuluj oczekiwanie</button></div><p id="betaStatus" class="beta-status" role="status"></p><div id="betaProposal" class="beta-proposal" hidden></div>';
-  document.querySelector(".workspace-grid").before(panel);
+  panel.innerHTML = '<small id="betaCurrent"></small><div class="beta-comment-row"><textarea id="betaComment" rows="2" maxlength="6000" placeholder="Komentarz do tej czesci..." aria-label="Komentarz do aukcji beta"></textarea><button id="betaRecord" class="beta-mic" type="button" aria-label="Nagraj komentarz" title="Nagraj komentarz" aria-pressed="false"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg><span class="beta-stop-icon" aria-hidden="true"></span></button></div><details id="betaAIDetails"><summary>AI i nagranie</summary><audio id="betaAudio" controls hidden></audio><button id="betaDownloadAudio" type="button" disabled>Zapisz nagranie</button><label class="beta-consent"><input id="betaConsent" type="checkbox"><span>Zgadzam sie wyslac wybrany komentarz lub nagranie do OpenAI. Bez zdjec. Nie nagrywaj danych klientow ani hasel. API moze generowac koszty.</span></label><label class="beta-consent"><input id="betaAutoAI" type="checkbox"><span>Po nagraniu przepisz komentarz i przygotuj pola AI.</span></label><div class="beta-actions"><button id="betaTranscribe" type="button">Przepisz nagranie</button><button id="betaSuggest" type="button">AI: przygotuj pola</button><button id="betaCancelAI" type="button" disabled>Anuluj oczekiwanie</button></div></details><p id="betaStatus" class="beta-status" role="status"></p><div id="betaProposal" class="beta-proposal" hidden></div>';
+  document.querySelector(".photos-card").append(panel);
+  const storage = document.createElement("div"); storage.className = "beta-session-tools";
+  storage.innerHTML = '<button id="betaSave" type="button">Zapisz bete lokalnie</button><button id="betaRestore" type="button" hidden>Przywroc zapis bety</button><small id="betaStorageStatus" class="beta-status" role="status"></small>';
+  document.querySelector(".session-actions").append(storage);
   const el = id => document.getElementById(id);
   const aiStatus = document.createElement("small"); aiStatus.id = "betaAIStatus"; aiStatus.textContent = "Sprawdzam konfiguracje AI..."; el("betaConsent").closest("label").before(aiStatus);
   const recordings = new Map(), persistedPhotos = new Map(), persistedAudio = new Map();
-  let db, existing, ready = false, saving = false, dirty = false, timer, recording = false, pending = false, recorder, stream, audioUrl = "", lastId = "", controller, proposal = null, aiAvailable = false;
+  let db, existing, ready = false, saving = false, dirty = false, timer, recording = false, pending = false, recorder, stream, audioUrl = "", lastId = "", controller, proposal = null, aiAvailable = false, qrControl;
   const current = () => state.products.find(product => product.id === activeProductId);
   function status(message, error = false) { el("betaStatus").textContent = message; el("betaStatus").classList.toggle("error", error); }
   function storageStatus(message, error = false) { el("betaStorageStatus").textContent = message; el("betaStorageStatus").classList.toggle("error", error); }
-  function writable() { if (!ready) { status("Najpierw przywroc poprzedni zapis bety albo poczekaj na otwarcie pamieci.", true); return false; } if (recording || pending) { status("Zakoncz nagranie lub przetwarzanie przed zmiana aukcji.", true); return false; } return true; }
+  function writable() { if (!ready) { status("Najpierw przywroc poprzedni zapis bety albo poczekaj na otwarcie pamieci.", true); return false; } if (recording || pending || qrControl?.busy) { status("Zakoncz nagranie lub przetwarzanie przed zmiana aukcji.", true); return false; } return true; }
   function sync() {
     const product = current();
-    const list = el("betaBatches"); list.replaceChildren();
-    state.products.forEach((item, index) => {
-      const b = document.createElement("button"); b.type = "button"; b.dataset.betaProduct = item.id;
-      b.textContent = `${index + 1}. ${item.title || "Bez nazwy"} (${item.photoNames?.length || 0} zdj.)`;
-      b.setAttribute("aria-pressed", String(item.id === activeProductId));
-      b.onclick = () => { if (writable()) editProduct(item.id); }; list.append(b);
-    });
-    el("betaCurrent").textContent = product ? `Komentarz przypisany do aukcji ${state.products.indexOf(product) + 1}: ${product.title || "Bez nazwy"}${product.betaLocation ? ` | Magazyn: ${product.betaLocation}` : ""}` : "Utworz zestaw zdjec lub wybierz aukcje powyzej.";
+    el("betaCurrent").textContent = product ? `Komentarz - aukcja ${state.products.indexOf(product) + 1}${product.betaLocation ? ` | Magazyn: ${product.betaLocation}` : ""}` : "Komentarz: wybierz aukcje z listy.";
     if (lastId !== activeProductId) {
       lastId = activeProductId; el("betaComment").value = product?.betaComment || ""; clearProposal(); status("");
       if (audioUrl) URL.revokeObjectURL(audioUrl);
@@ -32,12 +26,15 @@
       el("betaAudio").hidden = !audioUrl; if (audioUrl) el("betaAudio").src = audioUrl; else el("betaAudio").removeAttribute("src");
     }
     el("betaComment").disabled = !product || pending;
-    el("betaRecord").disabled = !product || recording || pending;
-    el("betaStop").disabled = !recording || !recorder || recorder.state !== "recording";
+    el("betaRecord").disabled = !product || pending || Boolean(qrControl?.busy) || (recording && recorder?.state !== "recording");
+    el("betaRecord").setAttribute("aria-pressed", String(recording));
+    el("betaRecord").setAttribute("aria-label", recording ? "Zatrzymaj nagranie" : "Nagraj komentarz");
+    el("betaRecord").title = recording ? "Zatrzymaj nagranie" : "Nagraj komentarz";
     el("betaTranscribe").disabled = !aiAvailable || !product || !recordings.has(activeProductId) || recording || pending;
     el("betaSuggest").disabled = !aiAvailable || !product || !el("betaComment").value.trim() || recording || pending;
     el("betaDownloadAudio").disabled = !product || !recordings.has(activeProductId);
     el("betaCancelAI").disabled = !pending;
+    qrControl?.refresh();
     document.querySelectorAll("#publishCurrentButton,#publishSelectedProducts,[data-publish-product-id]").forEach(button => { button.disabled = true; button.title = "Publikacja w becie jest zablokowana"; });
   }
   const originalEdit = editProduct;
@@ -51,27 +48,17 @@
   };
   publishProduct = async function () { status("Publikacja z bety jest zablokowana. Stabilny Wystawiacz pozostaje bez zmian.", true); };
   document.addEventListener("click", event => {
-    if ((recording || pending) && event.target.closest("button") && !event.target.closest("#betaStop,#betaCancelAI")) { event.preventDefault(); event.stopImmediatePropagation(); status("Najpierw zakoncz nagranie lub anuluj oczekiwanie.", true); }
+    if ((recording || pending || qrControl?.busy) && event.target.closest("button") && !event.target.closest("#betaRecord,#betaCancelAI,#betaCancelSplit")) { event.preventDefault(); event.stopImmediatePropagation(); status("Najpierw zakoncz nagranie lub anuluj oczekiwanie.", true); }
   }, true);
-  el("betaNew").onclick = () => { if (!writable()) return; if (activeProductId) saveActiveProductDraft(); resetForm(); sync(); schedule(); document.querySelector(".photos-card").scrollIntoView({ block: "start", behavior: "smooth" }); };
-  el("betaCreate").onclick = () => {
-    if (!writable()) return;
-    if (activeProductId) { status("Kliknij Nowy zestaw przed wyborem zdjec kolejnej czesci. Obecna aukcja zostaje zapisana.", true); return; }
-    const names = [...state.selectedPhotoNames];
-    if (!names.length) { status("Zaznacz zdjecia jednej czesci w galerii.", true); return; }
-    const duplicate = state.products.find(product => product.photoNames?.some(name => names.includes(name)));
-    if (duplicate) { status("Nie utworzono duplikatu: czesc wybranych zdjec jest juz przypisana do aukcji. Odznacz je albo popraw poprzedni zestaw.", true); return; }
-    const product = { ...getFormProduct(crypto.randomUUID()), title: titleInput.value.trim() || `Czesc ${state.products.length + 1}`, betaComment: "", photoNames: names };
-    state.products.push(product); editProduct(product.id); status(`Utworzono aukcje z ${names.length} zdjec. Teraz dodaj komentarz.`); schedule();
-  };
   el("betaComment").oninput = () => { const product = current(); if (product) product.betaComment = el("betaComment").value; clearProposal(); sync(); schedule(); };
   function clearProposal() { proposal = null; el("betaProposal").replaceChildren(); el("betaProposal").hidden = true; }
   function stopTracks() { stream?.getTracks().forEach(track => track.stop()); stream = null; }
   el("betaRecord").onclick = async () => {
+    if (recording) { if (recorder?.state === "recording") recorder.stop(); return; }
     const product = current(); if (!product || !writable()) return;
     if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { status("Ta przegladarka nie obsluguje nagrywania. Mozesz wpisac komentarz tekstowy.", true); return; }
     if (recordings.has(product.id) && !confirm("Zastapic poprzednie nagranie tej aukcji? Najpierw mozesz je zapisac do pliku.")) return;
-    const id = product.id; recording = true; sync(); status("Oczekiwanie na zgode mikrofonu...");
+    const id = product.id; recording = true; recorder = null; sync(); status("Oczekiwanie na zgode mikrofonu...");
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mime = ["audio/webm;codecs=opus", "audio/mp4", "audio/ogg;codecs=opus"].find(type => MediaRecorder.isTypeSupported(type));
@@ -82,13 +69,15 @@
       const stopTimer = setTimeout(() => { if (recorder?.state === "recording") recorder.stop(); }, 120000);
       recorder.onstop = () => {
         clearTimeout(stopTimer); stopTracks(); recording = false;
-        if (!tooLarge && size) { recordings.set(id, new Blob(chunks, { type: recorder.mimeType || "audio/webm" })); lastId = ""; sync(); schedule(); status("Nagranie zapisane przy tej aukcji. Mozesz je odsluchac lub przepisac przez AI."); }
+        if (!tooLarge && size) {
+          recordings.set(id, new Blob(chunks, { type: recorder.mimeType || "audio/webm" })); lastId = ""; sync(); schedule(); status("Nagranie zapisane przy tej aukcji.");
+          if (el("betaAutoAI").checked && aiAvailable && el("betaConsent").checked && activeProductId === id) void (async () => { if (await process(true)) await process(false); })();
+        }
         else { status("Nagranie puste lub za duze (maks. 8 MB). Poprzednie pozostalo bez zmian.", true); sync(); }
       };
-      recorder.start(1000); sync(); status("Nagrywam komentarz tej aukcji (maks. 2 minuty). Kliknij Zatrzymaj nagranie.");
+      recorder.start(1000); sync(); status("Nagrywam (maks. 2 minuty). Kliknij mikrofon ponownie, aby zatrzymac.");
     } catch { recording = false; stopTracks(); sync(); status("Brak dostepu do mikrofonu. Zezwol w przegladarce albo wpisz komentarz.", true); }
   };
-  el("betaStop").onclick = () => { if (recorder?.state === "recording") recorder.stop(); };
   el("betaDownloadAudio").onclick = () => { const blob = recordings.get(activeProductId); if (!blob) return; const url = URL.createObjectURL(blob), link = document.createElement("a"); link.href = url; link.download = `beta-komentarz-${activeProductId}.${blob.type.includes("mp4") ? "mp4" : blob.type.includes("ogg") ? "ogg" : "webm"}`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); };
   async function ai(path, body, type) {
     if (!el("betaConsent").checked) throw new Error("Najpierw zaznacz zgode na wyslanie wybranego komentarza do AI.");
@@ -105,13 +94,14 @@
         const blob = recordings.get(product.id); if (!blob) throw new Error("Brak nagrania tej aukcji.");
         const form = new FormData(); form.set("audio", blob, "komentarz.webm");
         const data = await ai("transcribe", form);
-        if (product.betaComment && !confirm("Zastapic obecny komentarz transkrypcja nagrania?")) { status("Komentarz pozostawiono bez zmian."); return; }
+        if (product.betaComment && !confirm("Zastapic obecny komentarz transkrypcja nagrania?")) { status("Komentarz pozostawiono bez zmian."); return false; }
         product.betaComment = data.text; el("betaComment").value = data.text; status("Przepisano nagranie. Sprawdz szczegolnie numer czesci, potem kliknij AI: przygotuj pola."); schedule();
       } else {
         const data = await ai("suggest", JSON.stringify({ comment: el("betaComment").value }), "application/json");
         proposal = { id: product.id, values: data.proposal }; showProposal(); status("Sprawdz propozycje i zaznacz pola do uzupelnienia. AI nie sprawdza kompatybilnosci ani cen na Allegro.");
       }
-    } catch (error) { status(error.name === "AbortError" ? "Anulowano oczekiwanie. Pola pozostaly bez zmian." : error.message, true); }
+      return true;
+    } catch (error) { status(error.name === "AbortError" ? "Anulowano oczekiwanie. Pola pozostaly bez zmian." : error.message, true); return false; }
     finally { pending = false; controller = null; sync(); }
   }
   el("betaTranscribe").onclick = () => void process(true);
@@ -204,6 +194,26 @@
       names.add(file.name);
     }
   }, true);
+  qrControl = window.BetaQR.mount({
+    state, previewName: () => previewPhotoName, allowed: writable, blocked: () => recording || pending,
+    changed: schedule, busyChanged: sync,
+    beforeScan() { if (activeProductId) saveActiveProductDraft(); },
+    create(groups) {
+      if (!writable()) return;
+      if (activeProductId) saveActiveProductDraft();
+      const settings = getFormProduct("defaults");
+      const common = {};
+      for (const key of ["shippingRateId", "shippingRateName", "returnPolicyId", "returnPolicyName", "impliedWarrantyId", "impliedWarrantyName", "warrantyId", "warrantyName", "selectedVehicleId", "descriptionVehicleFull", "marketedBeforeGPSRObligation"]) common[key] = settings[key];
+      const products = groups.map((names, index) => ({ ...common, id: crypto.randomUUID(), title: `Czesc ${state.products.length + index + 1}`, enteredPartNumber: "", price: "", stock: 1, stockUnit: "UNIT", categoryId: "", category: "", parameterValues: {}, catalogProduct: null, catalogLinkRequested: false,
+        photoNames: [...names], descriptionText: "{{TYTUL}}\n\nCzesc uzywana. Stan do sprawdzenia.\n\n{{AUTO}}", descriptionFullLayout: true, betaComment: "" }));
+      state.products.push(...products); renderProducts(); editProduct(products[0].id); schedule();
+      document.getElementById("productList").scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  });
+  const originalSnapshot = sessionSnapshot, originalRestore = restoreSessionPayload;
+  sessionSnapshot = function () { return { ...originalSnapshot(), betaSeparators: qrControl.snapshot() }; };
+  restoreSessionPayload = async function (payload) { await originalRestore(payload); qrControl.restore(payload.betaSeparators); };
+  window.BetaSession.snapshot = sessionSnapshot; window.BetaSession.restore = restoreSessionPayload;
   window.BetaWorkflow = { save };
   void window.getWystawiaczToken().then(token => fetch("/api/beta/status", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" })).then(async response => {
     if (!response.ok) throw new Error("status");

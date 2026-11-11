@@ -11,11 +11,16 @@
 
 ## Zdjecia i aukcje
 
-1. Wskaz folder zdjec. Nazwy plikow musza byc unikalne. Plik o innej zawartosci/metadanych nie moze po cichu zastapic zdjecia tej samej nazwy.
-2. Nowy zestaw -> zaznacz zdjecia jednej czesci -> Utworz aukcje z zaznaczonych zdjec.
-3. Przelaczaj zestawy przyciskami z numerem, nazwa i licznikiem zdjec. Formularz i komentarz sa zapisywane przy zmianie aukcji.
-4. Poprawiaj zdjecia w wybranym zestawie jak w obecnym edytorze. Aby przeniesc zdjecie, odznacz je w starej aukcji i zapisz zmiane przed wybraniem w nowej. Oryginaly pozostaja w folderze.
-5. QR nie jest jeszcze obslugiwany. To kolejny etap po sprawdzeniu recznego podzialu.
+1. Pod zdjeciami nie ma drugiego panelu ani drugiej listy aukcji. W naglowku zdjec sa przyciski Utworz QR, Utworz aukcje AI i Dodaj separator recznie.
+2. Utworz QR otwiera kartke do druku lub pobrania PNG. Ten sam kod fotografuje sie przed kazda kolejna czescia. Obecny QR jest separatorem, nie kodem konkretnego auta.
+3. Wskaz folder zdjec. Nazwy plikow musza byc unikalne. Kolejnosc podzialu to naturalne sortowanie nazw plikow (1, 2, 10), a nie data skopiowania pliku ani EXIF.
+4. Brak zdjecia QR: ustaw podglad na pierwszym zdjeciu kolejnej czesci i kliknij Dodaj separator recznie. Znacznik jest wstawiany PRZED tym zdjeciem i mozna go usunac. Nie tworzy sztucznego pliku i nie usuwa zdjecia.
+5. Utworz aukcje AI skanuje CALY wskazany folder lokalnie po QR i recznych separatorach. Pomimo nazwy przycisku ten etap jest deterministyczny, nie uzywa platnego AI i nie wysyla zdjec. Rozpoznaje wylacznie dokladny kod WYSTAWIACZ:BETA:SEPARATOR:1; obce QR pozostaja zdjeciami, nie sa otwierane jako linki.
+6. Przed dopisaniem aukcji pokazujemy krotki modal z zakresami nazw i licznikami. Zatwierdzenie dopisuje grupy do zwyklej listy Wystawiacza. Nie ma drugiej listy przy komentarzu. Przelaczanie: Edytuj przy aukcji lub dotychczasowe przyciski poprzednia/nastepna.
+7. QR rozpoczyna nastepna grupe. Zdjecia przed pierwszym QR tez tworza grupe; puste grupy, powtorzone i koncowe QR sa pomijane. Zdjecia separatorow pozostaja w oryginalnym folderze/pamieci zrodlowej, ale nie sa przypisywane do aukcji.
+8. Skan jest anulowalny. Nieczytelny plik lub zmiana danych podczas skanu przerywa bez czesciowego dopisania aukcji. Maksymalnie 5000 zdjec/skan i 2000 aukcji/sesja. Niewyrazny QR moze zostac nierozpoznany: zawsze sprawdz zakresy i popraw reczny separator w razie potrzeby.
+9. Ponowne przetworzenie nie dubluje zdjec juz przypisanych. Mieszanka nowych i przypisanych zdjec w jednym zakresie zatrzymuje podzial do recznej poprawy. Nie przebudowujemy ani nie kasujemy istniejacych aukcji/komentarzy.
+10. Nowe grupy dostaja puste pola czesci oraz wspolne ustawienia dostawy/warunkow i wybrane auto. Nie kopiujemy ceny, numeru ani parametrow poprzedniej czesci. Oryginalne pliki sa nietkniete.
 
 ## Dane i odzyskiwanie
 
@@ -25,10 +30,12 @@
 - Pamiec przegladarki NIE jest zewnetrzna kopia zapasowa: wyczyszczenie danych witryny, tryb prywatny, quota lub awaria komputera moga ja usunac. Zachowaj folder zdjec, eksport JSON i pobrane nagrania. Bledy zapisu sa widoczne.
 - Eksport bety ma format `wystawiacz-beta-session` i rozszerzenie `.wystawiacz-beta.json`. Stabilny edytor go odrzuca, aby nie zastapic produkcyjnej pracy. JSON zawiera teksty i nazwy plikow, ale nie binarne audio/zdjecia. Nagrania mozna pobrac osobno.
 - Pliki audio nie sa automatycznie usuwane po skasowaniu aukcji; pozostaja w lokalnej bazie bety. Nie ma jeszcze archiwum wielu sesji bety ani synchronizacji miedzy komputerami.
+- Reczne separatory sa zapisywane w `betaSeparators` w lokalnej sesji i eksporcie JSON. Kontrolki zapisu/przywracania sa w dotychczasowej sekcji sesji.
 
 ## Komentarz i AI
 
-- Nagranie jest przypisane do konkretnego ID aukcji, maks. 2 minuty / 8 MB. Podczas nagrywania/przetwarzania blokujemy przelaczanie i operacje przyciskami. Odmowa dostepu do mikrofonu pozostawia mozliwosc wpisania tekstu.
+- Pod zdjeciami jest male pole komentarza z jednym przyciskiem mikrofonu: kliknij, aby nagrac, kliknij ponownie, aby zatrzymac. Nagranie jest przypisane do konkretnego ID aukcji, maks. 2 minuty / 8 MB. Podczas nagrywania/przetwarzania blokujemy przelaczanie i operacje przyciskami. Odmowa mikrofonu pozostawia mozliwosc wpisania tekstu.
+- Odtwarzanie, pobieranie, zgoda i przyciski AI sa schowane pod AI i nagranie. Opcja Po nagraniu przepisz komentarz i przygotuj pola AI uruchamia oba kroki po zatrzymaniu, tylko przy wlaczonym AI i zaznaczonej zgodzie. Wynik nadal wymaga przegladu/zatwierdzenia pol.
 - Aby wlaczyc zdalna transkrypcje i propozycje, ustaw serwerowe BETA_AI_ENABLED=true oraz OPENAI_API_KEY. Klucz pozostaje sekretem, nigdy w publicznych assetach. Nie wlaczamy platnych wywolan automatycznie przy wdrozeniu.
 - Domyslne modele: gpt-4o-mini-transcribe (audio), gpt-4.1-mini (ustrukturyzowany tekst). Modele i dostepnosc trzeba okresowo weryfikowac. Wywolania API moga byc platne.
 - Przed wyslaniem trzeba zaznaczyc zgode w UI. Wysylamy tylko wybrane audio lub komentarz, nigdy zdjecia, profil klienta ani cala sesje. Backend sprawdza admina, zawieszenie konta i Origin.
@@ -47,5 +54,7 @@ Dokumentacja implementacji OpenAI:
 `scripts/test-beta-api.mjs`: uprawnienia, kill switch, CSRF, limity, schema i brak operacji na Allegro. Wywolania dostawcy sa atrapami.
 
 `scripts/test-beta-browser.mjs`: pelny edytor, podzial zdjec, komentarze/nagrania na ID, blokady, propozycje AI, odzyskanie IndexedDB i izolacja stabilnego zapisu. Mikrofon i AI sa atrapami; fizyczny mikrofon wymaga proby u uzytkownika.
+
+`scripts/test-beta-qr.mjs`: prawdziwy generator/dekoder QR, obrocone zdjecia JPEG, obce QR, kolejnosc nazw, reczne separatory, powtarzanie bez duplikatow, blad obrazu i anulowanie. Biblioteki sa przypiete i serwowane z vendor; bez CDN i zmian zaleznosci projektu.
 
 Przed szerszym udostepnieniem: reczny test mikrofonu, test rzeczywistego OpenAI na koncie z budzetem, zgody/informacje o przetwarzaniu danych, niezalezny przeglad i osobne srodowisko staging. Nie wlaczac publikacji w tej becie.
