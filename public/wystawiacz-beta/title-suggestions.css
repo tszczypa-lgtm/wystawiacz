@@ -1,0 +1,23 @@
+.title-suggestions { margin: -4px 0 18px; padding: 12px; border: 1px solid #d8dce3; border-radius: 10px; background: #f7f8fa; font-size: 13px; }
+.title-suggestions p { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.title-source { display: grid; gap: 7px; margin-top: 12px; }
+.title-candidate { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.title-candidate button { flex: 1; padding: 10px; border: 1px solid #d8dce3; border-radius: 8px; background: white; color: var(--ink); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.title-candidate button:hover, .title-candidate button:focus-visible { border-color: var(--orange); }
+.title-candidate a { font-size: 12px; color: var(--orange-dark); white-space: nowrap; }
+.title-candidate .title-choice { flex: 0 0 100%; width: 100%; min-width: 0; box-sizing: border-box; }
+.photo-controls { flex-wrap: wrap; }
+.title-modes { display: grid; gap: 8px; margin: 12px 0; }
+.title-modes label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.title-modes input { width: auto; accent-color: var(--orange); }
+.title-editor-options { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 12px; margin: -5px 0 8px; }
+.title-editor-options label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.title-editor-options input { width: auto; accent-color: var(--orange); }
+.title-editor-options output { font-weight: 700; }
+.title-invalid { color: #b42318; }
+.title-valid { color: #16875f; }
+.title-editor-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+.title-uppercase-label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.title-uppercase-label input { width: auto; accent-color: var(--orange); }
+.title-candidate .title-add { flex: 0 0 34px; width: 34px; height: 34px; padding: 0; box-sizing: border-box; font-size: 22px; text-align: center; color: var(--orange-dark); }
+#titleSuggestionStatus:empty { display: none; }

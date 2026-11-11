@@ -1,0 +1,21 @@
+.beta-banner, .beta-workflow { border: 2px solid #ff8a3d; background: #fff7ed; border-radius: 12px; padding: 16px; margin: 12px 0; color: #17202a; }
+.beta-banner { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.beta-workflow h2 { margin: 0 0 8px; font-size: 19px; }
+.beta-actions, .beta-batches { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
+.beta-workflow button, .beta-banner button, .beta-banner a { border: 1px solid #cbd5e1; padding: 8px 10px; border-radius: 8px; background: white; color: #17202a; cursor: pointer; font: inherit; font-size: 13px; }
+.beta-workflow button[aria-pressed="true"] { border-color: #ff5a00; background: #ffedd5; font-weight: 700; }
+.beta-workflow button:disabled { cursor: not-allowed; opacity: .5; }
+.beta-workflow textarea { display: block; width: 100%; min-height: 85px; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: white; margin: 8px 0; }
+.beta-workflow small, .beta-storage-note { display: block; font-size: 12px; line-height: 1.6; }
+.beta-workflow audio { display: block; max-width: 100%; margin: 8px 0; }
+.beta-consent { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 1.5; margin: 12px 0; }
+.beta-consent input { flex: 0 0 auto; width: auto; margin-top: 3px; }
+.beta-proposal { border: 1px solid #e2b478; background: white; border-radius: 10px; padding: 12px; }
+.beta-proposal label { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0; font-size: 13px; overflow-wrap: anywhere; }
+.beta-proposal input { width: auto; flex: 0 0 auto; }
+.beta-status { font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+.beta-status.error { color: #a22010; font-weight: 600; }
+.beta-batches { max-height: 150px; overflow-y: auto; }
+.beta-batches button { max-width: 100%; overflow-wrap: anywhere; }
+.beta-workflow [hidden] { display: none !important; }
+#connectButton, #disconnectButton { display: none !important; }

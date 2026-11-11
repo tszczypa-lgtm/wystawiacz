@@ -6,12 +6,14 @@ import { handleAccountApi, protectAllegroRequest, type AccountEnv } from "../lib
 import { runWithConnectorBinding } from "../lib/connector-context";
 import type { ConnectorBinding } from "../lib/connector-contract.mjs";
 import { deliverOrderMail, type OrderMailEnv } from "../lib/order-mail";
+import { handleBetaApi, type BetaEnv } from "../lib/beta-api";
 
 export default {
   async scheduled(_event: ScheduledController, env: Cloudflare.Env, ctx: ExecutionContext) {
     ctx.waitUntil(deliverOrderMail(env as OrderMailEnv));
   },
   async fetch(request: Request, env: Cloudflare.Env, ctx: ExecutionContext<{ CONNECTORS?: ConnectorBinding }>) {
+    if (new URL(request.url).pathname.startsWith("/api/beta/")) return handleBetaApi(request, env as BetaEnv);
     if (new URL(request.url).pathname.startsWith("/api/account/tpay/")) {
       const response = await handleTpayApi(request, env as TpayEnv);
       if (new URL(request.url).pathname.endsWith("/webhook") && request.method === "POST" && response.ok) ctx.waitUntil(deliverOrderMail(env as OrderMailEnv));
