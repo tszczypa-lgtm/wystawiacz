@@ -2416,7 +2416,7 @@ function editProduct(id) {
       productList.scrollTo({ top: productList.scrollTop + cardBounds.top - top, behavior: "instant" });
     }
   }
-  document.querySelector(".photos-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  (window.BetaMode === "standard" ? summaryCard : document.querySelector(".photos-card"))?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function navigateProduct(direction) {

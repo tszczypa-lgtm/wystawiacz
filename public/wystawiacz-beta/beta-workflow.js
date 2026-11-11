@@ -9,6 +9,24 @@
   storage.innerHTML = '<button id="betaSave" type="button">Zapisz bete lokalnie</button><button id="betaRestore" type="button" hidden>Przywroc zapis bety</button><small id="betaStorageStatus" class="beta-status" role="status"></small>';
   document.querySelector(".session-actions").append(storage);
   const el = id => document.getElementById(id);
+  const modeSwitch = document.createElement("div"); modeSwitch.className = "beta-mode-switch"; modeSwitch.setAttribute("role", "group"); modeSwitch.setAttribute("aria-label", "Tryb pracy");
+  modeSwitch.innerHTML = '<span>Tryb pracy</span><button id="betaModeStandard" type="button" aria-pressed="true">Standardowy</button><button id="betaModeAI" type="button" aria-pressed="false">AI / separatory</button><button id="betaModeApp" type="button" disabled title="Import z aplikacji telefonu nie jest jeszcze dostepny">Z aplikacji - wkrotce</button>';
+  document.querySelector(".photos-card .card-heading").before(modeSwitch);
+  window.BetaMode = "standard";
+  try { if (window.BetaStorage.getItem("workflow-mode") === "ai") window.BetaMode = "ai"; } catch { /* The editor can still work without saved preferences. */ }
+  function applyMode() {
+    document.body.dataset.betaMode = window.BetaMode;
+    panel.hidden = window.BetaMode !== "ai";
+    document.querySelector(".beta-qr-tools")?.toggleAttribute("hidden", window.BetaMode !== "ai");
+    el("betaModeStandard").setAttribute("aria-pressed", String(window.BetaMode === "standard"));
+    el("betaModeAI").setAttribute("aria-pressed", String(window.BetaMode === "ai"));
+  }
+  for (const [id, mode] of [["betaModeStandard", "standard"], ["betaModeAI", "ai"]]) el(id).onclick = () => {
+    if (recording || pending || qrControl?.busy) return;
+    window.BetaMode = mode;
+    try { window.BetaStorage.setItem("workflow-mode", mode); } catch { /* Keep the selected mode for this tab. */ }
+    applyMode(); sync();
+  };
   const aiStatus = document.createElement("small"); aiStatus.id = "betaAIStatus"; aiStatus.textContent = "Sprawdzam konfiguracje AI..."; el("betaConsent").closest("label").before(aiStatus);
   const recordings = new Map(), persistedPhotos = new Map(), persistedAudio = new Map();
   let db, existing, ready = false, saving = false, dirty = false, timer, recording = false, pending = false, recorder, stream, audioUrl = "", lastId = "", controller, proposal = null, aiAvailable = false, qrControl;
@@ -34,6 +52,7 @@
     el("betaSuggest").disabled = !aiAvailable || !product || !el("betaComment").value.trim() || recording || pending;
     el("betaDownloadAudio").disabled = !product || !recordings.has(activeProductId);
     el("betaCancelAI").disabled = !pending;
+    el("betaModeStandard").disabled = el("betaModeAI").disabled = recording || pending || Boolean(qrControl?.busy);
     qrControl?.refresh();
     document.querySelectorAll("#publishCurrentButton,#publishSelectedProducts,[data-publish-product-id]").forEach(button => { button.disabled = true; button.title = "Publikacja w becie jest zablokowana"; });
   }
@@ -54,6 +73,7 @@
   function clearProposal() { proposal = null; el("betaProposal").replaceChildren(); el("betaProposal").hidden = true; }
   function stopTracks() { stream?.getTracks().forEach(track => track.stop()); stream = null; }
   el("betaRecord").onclick = async () => {
+    if (window.BetaMode !== "ai") return;
     if (recording) { if (recorder?.state === "recording") recorder.stop(); return; }
     const product = current(); if (!product || !writable()) return;
     if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { status("Ta przegladarka nie obsluguje nagrywania. Mozesz wpisac komentarz tekstowy.", true); return; }
@@ -86,6 +106,7 @@
     const data = await response.json(); if (!response.ok) throw new Error(data.message || "Blad AI."); return data;
   }
   async function process(transcribe) {
+    if (window.BetaMode !== "ai") return;
     const product = current(); if (!product || !writable()) return;
     pending = true; controller = new AbortController(); sync(); clearProposal();
     status(transcribe ? "Przepisuje wybrane nagranie..." : "AI przygotowuje propozycje. Pola nie zostana nadpisane bez zatwierdzenia.");
@@ -214,6 +235,7 @@
       state.products.push(...products); renderProducts(); editProduct(products[0].id); schedule();
     }
   });
+  applyMode();
   const originalSnapshot = sessionSnapshot, originalRestore = restoreSessionPayload;
   sessionSnapshot = function () { return { ...originalSnapshot(), betaSeparators: qrControl.snapshot() }; };
   restoreSessionPayload = async function (payload) { await originalRestore(payload); qrControl.restore(payload.betaSeparators); };

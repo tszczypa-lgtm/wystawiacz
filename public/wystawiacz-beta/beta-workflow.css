@@ -1,4 +1,12 @@
 .beta-workflow { border-top: 1px solid #dce1e8; padding-top: 10px; margin-top: 12px; color: #17202a; }
+.beta-mode-switch { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-bottom: 12px; font-size: 12px; }
+.beta-mode-switch > span { margin-right: 5px; color: #667085; }
+.beta-mode-switch button { border: 1px solid #cbd5e1; border-radius: 8px; padding: 7px 9px; background: white; color: #17202a; font: inherit; cursor: pointer; }
+.beta-mode-switch #betaModeStandard[aria-pressed="true"] { border-color: #ff5a00; background: #fff1e5; }
+.beta-mode-switch #betaModeAI { color: #6d28d9; border-color: #c4b5fd; }
+.beta-mode-switch #betaModeAI[aria-pressed="true"] { background: #6d28d9; color: white; border-color: #6d28d9; }
+.beta-mode-switch button:disabled { opacity: .5; cursor: not-allowed; }
+.beta-workflow[hidden], .beta-qr-tools[hidden] { display: none !important; }
 .beta-actions, .beta-qr-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0; }
 .beta-workflow button, .beta-qr-tools button, .beta-session-tools button, #betaQrDialog button, #betaSplitDialog button { border: 1px solid #cbd5e1; padding: 7px 9px; border-radius: 8px; background: white; color: #17202a; cursor: pointer; font: inherit; font-size: 12px; }
 .beta-workflow button[aria-pressed="true"], .beta-qr-tools button[aria-pressed="true"] { border-color: #ff5a00; background: #fff1e5; }
@@ -36,6 +44,21 @@
 #betaSplitPreview { max-height: 36vh; overflow: auto; font-size: 13px; padding-left: 28px; }
 #betaSplitPreview li { padding: 5px 0; overflow-wrap: anywhere; }
 #connectButton, #disconnectButton { display: none !important; }
+body[data-beta-mode="ai"] .beta-qr-tools button,
+body[data-beta-mode="ai"] .beta-workflow button,
+body[data-beta-mode="ai"] #betaQrDialog button,
+body[data-beta-mode="ai"] #betaSplitDialog button { color: #6d28d9; border-color: #c4b5fd; background: #f5f3ff; }
+body[data-beta-mode="ai"] .beta-qr-tools #betaSplitAI,
+body[data-beta-mode="ai"] .beta-workflow button[aria-pressed="true"],
+body[data-beta-mode="ai"] .beta-qr-tools button[aria-pressed="true"] { background: #6d28d9; border-color: #6d28d9; color: white; }
+body[data-beta-mode="ai"] .beta-workflow { border-color: #c4b5fd; }
+body[data-beta-mode="ai"] .beta-comment-row textarea { border-color: #c4b5fd; background: #faf8ff; }
+body[data-beta-mode="ai"] .beta-workflow summary,
+body[data-beta-mode="ai"] #betaCurrent { color: #6d28d9; }
+body[data-beta-mode="ai"] .beta-workflow input[type="checkbox"] { accent-color: #6d28d9; }
+body[data-beta-mode="ai"] .beta-proposal { border-color: #c4b5fd; background: #f5f3ff; }
+body[data-beta-mode="ai"] .photo-choice.beta-boundary-photo { border-color: #7c3aed; }
+body[data-beta-mode="ai"] .beta-separator-badge { background: #6d28d9; }
 @media print {
   body > * { display: none !important; }
   body > #betaQrDialog[open] { display: block !important; position: static; width: 100%; max-width: none; max-height: none; border: 0; background: white; color: black; overflow: visible; }

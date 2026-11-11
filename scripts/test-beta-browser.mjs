@@ -46,6 +46,13 @@ try {
   });
   await page.goto(`http://127.0.0.1:${server.address().port}/#owner=00000000-0000-0000-0000-000000000001`);
   await page.getByText(/Beta gotowa/).waitFor();
+  assert.equal(await page.locator("#betaModeStandard").getAttribute("aria-pressed"), "true", "First visit defaults to standard workflow");
+  assert.equal(await page.locator(".beta-qr-tools").isVisible(), false);
+  assert.equal(await page.locator(".beta-workflow").isVisible(), false);
+  assert.equal(await page.locator("#betaModeApp").isDisabled(), true, "Phone app import is not presented as a working feature");
+  await page.locator("#betaModeAI").click();
+  assert.equal(await page.locator(".beta-qr-tools").isVisible(), true);
+  assert.equal(await page.locator("#betaSplitAI").evaluate(button => getComputedStyle(button).backgroundColor), "rgb(109, 40, 217)");
   await page.evaluate(async () => {
     const canvas = document.createElement("canvas"); canvas.width = 40; canvas.height = 40;
     const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
@@ -91,6 +98,7 @@ try {
   await page.locator("#betaComment").fill("Pierwsza czesc - pompa");
   await page.locator("#betaRecord").click();
   await page.waitForFunction(() => document.querySelector("#betaRecord").getAttribute("aria-pressed") === "true" && !document.querySelector("#betaRecord").disabled);
+  assert.equal(await page.locator("#betaModeStandard").isDisabled(), true, "Cannot hide an ongoing recording by switching mode");
   await page.locator("#productList .edit-button").nth(1).click();
   assert.equal(await page.evaluate(() => activeProductId), await page.evaluate(() => state.products[0].id), "Cannot switch parts while recording");
   await page.locator("#betaRecord").click();
@@ -99,6 +107,10 @@ try {
   await page.evaluate(() => { togglePhoto("a.png"); });
   assert.deepEqual(await page.evaluate(() => state.selectedPhotoNames), ["c.png", "d.png"], "Photo already assigned to another part cannot be selected accidentally");
   await page.locator("#betaComment").fill("Druga czesc");
+  await page.locator("#betaModeStandard").click();
+  assert.equal(await page.locator(".beta-workflow").isVisible(), false);
+  assert.equal(await page.evaluate(() => state.products[1].betaComment), "Druga czesc", "Switching mode does not clear comments or auctions");
+  await page.locator("#betaModeAI").click();
   assert.equal(await page.evaluate(() => state.products.length), 2);
   await page.locator("#productList .edit-button").first().click();
   await page.locator("#betaAIDetails").evaluate(details => { details.open = true; });
@@ -130,6 +142,7 @@ try {
   await page.evaluate(() => BetaWorkflow.save());
   await page.getByText(/Zapisano bete lokalnie/).waitFor();
   await page.reload(); await page.locator("#betaRestore").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#betaModeAI").getAttribute("aria-pressed"), "true", "Workflow choice survives reload");
   assert.equal(await page.evaluate(() => state.products.length), 0, "Old local save is never overwritten by blank startup");
   await page.locator("#betaRestore").click();
   await page.getByText(/Przywrocono bete wraz/).waitFor();

@@ -11,7 +11,7 @@
 
 ## Zdjecia i aukcje
 
-1. Pod zdjeciami nie ma drugiego panelu ani drugiej listy aukcji. W naglowku zdjec sa przyciski Utworz QR, Utworz aukcje AI i Dodaj separator recznie.
+1. Nad zdjeciami jest kompaktowy wybor Standardowy / AI-separatory, zapamietywany lokalnie osobno dla wlasciciela. Domyslnie Standardowy: narzedzia AI/QR i komentarz sa ukryte. AI/separatory pokazuje je w kolorze fioletowym. Przelaczenie nie kasuje danych i jest blokowane podczas nagrywania/przetwarzania. Import Z aplikacji jest wylaczony i oznaczony jako wkrotce. Nadal jest to beta bez publikacji; do realnego wystawiania sluzy Stabilny Wystawiacz.
 2. Utworz QR otwiera kartke do druku lub pobrania PNG. Ten sam kod fotografuje sie przed kazda kolejna czescia. Obecny QR jest separatorem, nie kodem konkretnego auta.
 3. Wskaz folder zdjec. Nazwy plikow musza byc unikalne. Kolejnosc podzialu to naturalne sortowanie nazw plikow (1, 2, 10), a nie data skopiowania pliku ani EXIF.
 4. Brak zdjecia QR: ustaw podglad na pierwszym zdjeciu kolejnej czesci i kliknij Wstaw zdjecie separatora. Powstaje lokalny obraz PNG z QR, widoczny PRZED tym zdjeciem w miniaturach i duzym podgladzie. Usun separator usuwa tylko wygenerowany obraz, nie oryginal. Bez dodatkowego komunikatu. Obraz nie trafia do galerii aukcji i nie jest zapisywany do folderu na dysku.
