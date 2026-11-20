@@ -7,12 +7,14 @@ import { runWithConnectorBinding } from "../lib/connector-context";
 import type { ConnectorBinding } from "../lib/connector-contract.mjs";
 import { deliverOrderMail, type OrderMailEnv } from "../lib/order-mail";
 import { handleBetaApi, type BetaEnv } from "../lib/beta-api";
+import { handleOvokoApi } from "../lib/ovoko-api";
 
 export default {
   async scheduled(_event: ScheduledController, env: Cloudflare.Env, ctx: ExecutionContext) {
     ctx.waitUntil(deliverOrderMail(env as OrderMailEnv));
   },
   async fetch(request: Request, env: Cloudflare.Env, ctx: ExecutionContext<{ CONNECTORS?: ConnectorBinding }>) {
+    if (new URL(request.url).pathname.startsWith("/api/ovoko/")) return handleOvokoApi(request, env as AccountEnv);
     if (new URL(request.url).pathname.startsWith("/api/beta/")) return handleBetaApi(request, env as BetaEnv);
     if (new URL(request.url).pathname.startsWith("/api/account/tpay/")) {
       const response = await handleTpayApi(request, env as TpayEnv);
