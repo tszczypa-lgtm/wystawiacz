@@ -3,7 +3,7 @@ export class OvokoError extends Error {
 }
 export type OvokoReadOperation = "models" | "categories" | "statuses" | "qualities" | "parts";
 export type OvokoReadRow = { id: string; name: string; brand?: string; years?: string; level?: string; parentId?: string; carId?: string; categoryId?: string; manufacturerCode?: string; externalId?: string; price?: string; status?: string; quality?: string };
-export type OvokoReadResult = { ok: true; code: "R200"; readOnly: true; credentialsStored: false; checkedAt: string; operation: OvokoReadOperation; rows: OvokoReadRow[]; pagination?: { page: number; limit: number; total: number } };
+export type OvokoReadResult = { ok: true; code: "R200"; readOnly: true; credentialsStored: boolean; checkedAt: string; operation: OvokoReadOperation; rows: OvokoReadRow[]; pagination?: { page: number; limit: number; total: number } };
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 const invalid = () => new OvokoError(502, "Nieprawidlowy lub niepelny format danych Ovoko. Nie potwierdzono odczytu; nie zmieniono ofert.");
 function id(value: unknown) {

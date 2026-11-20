@@ -19,6 +19,8 @@ const originalFetch = globalThis.fetch;
 let admin = true, suspended = false, user = 1, mode = "ok";
 let expectedPath = "/get/car_brands", fixtureResult = null;
 const calls = [], dbCalls = [];
+const savedConnections = new Map();
+let failStorage = false;
 const owner = () => `00000000-0000-0000-0000-${String(user).padStart(12, "0")}`;
 const env = { SUPABASE_SERVICE_ROLE_KEY: "db-fixture" };
 const credentials = { username: "fixture-user", password: "private-password&+", user_token: "private-token" };
@@ -28,6 +30,21 @@ globalThis.fetch = async (input, options = {}) => {
   if (url.pathname === "/auth/v1/user") return Response.json({ id: owner(), email_confirmed_at: new Date().toISOString() });
   if (url.pathname.includes("customer_accounts")) { dbCalls.push(options.method || "GET"); return Response.json([{ owner_id: owner(), suspended, company: {} }]); }
   if (url.pathname.includes("account_admins")) return Response.json(admin ? [{ owner_id: owner() }] : []);
+  if (url.pathname === "/rest/v1/ovoko_connections") {
+    if (failStorage) return new Response("private-storage-error", { status: 503 });
+    const method = options.method || "GET";
+    if (method === "POST") {
+      const row = JSON.parse(options.body); assert.equal(row.owner_id, owner());
+      assert.ok(!options.body.includes("private-")); assert.ok(!options.body.includes(credentials.username));
+      assert.deepEqual(Object.keys(row).sort(), ["owner_id", "sealed", "updated_at", "verified_at"]);
+      savedConnections.set(owner(), row); return new Response(null, { status: 204 });
+    }
+    assert.equal(url.searchParams.get("owner_id"), `eq.${owner()}`, "All reads/deletes scoped to authenticated owner, not request input");
+    if (method === "DELETE") { savedConnections.delete(owner()); return new Response(null, { status: 204 }); }
+    assert.equal(method, "GET");
+    const row = savedConnections.get(owner()), select = url.searchParams.get("select");
+    return Response.json(row ? [{ [select]: row[select] }] : []);
+  }
   assert.equal(url.href, `https://api.rrr.lt${expectedPath}`, "Only the selected allowlisted read is permitted");
   calls.push({ url, options });
   assert.equal(options.method, "POST"); assert.equal(options.redirect, "manual");
@@ -106,6 +123,44 @@ try {
   ]) assert.throws(() => parseOvokoRead(operation, result, "wrong-brand"), /format danych/);
   user++; expectedPath = readCases[4].path; fixtureResult = { data: [], pagination: { page: 1, limit: 20, total_count: 9 } };
   assert.equal((await handleOvokoApi(req("/read", { body: { ...credentials, operation: "parts" } }), env)).status, 502, "Malformed data never returns a successful preview");
+  const secureEnv = { ...env, ALLEGRO_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64") };
+  user++; mode = "ok"; expectedPath = "/get/car_brands"; fixtureResult = null;
+  const statusRequest = () => req("/status", { init: { method: "GET", body: undefined } });
+  assert.equal((await (await handleOvokoApi(statusRequest(), secureEnv)).json()).connected, false);
+  assert.equal((await handleOvokoApi(req("/connect"), env)).status, 503, "No unencrypted fallback");
+  let response = await handleOvokoApi(req("/connect"), secureEnv); assert.equal(response.status, 200);
+  let payload = await response.text(); assert.ok(!payload.includes("private-") && !payload.includes(credentials.username));
+  const firstOwner = user, original = savedConnections.get(owner()), originalCipher = original.sealed;
+  assert.equal((await (await handleOvokoApi(statusRequest(), secureEnv)).json()).connected, true);
+  response = await handleOvokoApi(req("/test", { body: { useSaved: true, owner_id: "someone-else" } }), secureEnv);
+  assert.equal(response.status, 200); assert.equal((await response.json()).credentialsStored, true);
+  mode = "R012";
+  assert.equal((await handleOvokoApi(req("/connect"), secureEnv)).status, 502);
+  assert.equal(savedConnections.get(owner()).sealed, originalCipher, "Failed verification cannot replace working connection");
+  user++; mode = "ok";
+  const beforeSaved = calls.length;
+  assert.equal((await handleOvokoApi(req("/test", { body: { useSaved: true } }), secureEnv)).status, 409, "Another owner cannot use existing secrets");
+  savedConnections.set(owner(), { ...original, owner_id: owner() });
+  response = await handleOvokoApi(req("/test", { body: { useSaved: true } }), secureEnv); assert.equal(response.status, 503, "Ciphertext is bound to owner by AES-GCM AAD");
+  assert.equal(calls.length, beforeSaved);
+  await handleOvokoApi(req("/disconnect", { body: {} }), secureEnv);
+  assert.ok(savedConnections.has(`00000000-0000-0000-0000-${String(firstOwner).padStart(12, "0")}`), "Disconnect does not delete another owner's connection");
+  user = firstOwner;
+  const beforeDisconnect = calls.length;
+  assert.equal((await handleOvokoApi(req("/disconnect", { body: {}, headers: { Origin: "https://evil.test" } }), secureEnv)).status, 403);
+  admin = false; assert.equal((await handleOvokoApi(req("/disconnect", { body: {} }), secureEnv)).status, 403); admin = true;
+  original.sealed = originalCipher.slice(0, -8) + "AAAAAAAA";
+  assert.equal((await handleOvokoApi(req("/test", { body: { useSaved: true } }), secureEnv)).status, 503, "Tampering fails closed");
+  assert.equal((await handleOvokoApi(req("/test", { body: { useSaved: true, ...credentials } }), secureEnv)).status, 400);
+  failStorage = true;
+  response = await handleOvokoApi(statusRequest(), secureEnv); assert.equal(response.status, 503); assert.ok(!(await response.text()).includes("private-"));
+  failStorage = false;
+  assert.equal((await handleOvokoApi(req("/disconnect", { body: {} }), secureEnv)).status, 200);
+  assert.equal((await (await handleOvokoApi(statusRequest(), secureEnv)).json()).connected, false);
+  assert.equal(calls.length, beforeDisconnect, "Disconnect and invalid ciphertext never call Ovoko");
+  const migration = readFileSync(path.join(root, "supabase/011_ovoko_connections.sql"), "utf8");
+  assert.match(migration, /enable row level security/); assert.match(migration, /revoke all.*public, anon, authenticated/);
+  assert.match(migration, /grant select, insert, update, delete.*service_role/);
   assert.ok(readFileSync(path.join(root, "build/sites-worker.ts"), "utf8").includes('pathname.startsWith("/api/ovoko/")'));
   console.log("Ovoko: guards, CSRF, bounds, redirects, auth errors, rate limit, read-only allowlist, five read contracts, empty inventory, invalid schemas, single page and field redaction passed. All network calls mocked.");
 } finally { globalThis.fetch = originalFetch; }

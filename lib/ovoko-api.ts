@@ -1,7 +1,8 @@
 import { accountContext, type AccountEnv } from "./account-api";
 import { OvokoError, ovokoReadPlan, parseOvokoRead } from "./ovoko-read";
+import { loadOvokoConnection, ovokoConnectionKey, ovokoConnectionStatus, removeOvokoConnection, saveOvokoConnection, validateOvokoCredentials, type OvokoKeyEnv } from "./ovoko-connection";
 
-type OvokoEnv = AccountEnv & { OVOKO_TEST_ENABLED?: string };
+type OvokoEnv = AccountEnv & OvokoKeyEnv & { OVOKO_TEST_ENABLED?: string };
 const attempts = new Map<string, number[]>();
 async function boundedText(input: Pick<Request, "body" | "headers">, limit: number) {
   if (Number(input.headers.get("Content-Length")) > limit) throw new OvokoError(413, "Odpowiedz lub formularz przekracza limit rozmiaru.");
@@ -33,8 +34,13 @@ export async function handleOvokoApi(request: Request, env: OvokoEnv): Promise<R
     const context = await accountContext(request, env);
     if (!context.isAdmin || context.account.suspended || env.OVOKO_TEST_ENABLED === "false") return reply({ message: "Test Ovoko jest dostepny tylko dla administratora i moze byc wylaczony." }, 403);
     const url = new URL(request.url);
-    if (url.pathname === "/api/ovoko/status" && request.method === "GET") return reply({ allowed: true, readOnly: true, credentialsStored: false });
-    if (!["/api/ovoko/test", "/api/ovoko/read"].includes(url.pathname)) return reply({ message: "Nieznana operacja Ovoko. Zapis ofert nie jest dostepny." }, 404);
+    if (url.pathname === "/api/ovoko/status" && request.method === "GET") {
+      let storageReady = false;
+      try { await ovokoConnectionKey(env); storageReady = true; } catch { /* Ephemeral probes still work without storage configuration. */ }
+      const status = storageReady ? await ovokoConnectionStatus(context) : { connected: false, verifiedAt: null };
+      return reply({ allowed: true, readOnly: true, storageReady, credentialsStored: status.connected, ...status });
+    }
+    if (!["/api/ovoko/test", "/api/ovoko/read", "/api/ovoko/connect", "/api/ovoko/disconnect"].includes(url.pathname)) return reply({ message: "Nieznana operacja Ovoko. Zapis ofert nie jest dostepny." }, 404);
     if (request.method !== "POST") return reply({ message: "Nieprawidlowa metoda." }, 405);
     if (request.headers.get("Origin") !== url.origin || (env.APP_ORIGIN && env.APP_ORIGIN !== url.origin)) return reply({ message: "Nieprawidlowe zrodlo zadania." }, 403);
     if (request.headers.get("Content-Type")?.split(";")[0].trim() !== "application/json") return reply({ message: "Nieprawidlowy format formularza." }, 415);
@@ -42,13 +48,17 @@ export async function handleOvokoApi(request: Request, env: OvokoEnv): Promise<R
     try { input = JSON.parse(await boundedText(request, 8192)); } catch (error) { if (error instanceof OvokoError) throw error; throw new OvokoError(400, "Nieprawidlowy formularz."); }
     if (!input || typeof input !== "object" || Array.isArray(input)) throw new OvokoError(400, "Nieprawidlowy formularz.");
     const values = input as Record<string, unknown>;
-    const plan = url.pathname === "/api/ovoko/read" ? ovokoReadPlan(values) : null;
-    const form = new URLSearchParams();
-    for (const [name, max] of [["username", 256], ["password", 1024], ["user_token", 2048]] as const) {
-      const value = values[name];
-      if (typeof value !== "string" || !value.trim() || value.length > max || /[\r\n\0]/.test(value)) throw new OvokoError(400, "Wypelnij login, haslo i token API. Nie podawaj linku z menedzera hasel.");
-      form.set(name, name === "password" ? value : value.trim());
+    if (url.pathname === "/api/ovoko/disconnect") {
+      await removeOvokoConnection(context);
+      return reply({ ok: true, connected: false, credentialsStored: false, readOnly: true });
     }
+    const connecting = url.pathname === "/api/ovoko/connect";
+    const useSaved = !connecting && values.useSaved === true;
+    const key = connecting || useSaved ? await ovokoConnectionKey(env) : null;
+    if (useSaved && ["username", "password", "user_token"].some(name => name in values)) throw new OvokoError(400, "Nie lacz danych formularza z zapisanym polaczeniem.");
+    const credentials = useSaved ? await loadOvokoConnection(context, key!) : validateOvokoCredentials(values);
+    const plan = url.pathname === "/api/ovoko/read" ? ovokoReadPlan(values) : null;
+    const form = new URLSearchParams(credentials);
     const now = Date.now(), recent = (attempts.get(context.user.id) || []).filter(time => now - time < 60000);
     if (recent.length >= 3) return reply({ message: "Maksymalnie 3 proby na minute. Odczekaj chwile." }, 429);
     if (attempts.size >= 1000 && !attempts.has(context.user.id)) attempts.delete(attempts.keys().next().value!);
@@ -67,9 +77,11 @@ export async function handleOvokoApi(request: Request, env: OvokoEnv): Promise<R
       const code = typeof result.status_code === "string" && /^R\d{3}$/.test(result.status_code) ? result.status_code : "unknown";
       return reply({ message: `${errors[code] || "Ovoko nie potwierdzilo poprawnego odczytu."} Kod: ${code}. Nie zmieniono ofert.`, code }, code === "R008" ? 429 : 502);
     }
-    if (plan) return reply({ ok: true, code: "R200", readOnly: true, credentialsStored: false, checkedAt: new Date().toISOString(), operation: plan.operation, ...parseOvokoRead(plan.operation, result, values.brandId) });
-    if (!Array.isArray(result.list) || result.list.length > 5000 || result.list.some(item => !item || typeof item !== "object" || !/^\d{1,12}$/.test(String(item.id)) || typeof item.name !== "string" || !item.name.trim() || item.name.length > 200)) throw new OvokoError(502, "Niepelna lista marek z Ovoko. Nie potwierdzono poprawnego odczytu.");
-    return reply({ ok: true, code: "R200", readOnly: true, credentialsStored: false, checkedAt: new Date().toISOString(), brands: result.list.map(item => ({ id: String(item.id), name: item.name })) });
+    const checkedAt = new Date().toISOString();
+    if (plan) return reply({ ok: true, code: "R200", readOnly: true, credentialsStored: useSaved, checkedAt, operation: plan.operation, ...parseOvokoRead(plan.operation, result, values.brandId) });
+    if (!Array.isArray(result.list) || !result.list.length || result.list.length > 5000 || result.list.some(item => !item || typeof item !== "object" || !/^\d{1,12}$/.test(String(item.id)) || typeof item.name !== "string" || !item.name.trim() || item.name.length > 200)) throw new OvokoError(502, "Niepelna lista marek z Ovoko. Nie potwierdzono poprawnego odczytu.");
+    if (connecting) await saveOvokoConnection(context, key!, credentials, checkedAt);
+    return reply({ ok: true, code: "R200", readOnly: true, credentialsStored: connecting || useSaved, connected: connecting || useSaved, checkedAt, brands: result.list.map(item => ({ id: String(item.id), name: item.name })) });
   } catch (error) {
     if (error instanceof OvokoError) return reply({ message: error.message }, error.status);
     if (error instanceof Error && "status" in error && error.status === 401) return reply({ message: "Zaloguj sie ponownie do Wystawiacza." }, 401);

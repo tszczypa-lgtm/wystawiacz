@@ -14,15 +14,26 @@ const owner = "00000000-0000-0000-0000-000000000001";
 const credentials = { username: "fixture", password: "private-password&+", user_token: "private-token" };
 let mode = 200, user = 0, probes = 0;
 let readCase = null;
+const saved = new Map();
 const mf = new Miniflare({
   modules: true, compatibilityDate: "2026-05-15", compatibilityFlags: ["nodejs_compat"],
   script: bundled.outputFiles[0].text,
-  bindings: { SUPABASE_SERVICE_ROLE_KEY: "fixture", NEXT_PUBLIC_SUPABASE_URL: "https://database.test" },
+  bindings: { SUPABASE_SERVICE_ROLE_KEY: "fixture", NEXT_PUBLIC_SUPABASE_URL: "https://database.test", ALLEGRO_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64") },
   // Intercept outbound traffic, not worker fetch(): Request construction uses real workerd semantics.
   outboundService: async request => {
     const url = new URL(request.url);
     const id = owner.slice(0, -3) + String(user).padStart(3, "0");
     if (url.hostname === "database.test") {
+      if (url.pathname === "/rest/v1/ovoko_connections") {
+        if (request.method === "POST") {
+          const row = await request.json(); assert.equal(row.owner_id, id); assert.ok(!JSON.stringify(row).includes("private-")); saved.set(id, row);
+          return new Response(null, { status: 204 });
+        }
+        assert.equal(url.searchParams.get("owner_id"), `eq.${id}`);
+        if (request.method === "DELETE") { saved.delete(id); return new Response(null, { status: 204 }); }
+        const row = saved.get(id), select = url.searchParams.get("select");
+        return Response.json(row ? [{ [select]: row[select] }] : []);
+      }
       assert.equal(request.method, "GET");
       if (url.pathname === "/auth/v1/user") return Response.json({ id, email_confirmed_at: "2026-11-20T00:00:00Z" });
       if (url.pathname === "/rest/v1/customer_accounts") return Response.json([{ owner_id: id, company: {}, suspended: false }]);
@@ -62,5 +73,14 @@ try {
     assert.ok(!JSON.stringify(result).includes("private-"));
     assert.equal(probes, before + 1);
   }
-  console.log("Ovoko workerd: real fetch completed; all five redirect types blocked without forwarding credentials. All outbound services mocked.");
+  user++; readCase = null;
+  const post = (path, body) => mf.dispatchFetch(`https://ovoko.test/api/ovoko/${path}`, { method: "POST", headers: { Authorization: "Bearer fixture", Origin: "https://ovoko.test", "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  assert.equal((await post("connect", credentials)).status, 200);
+  const stored = await post("test", { useSaved: true }); assert.equal(stored.status, 200);
+  assert.equal((await stored.json()).credentialsStored, true);
+  const beforeDisconnect = probes;
+  assert.equal((await post("disconnect", {})).status, 200);
+  assert.equal((await post("test", { useSaved: true })).status, 409);
+  assert.equal(probes, beforeDisconnect);
+  console.log("Ovoko workerd: real fetch, redirect blocking, read schemas, AES-GCM encrypted save/load/disconnect passed. All outbound services mocked.");
 } finally { await mf.dispose(); }
