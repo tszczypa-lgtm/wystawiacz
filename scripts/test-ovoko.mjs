@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { readCases } from "./ovoko-read-fixtures.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url)), native = createRequire(import.meta.url), cache = new Map();
 function load(file) {
@@ -16,6 +17,7 @@ function load(file) {
 const { handleOvokoApi } = load(path.join(root, "lib/ovoko-api.ts"));
 const originalFetch = globalThis.fetch;
 let admin = true, suspended = false, user = 1, mode = "ok";
+let expectedPath = "/get/car_brands", fixtureResult = null;
 const calls = [], dbCalls = [];
 const owner = () => `00000000-0000-0000-0000-${String(user).padStart(12, "0")}`;
 const env = { SUPABASE_SERVICE_ROLE_KEY: "db-fixture" };
@@ -26,11 +28,12 @@ globalThis.fetch = async (input, options = {}) => {
   if (url.pathname === "/auth/v1/user") return Response.json({ id: owner(), email_confirmed_at: new Date().toISOString() });
   if (url.pathname.includes("customer_accounts")) { dbCalls.push(options.method || "GET"); return Response.json([{ owner_id: owner(), suspended, company: {} }]); }
   if (url.pathname.includes("account_admins")) return Response.json(admin ? [{ owner_id: owner() }] : []);
-  assert.equal(url.href, "https://api.rrr.lt/get/car_brands", "Only the fixed dictionary read is permitted");
+  assert.equal(url.href, `https://api.rrr.lt${expectedPath}`, "Only the selected allowlisted read is permitted");
   calls.push({ url, options });
   assert.equal(options.method, "POST"); assert.equal(options.redirect, "manual");
   const form = new URLSearchParams(options.body);
   assert.deepEqual(Object.fromEntries(form), credentials, "Special characters and password are preserved in form encoding");
+  if (fixtureResult) return Response.json({ status_code: "R200", ...fixtureResult, password: credentials.password });
   if (mode === "timeout") throw new DOMException("private-password&+", "TimeoutError");
   if (mode === "network") throw new TypeError("private-password&+");
   if (mode === "http") return new Response("private-token", { status: 503 });
@@ -72,6 +75,37 @@ try {
   for (let i = 0; i < 3; i++) assert.equal((await handleOvokoApi(req(), env)).status, 200);
   const before = calls.length; assert.equal((await handleOvokoApi(req(), env)).status, 429); assert.equal(calls.length, before);
   assert.ok(dbCalls.every(method => method === "GET"), "Credentials and listings are never written to the database");
+  for (const fixture of readCases) {
+    user++; expectedPath = fixture.path; fixtureResult = fixture.result;
+    const before = calls.length;
+    const response = await handleOvokoApi(req("/read", { body: { ...credentials, operation: fixture.operation, ...(fixture.brandId ? { brandId: fixture.brandId } : {}), url: "https://evil.test", page: 999, limit: 100 } }), env);
+    assert.equal(response.status, 200, fixture.operation);
+    const body = await response.json();
+    assert.deepEqual(body.rows, fixture.rows); assert.equal(body.operation, fixture.operation);
+    assert.ok(!JSON.stringify(body).includes("private-"));
+    assert.equal(calls.length, before + 1, "Only one read per explicit request, no auto-pagination");
+    if (fixture.operation === "parts") assert.deepEqual(body.pagination, { page: 1, limit: 20, total: 1 });
+  }
+  for (const body of [{ operation: "deletePart" }, { operation: "https://evil.test" }, { operation: "models", brandId: "../crm/deletePart" }, { operation: "models", brandId: 120 }, { operation: "models", brandId: "" }]) {
+    user++; const before = calls.length;
+    assert.equal((await handleOvokoApi(req("/read", { body: { ...credentials, ...body } }), env)).status, 400);
+    assert.equal(calls.length, before);
+  }
+  admin = false; assert.equal((await handleOvokoApi(req("/read"), env)).status, 403); admin = true;
+  const { parseOvokoRead } = load(path.join(root, "lib/ovoko-read.ts"));
+  assert.deepEqual(parseOvokoRead("parts", { data: [], pagination: { page: 1, limit: 20, total_count: 0 } }), { rows: [], pagination: { page: 1, limit: 20, total: 0 } });
+  for (const [operation, result] of [
+    ["statuses", { list: [] }], ["statuses", { list: { unknown: { en: "Bad" } } }],
+    ["qualities", { list: { "0": null } }], ["categories", { list: [{ id: "1", parent_id: "0", level: "4", pl: "Bad" }] }],
+    ["models", readCases[0].result], ["categories", { list: [] }],
+    ["parts", { ...readCases[4].result, pagination: { pagination: { page: 1, limit: 20, total_count: 1 } } }],
+    ["parts", { data: [], pagination: { page: 1, limit: 20, total_count: 99 } }],
+    ["parts", { ...readCases[4].result, data: Array(21).fill(readCases[4].result.data[0]) }],
+    ["parts", { ...readCases[4].result, data: [{ ...readCases[4].result.data[0], price: "NaN" }] }],
+    ["parts", { ...readCases[4].result, data: [{ ...readCases[4].result.data[0], id: {} }] }],
+  ]) assert.throws(() => parseOvokoRead(operation, result, "wrong-brand"), /format danych/);
+  user++; expectedPath = readCases[4].path; fixtureResult = { data: [], pagination: { page: 1, limit: 20, total_count: 9 } };
+  assert.equal((await handleOvokoApi(req("/read", { body: { ...credentials, operation: "parts" } }), env)).status, 502, "Malformed data never returns a successful preview");
   assert.ok(readFileSync(path.join(root, "build/sites-worker.ts"), "utf8").includes('pathname.startsWith("/api/ovoko/")'));
-  console.log("Ovoko: admin/suspension/kill-switch guards, CSRF, bounded bodies, form encoding, fixed read-only endpoint, R200 validation, IP/auth errors, timeout, rate limit and secret redaction passed. All network calls mocked.");
+  console.log("Ovoko: guards, CSRF, bounds, redirects, auth errors, rate limit, read-only allowlist, five read contracts, empty inventory, invalid schemas, single page and field redaction passed. All network calls mocked.");
 } finally { globalThis.fetch = originalFetch; }
