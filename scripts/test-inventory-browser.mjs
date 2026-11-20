@@ -39,15 +39,18 @@ try {
   assert.equal(await page.locator('tbody input:checked').count(), 2);
   await page.getByRole("button", { name: "Nastepna", exact: true }).click();
   await page.getByText("Strona 2 z 2003", { exact: true }).waitFor();
+  await page.getByText("Allegro: 1234567941", { exact: true }).waitFor();
   assert.equal(await page.locator('tbody input:checked').count(), 0);
   await page.getByLabel("Numer strony").fill("2001"); await page.getByRole("button", { name: "Przejdz", exact: true }).click();
   await page.getByText("Strona 2001 z 2003", { exact: true }).waitFor();
+  await page.getByText("Allegro: 1234667891", { exact: true }).waitFor();
   assert.equal(requests.filter(req => req.url.pathname.endsWith("/inventory")).at(-1).url.searchParams.get("offset"), "100000");
   await page.getByLabel("Szukaj ofert", { exact: true }).fill("1234567");
   await page.getByLabel("Cennik wysylki Allegro").selectOption(shipping);
   await page.locator("select").filter({ has: page.locator('option[value="ENDED"]') }).selectOption("ENDED");
   await page.getByRole("button", { name: "Pokaz oferty" }).click();
   await page.getByText("Strona 1 z 2003", { exact: true }).waitFor();
+  await page.getByText("Allegro: 1234567891", { exact: true }).waitFor();
   assert.equal(requests.at(-1).url.searchParams.get("query"), "1234567");
   assert.equal(requests.at(-1).url.searchParams.get("shippingRate"), shipping);
   await page.getByRole("checkbox", { name: "Zaznacz widoczna strone" }).check();
