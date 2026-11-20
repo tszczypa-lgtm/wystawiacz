@@ -12,4 +12,4 @@
 
 Zrodlo: https://api.rrr.lt/docs/integration_guide.php - sekcje 2 i 3.
 
-Testy: `node scripts/test-ovoko.mjs` oraz `node scripts/test-ovoko-browser.mjs` (PLAYWRIGHT_MODULE wskazuje runtime). Dane i zewnetrzne zadania sa atrapami. Pierwszy test rzeczywistego konta wykonuje administrator w panelu.
+Testy: `node scripts/test-ovoko.mjs`, `node scripts/test-ovoko-worker.mjs` oraz `node scripts/test-ovoko-browser.mjs` (PLAYWRIGHT_MODULE wskazuje runtime). Dane i zewnetrzne zadania sa atrapami. Test worker uruchamia prawdziwy workerd: weryfikuje odczyt i blokade HTTP 301/302/303/307/308 bez przekazywania sekretow. Uzywamy redirect: manual, poniewaz Workers nie obsluguje redirect: error. Pierwszy test rzeczywistego konta wykonuje administrator w panelu.

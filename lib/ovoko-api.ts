@@ -55,7 +55,11 @@ export async function handleOvokoApi(request: Request, env: OvokoEnv): Promise<R
     if (attempts.size >= 1000 && !attempts.has(context.user.id)) attempts.delete(attempts.keys().next().value!);
     attempts.set(context.user.id, [...recent, now]);
     // Fixed read-only probe. Never accept caller-supplied URLs or forward redirects with credentials.
-    const response = await fetch("https://api.rrr.lt/get/car_brands", { method: "POST", redirect: "error", signal: AbortSignal.timeout(20000), headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" }, body: form.toString() });
+    const response = await fetch("https://api.rrr.lt/get/car_brands", { method: "POST", redirect: "manual", signal: AbortSignal.timeout(20000), headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" }, body: form.toString() });
+    if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel();
+      throw new OvokoError(502, "Ovoko zwrocilo przekierowanie. Zablokowano je, aby nie przekazac hasla i tokena pod inny adres. Nie zmieniono ofert.");
+    }
     if (!response.ok) return reply({ message: `Ovoko zwrocilo HTTP ${response.status}. Nie potwierdzono polaczenia; nie zmieniono ofert.` }, response.status === 429 ? 429 : 502);
     let result: { status_code?: unknown; list?: unknown };
     try { result = JSON.parse(await boundedText(response, 512000)); } catch { throw new OvokoError(502, "Niepelna lub nieprawidlowa odpowiedz Ovoko. Nie potwierdzono polaczenia."); }

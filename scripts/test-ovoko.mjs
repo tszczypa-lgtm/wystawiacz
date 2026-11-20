@@ -28,12 +28,13 @@ globalThis.fetch = async (input, options = {}) => {
   if (url.pathname.includes("account_admins")) return Response.json(admin ? [{ owner_id: owner() }] : []);
   assert.equal(url.href, "https://api.rrr.lt/get/car_brands", "Only the fixed dictionary read is permitted");
   calls.push({ url, options });
-  assert.equal(options.method, "POST"); assert.equal(options.redirect, "error");
+  assert.equal(options.method, "POST"); assert.equal(options.redirect, "manual");
   const form = new URLSearchParams(options.body);
   assert.deepEqual(Object.fromEntries(form), credentials, "Special characters and password are preserved in form encoding");
   if (mode === "timeout") throw new DOMException("private-password&+", "TimeoutError");
   if (mode === "network") throw new TypeError("private-password&+");
   if (mode === "http") return new Response("private-token", { status: 503 });
+  if (mode.startsWith("redirect")) return new Response("private-token", { status: Number(mode.slice(8)), headers: { Location: "https://evil.test/private-token" } });
   if (mode === "html") return new Response("private-token<html>");
   if (mode === "large") return new Response("x".repeat(512001));
   if (mode === "invalid") return Response.json({ status_code: "R200", list: [{ id: "1", name: null }] });
@@ -60,7 +61,7 @@ try {
   assert.deepEqual(data.brands, [{ id: "120", name: "AC" }, { id: "121", name: "Audi" }]);
   assert.equal(data.readOnly, true); assert.equal(data.credentialsStored, false);
   assert.ok(!JSON.stringify(data).includes("private-"));
-  for (const failure of ["R001", "R002", "R003", "R008", "R012", "R013", "R202", "R500", "invalid", "missing", "html", "http", "large", "timeout", "network"]) {
+  for (const failure of ["R001", "R002", "R003", "R008", "R012", "R013", "R202", "R500", "invalid", "missing", "html", "http", "large", "timeout", "network", "redirect301", "redirect302", "redirect303", "redirect307", "redirect308"]) {
     user++; mode = failure;
     const response = await handleOvokoApi(req(), env);
     assert.ok(response.status >= 400, `${failure} is not a false successful connection`);
