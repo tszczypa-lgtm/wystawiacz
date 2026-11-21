@@ -25,6 +25,7 @@ let deleted = false;
 let remoteCalls = [];
 let tokenCalls = [];
 let imageStatus = 200;
+let callbackFailure = "";
 globalThis.fetch = async (url, options = {}) => {
   url = String(url);
   const headers = new Headers(options.headers);
@@ -35,6 +36,7 @@ globalThis.fetch = async (url, options = {}) => {
   if (url.includes("/rest/v1/allegro_connections")) {
     assert.equal(headers.get("apikey"), "server-only");
     if (options.method === "POST") {
+      if (callbackFailure === "save") return Response.json({ message: "private-database-error" }, { status: 500 });
       const value = JSON.parse(options.body);
       assert.equal(value.owner_id, owner);
       saved = value.sealed;
@@ -46,14 +48,18 @@ globalThis.fetch = async (url, options = {}) => {
   }
   if (url.includes("/auth/oauth/token")) {
     tokenCalls.push({ headers, form: new URLSearchParams(options.body) });
+    if (callbackFailure === "network") throw new Error("private-network-error");
+    if (callbackFailure.startsWith("token:")) return Response.json({ error: callbackFailure.slice(6), error_description: "private-provider-error" }, { status: 400 });
+    if (callbackFailure === "bad-token") return Response.json({ access_token: "private-incomplete-token" });
     return Response.json({ access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600 });
   }
+  if (url.includes("/rest/v1/rpc/claim_allegro_seller")) return callbackFailure === "binding-db" ? Response.json({ message: "private-binding-error" }, { status: 503 }) : Response.json(false);
   assert.ok(url.startsWith("https://api.allegro.pl/") || url.startsWith("https://upload.allegro.pl/"));
   assert.ok(headers.get("Authorization").startsWith("Bearer "));
   assert.notEqual(headers.get("Authorization"), "Bearer user-session");
   remoteCalls.push({ url, options });
   if (url.startsWith("https://upload.allegro.pl/") && imageStatus !== 200) return Response.json({ errors: [{ userMessage: "Za duzo zapytan" }] }, { status: imageStatus, headers: { "Retry-After": "60" } });
-  if (url.endsWith("/me")) return Response.json({ id: "seller" });
+  if (url.endsWith("/me")) return callbackFailure === "seller-read" ? Response.json({ message: "private-seller-error" }, { status: 500 }) : Response.json({ id: callbackFailure.startsWith("binding") ? "123" : "seller" });
   if (url.endsWith("/sale/categories/123")) return Response.json({ id: "123", name: "Parts", parent: null });
   return Response.json({ ok: true, id: "test-offer" });
 };
@@ -100,7 +106,7 @@ try {
   const pending = await openConnection(decodeURIComponent(cookieHeader.split("=")[1]), key, "allegro-oauth");
   const expectedChallenge = Buffer.from(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(pending.verifier))).toString("base64url");
   assert.equal(authorize.searchParams.get("code_challenge"), expectedChallenge);
-  const callback = (state, cookieValue = cookieHeader, extra = "") => handleAllegroApi(new Request(`${env.ALLEGRO_REDIRECT_URI}?code=authorization-code&state=${state}${extra}`, { headers: { Cookie: cookieValue } }), env);
+  const callback = (state, cookieValue = cookieHeader, extra = "", callbackEnv = env) => handleAllegroApi(new Request(`${env.ALLEGRO_REDIRECT_URI}?code=authorization-code&state=${state}${extra}`, { headers: { Cookie: cookieValue } }), callbackEnv);
   const before = tokenCalls.length;
   assert.equal((await callback("wrong-state")).status, 400);
   assert.equal((await callback(pending.state, "")).status, 400);
@@ -119,6 +125,28 @@ try {
   assert.equal(exchange.headers.get("Authorization"), null);
   assert.equal((await openConnection(saved, key, owner)).accessToken, "new-access");
   assert.equal((await openConnection(saved, key, owner)).clientSecret, "");
+  const expectFailure = async (response, code) => {
+    assert.equal(response.status, 400);
+    const html = await response.text(); assert.ok(html.includes(`code:"${code}"`), code);
+    for (const secret of ["private-", "authorization-code", pending.verifier, "new-access", "new-refresh", "shared-server-secret"]) assert.ok(!html.includes(secret), "Callback must never expose secrets or raw provider errors");
+    assert.ok(response.headers.get("Set-Cookie").includes("Max-Age=0"));
+  };
+  const oldSaved = saved, callsBeforeSession = tokenCalls.length;
+  await expectFailure(await callback("wrong-state"), "oauth_session_invalid");
+  await expectFailure(await callback(pending.state, ""), "oauth_cookie_missing");
+  await expectFailure(await callback(pending.state, "__Host-wystawiacz-oauth=invalid"), "oauth_cookie_invalid");
+  await expectFailure(await callback(pending.state, invalidCookie), "oauth_session_invalid");
+  await expectFailure(await callback(pending.state, cookieHeader, "&error=access_denied"), "oauth_denied");
+  await expectFailure(await callback(pending.state, cookieHeader, "", { ...env, ALLEGRO_REDIRECT_URI: "https://other.test/callback" }), "oauth_configuration");
+  await expectFailure(await callback(pending.state, cookieHeader, "", { ...env, SUPABASE_SERVICE_ROLE_KEY: "" }), "oauth_database_config");
+  await expectFailure(await callback(pending.state, cookieHeader, "", { ...env, ALLEGRO_ENCRYPTION_KEY: "bad" }), "oauth_encryption");
+  assert.equal(tokenCalls.length, callsBeforeSession, "Invalid sessions/config never contact OAuth provider");
+  for (const [mode, code] of [["network", "oauth_token_unavailable"], ["token:invalid_grant", "oauth_invalid_grant"], ["token:invalid_client", "oauth_invalid_client"], ["token:unauthorized_client", "oauth_invalid_client"], ["token:invalid_request", "oauth_invalid_request"], ["token:private-unknown", "oauth_token_rejected"], ["bad-token", "oauth_token_response"], ["seller-read", "oauth_seller_read"], ["binding-db", "oauth_seller_binding"], ["binding-rejected", "seller_not_allowed"], ["save", "oauth_connection_save"]]) {
+    callbackFailure = mode;
+    await expectFailure(await callback(pending.state, cookieHeader, "", { ...env, ALLEGRO_PAIRING_ENFORCED: ["seller-read", "binding-db", "binding-rejected"].includes(mode) ? "true" : "false" }), code);
+    assert.equal(saved, oldSaved, "Every failed callback preserves the prior connection");
+  }
+  callbackFailure = "";
   assert.equal((await post("/auth/logout", {})).status, 200);
   assert.ok(deleted);
   assert.ok(remoteCalls.some(call => call.url.includes("seller.id=seller")));
@@ -128,6 +156,11 @@ try {
   globalThis.fetch = async () => Response.json({ error: "invalid JWT" }, { status: 401 });
   assert.equal((await handleAllegroApi(request("/health"), env)).status, 401);
 } finally { globalThis.fetch = originalFetch; }
+
+if (process.argv.includes("--oauth-only")) {
+  console.log("Allegro OAuth: PKCE success, encrypted state, diagnostic stages, rejection redaction, cookie expiry, failed-callback connection preservation and API guards passed. All external calls mocked.");
+  process.exit(0);
+}
 
 const html = await readFile(new URL("../public/wystawiacz/index.html", import.meta.url), "utf8");
 const app = await readFile(new URL("../public/wystawiacz/app.js", import.meta.url), "utf8");

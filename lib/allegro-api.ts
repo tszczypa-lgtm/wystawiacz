@@ -131,39 +131,59 @@ function appConfig(env: Env, origin: string) {
 }
 function callbackPage(origin: string, ok: boolean, code = "") {
   const nonce = crypto.randomUUID();
-  const message = ok ? "Konto Allegro połączone. Możesz wrócić do Wystawiacza." : code === "seller_not_allowed" ? "To konto Allegro nie jest dozwolone dla tej firmy. Administrator musi zatwierdzic drugie konto lub zmiane. Dotychczasowe polaczenie pozostalo bez zmian." : "Nie udało się połączyć konta Allegro lub zgoda została anulowana. Wróć do Wystawiacza i spróbuj ponownie.";
+  const message = ok ? "Konto Allegro połączone. Możesz wrócić do Wystawiacza." : code === "seller_not_allowed" ? "To konto Allegro nie jest dozwolone dla tej firmy. Administrator musi zatwierdzic drugie konto lub zmiane. Dotychczasowe polaczenie pozostalo bez zmian." : `Nie potwierdzono polaczenia konta Allegro. Kod diagnostyczny: ${code}. Odswiez status polaczenia. Nie zmieniono ofert.`;
   return new Response(`<!doctype html><html lang="pl"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Połączenie Allegro</title><body><h1>${message}</h1><a href="/panel">Wróć do Wystawiacza</a><script nonce="${nonce}">if(window.opener){window.opener.postMessage({type:"wystawiacz-allegro-complete",ok:${ok},code:${JSON.stringify(code)}},${JSON.stringify(origin)});}window.close();</script></body></html>`, { status: ok ? 200 : 400, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "Set-Cookie": cookie("", 0), "Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'` } });
 }
 
 async function completeOAuth(request: Request, env: Env) {
   const url = new URL(request.url);
-  let failureCode = "";
+  let failureCode = "oauth_configuration";
   try {
     const config = appConfig(env, url.origin);
+    failureCode = "oauth_database_config";
     if (!env.SUPABASE_SERVICE_ROLE_KEY) throw new Error("Missing database configuration");
+    failureCode = "oauth_cookie_missing";
     const encoded = request.headers.get("Cookie")?.split(";").map(part => part.trim()).find(part => part.startsWith(`${oauthCookieName}=`))?.slice(oauthCookieName.length + 1);
     if (!encoded) throw new Error("Missing OAuth cookie");
+    failureCode = "oauth_encryption";
     const key = await encryptionKey(env);
+    failureCode = "oauth_cookie_invalid";
     const pending = await openConnection<OAuthCookie>(decodeURIComponent(encoded), key, "allegro-oauth");
-    if (!pending.owner || pending.expiresAt <= Date.now() || pending.state !== url.searchParams.get("state") || pending.clientId !== config.clientId || pending.redirectUri !== config.redirectUri || url.searchParams.has("error")) throw new Error("Invalid OAuth state");
+    failureCode = "oauth_session_invalid";
+    if (!pending.owner || pending.expiresAt <= Date.now() || pending.state !== url.searchParams.get("state") || pending.clientId !== config.clientId || pending.redirectUri !== config.redirectUri) throw new Error("Invalid OAuth state");
+    if (url.searchParams.has("error")) { failureCode = "oauth_denied"; throw new Error("Authorization denied"); }
+    failureCode = "oauth_code_missing";
     const code = url.searchParams.get("code");
     if (!code) throw new Error("Missing authorization code");
+    failureCode = "oauth_token_unavailable";
     // Allegro requires client_id + verifier, not Basic authentication, for PKCE.
-    const response = await fetch(`${oauthBase}/token`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "authorization_code", client_id: config.clientId, code, redirect_uri: config.redirectUri, code_verifier: pending.verifier }) });
-    if (!response.ok) throw new Error("Token exchange rejected");
+    const response = await fetch(`${oauthBase}/token`, { method: "POST", redirect: "manual", signal: AbortSignal.timeout(15000), headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "authorization_code", client_id: config.clientId, code, redirect_uri: config.redirectUri, code_verifier: pending.verifier }) });
+    if (!response.ok) {
+      failureCode = "oauth_token_rejected";
+      const rejection = await response.json().catch(() => null) as { error?: unknown } | null;
+      if (rejection?.error === "invalid_grant") failureCode = "oauth_invalid_grant";
+      if (rejection?.error === "invalid_client" || rejection?.error === "unauthorized_client") failureCode = "oauth_invalid_client";
+      if (rejection?.error === "invalid_request") failureCode = "oauth_invalid_request";
+      throw new Error("Token exchange rejected");
+    }
+    failureCode = "oauth_token_response";
     const tokens = await response.json() as RemotePayload;
     if (!tokens.access_token || !tokens.refresh_token || !Number.isFinite(tokens.expires_in)) throw new Error("Invalid token response");
+    failureCode = "oauth_encryption";
     const sealed = await sealConnection({ clientId: config.clientId, clientSecret: "", accessToken: tokens.access_token, refreshToken: tokens.refresh_token, expiresAt: Date.now() + (tokens.expires_in - 60) * 1000 }, key, pending.owner);
     const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL || "https://wgshalvkjfefavnbccil.supabase.co";
     if (env.ALLEGRO_PAIRING_ENFORCED === "true") {
+      failureCode = "oauth_seller_read";
       const sellerResponse = await fetch(`${apiBase}/me`, { headers: { Authorization: `Bearer ${tokens.access_token}`, Accept: accept } });
       if (!sellerResponse.ok) throw new Error("Seller verification failed");
       const seller = await sellerResponse.json() as { id: string };
       if (!/^\d+$/.test(seller.id)) throw new Error("Invalid seller");
+      failureCode = "oauth_seller_binding";
       const claim = await fetch(`${supabaseUrl}/rest/v1/rpc/claim_allegro_seller`, { method: "POST", headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ p_owner: pending.owner, p_seller: seller.id }) });
       if (!claim.ok) throw new Error("Binding database unavailable");
       if (await claim.json() !== true) { failureCode = "seller_not_allowed"; throw new Error("Seller not permitted"); }
     }
+    failureCode = "oauth_connection_save";
     const saved = await fetch(`${supabaseUrl}/rest/v1/allegro_connections?on_conflict=owner_id`, { method: "POST", headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates" }, body: JSON.stringify({ owner_id: pending.owner, sealed, updated_at: new Date().toISOString() }) });
     if (!saved.ok) throw new Error("Connection save failed");
     return callbackPage(url.origin, true);

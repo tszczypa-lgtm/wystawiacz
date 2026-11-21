@@ -11,8 +11,9 @@ const browser = await chromium.launch({ headless: true, channel: process.env.PLA
 try {
   const context = await browser.newContext();
   let connected = false, invalidUrl = false;
+  let holdStart = false, releaseStart, startArrived;
   const calls = [];
-  await context.route("**/*", route => {
+  await context.route("**/*", async route => {
     const request = route.request(), url = new URL(request.url());
     if (url.origin === "https://allegro.pl") return route.fulfill({ contentType: "text/html", body: "<title>Mock Allegro login</title>" });
     assert.equal(url.origin, "https://connection.test");
@@ -20,6 +21,7 @@ try {
       calls.push({ path: url.pathname, method: request.method() });
       if (url.pathname === "/api/allegro/me") return route.fulfill({ status: connected ? 200 : 409, json: connected ? { id: "123", login: "Testowy sprzedawca" } : { message: "Najpierw polacz konto Allegro." } });
       assert.equal(url.pathname, "/api/allegro/auth/start"); assert.equal(request.method(), "POST");
+      if (holdStart) await new Promise(resolve => { releaseStart = resolve; startArrived(); });
       return route.fulfill({ json: { url: invalidUrl ? "https://unsafe.test/auth" : "https://allegro.pl/auth/oauth/authorize?client_id=fixture" } });
     }
     if (url.pathname === "/fixture.js") return route.fulfill({ contentType: "text/javascript", body: bundle.outputFiles[0].text });
@@ -33,6 +35,7 @@ try {
   await page.getByRole("button", { name: "Polacz z Allegro", exact: true }).click();
   const popup = await popupPromise;
   await popup.waitForURL("https://allegro.pl/auth/oauth/authorize?client_id=fixture");
+  assert.equal(await page.getByRole("button", { name: "Otwieram Allegro..." }).isDisabled(), true, "Do not start a second login before the first finishes");
   await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { origin: location.origin, source: window, data: { type: "wystawiacz-allegro-complete", ok: true } })));
   assert.equal(calls.filter(call => call.path.endsWith("/me")).length, 1, "Unrelated windows cannot complete OAuth");
   await popup.goto("https://connection.test/callback");
@@ -40,6 +43,10 @@ try {
   assert.equal(await page.getByText(/Zablokowano przypisanie konta Allegro/).count(), 0, "Foreign origins cannot inject a binding failure");
   await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { origin: location.origin, source: window.fixturePopup, data: { type: "wystawiacz-allegro-complete", ok: false, code: "seller_not_allowed", message: "private-provider-error" } })));
   await page.getByText(/Kod: seller_not_allowed/).waitFor();
+  for (const code of ["oauth_configuration", "oauth_database_config", "oauth_cookie_missing", "oauth_encryption", "oauth_cookie_invalid", "oauth_session_invalid", "oauth_denied", "oauth_code_missing", "oauth_token_unavailable", "oauth_token_rejected", "oauth_invalid_grant", "oauth_invalid_client", "oauth_invalid_request", "oauth_token_response", "oauth_seller_read", "oauth_seller_binding", "oauth_connection_save"]) {
+    await page.evaluate(code => window.dispatchEvent(new MessageEvent("message", { origin: location.origin, source: window.fixturePopup, data: { type: "wystawiacz-allegro-complete", ok: false, code } })), code);
+    await page.getByText(new RegExp(`Kod: ${code}\\.`)).waitFor();
+  }
   assert.equal(calls.filter(call => call.path.endsWith("/me")).length, 1, "Binding rejection never reloads or reconnects automatically");
   assert.equal(await page.getByText("private-provider-error").count(), 0);
   await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { origin: location.origin, source: window.fixturePopup, data: { type: "wystawiacz-allegro-complete", ok: false, code: "private-unknown-code" } })));
@@ -49,6 +56,22 @@ try {
   await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { origin: location.origin, source: window.fixturePopup, data: { type: "wystawiacz-allegro-complete", ok: true } })));
   await page.getByText("Testowy sprzedawca", { exact: true }).waitFor();
   await popup.close();
+  const closePopupPromise = page.waitForEvent("popup");
+  await page.getByRole("button", { name: "Polacz ponownie z Allegro" }).click();
+  const closing = await closePopupPromise; await closing.waitForURL("https://allegro.pl/auth/oauth/authorize?client_id=fixture");
+  assert.equal(await page.getByRole("button", { name: "Otwieram Allegro..." }).isDisabled(), true);
+  await closing.close();
+  await page.getByText(/Okno logowania zostalo zamkniete bez potwierdzenia/).waitFor();
+  assert.equal(await page.getByRole("button", { name: "Polacz ponownie z Allegro" }).isEnabled(), true, "Closing the popup releases the button without changing connections");
+  holdStart = true;
+  const arrived = new Promise(resolve => { startArrived = resolve; });
+  const earlyPopupPromise = page.waitForEvent("popup");
+  await page.getByRole("button", { name: "Polacz ponownie z Allegro" }).click();
+  const early = await earlyPopupPromise; await arrived; await early.close();
+  await page.waitForTimeout(700);
+  assert.equal(await page.getByRole("button", { name: "Otwieram Allegro..." }).isDisabled(), true, "Pending auth/start must finish before another session can overwrite its cookie");
+  holdStart = false; releaseStart();
+  await page.getByText(/Okno logowania zamknieto przed rozpoczeciem/).waitFor();
   invalidUrl = true;
   await page.getByRole("button", { name: "Polacz ponownie z Allegro" }).click();
   await page.getByText("Nieprawidlowy adres logowania Allegro.").waitFor();
