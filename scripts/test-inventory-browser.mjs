@@ -23,6 +23,7 @@ try {
     const req = route.request(), url = new URL(req.url());
     if (!url.pathname.startsWith("/api/")) return route.fulfill({ contentType: "text/html", body: '<html><body style="background:#0d1117;color:white"><main id="root" style="max-width:1100px;margin:auto"></main></body></html>' });
     requests.push({ url, method: req.method() }); assert.equal(req.method(), "GET");
+    if (url.pathname === "/api/account/me") return route.fulfill({ json: { isAdmin: true } });
     if (url.pathname.endsWith("/shipping-rates")) return route.fulfill({ json: { shippingRates: [{ id: shipping, name: "Maly kurier" }] } });
     if (fail) return route.fulfill({ status: 502, json: { message: "Blad odczytu Allegro" } });
     const offset = Number(url.searchParams.get("offset")), limit = Number(url.searchParams.get("limit"));
@@ -34,6 +35,7 @@ try {
   await page.addScriptTag({ content: bundle.outputFiles[0].text });
   await page.getByText(/ofert wedlug/).waitFor();
   assert.equal(await page.locator("tbody tr").count(), 2);
+  assert.equal(await page.getByRole("link", { name: "Przygotuj do Ovoko" }).first().getAttribute("href"), "/panel/inventory/prepare-ovoko?offerId=1234567891");
   assert.equal(await page.getByText("Maly kurier", { exact: true }).count(), 3);
   await page.getByRole("checkbox", { name: "Zaznacz widoczna strone" }).check();
   assert.equal(await page.locator('tbody input:checked').count(), 2);

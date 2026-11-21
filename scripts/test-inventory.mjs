@@ -13,7 +13,7 @@ const connections = await Promise.all(owners.map((id, index) => sealConnection({
 const shipping = "2991e29e-5fbc-46f5-963a-65c326ba65c2";
 const request = (query = "", method = "GET", index = 0) => new Request(`https://example.test/api/allegro/inventory${query}`, { method, headers: { Authorization: `Bearer user-${index}` } });
 const originalFetch = globalThis.fetch;
-let calls = [], status = 200, malformed = false;
+let calls = [], status = 200, malformed = false, detailMode = false;
 globalThis.fetch = async (address, options = {}) => {
   const url = new URL(address), headers = new Headers(options.headers);
   const auth = headers.get("Authorization");
@@ -27,6 +27,11 @@ globalThis.fetch = async (address, options = {}) => {
     assert.ok(index >= 0); return Response.json([{ sealed: connections[index] }]);
   }
   assert.equal(url.origin, "https://api.allegro.pl");
+  if (detailMode && url.pathname.startsWith("/sale/product-offers/")) {
+    const ownedId = auth === "Bearer seller-0" ? "1234567890" : "2234567890";
+    assert.equal(url.pathname, `/sale/product-offers/${ownedId}`); assert.equal(options.method || "GET", "GET");
+    calls.push({ url, auth }); return Response.json({ id: ownedId, name: "Owned source preview" });
+  }
   assert.equal(url.pathname, "/sale/offers");
   assert.equal(options.method || "GET", "GET", "No seller mutations allowed");
   calls.push({ url, auth });
@@ -59,6 +64,13 @@ try {
   status = 500; assert.equal((await handleAllegroApi(request(), env)).status, 502);
   status = 200; malformed = true;
   const failure = await handleAllegroApi(request(), env); assert.equal(failure.status, 502); assert.ok(!(await failure.json()).offers, "Malformed responses are errors, never an empty successful inventory");
+  malformed = false; detailMode = true;
+  const sourceRequest = (id, index = 0) => new Request(`https://example.test/api/allegro/own-offers/${id}`, { headers: { Authorization: `Bearer user-${index}` } });
+  assert.equal((await (await handleAllegroApi(sourceRequest("1234567890"), env)).json()).id, "1234567890");
+  const detailsBefore = calls.filter(call => call.url.pathname.startsWith("/sale/product-offers/")).length;
+  assert.equal((await handleAllegroApi(sourceRequest("1234567890", 1), env)).status, 404, "Foreign seller's detail cannot be used as a preparation source");
+  assert.equal(calls.filter(call => call.url.pathname.startsWith("/sale/product-offers/")).length, detailsBefore, "Detail is never fetched when ownership check fails");
+  assert.equal((await (await handleAllegroApi(sourceRequest("2234567890", 1), env)).json()).id, "2234567890");
   assert.equal(inventoryQuery(new URLSearchParams("shippingRate=none")).remote.get("delivery.shippingRates.id.empty"), "true");
   console.log("Inventory API: seller isolation, read-only methods, bounded pagination beyond 100k, strict filters, shipping IDs, no-store and failure handling passed. No live requests.");
 } finally { globalThis.fetch = originalFetch; }

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { allegroRequest } from "@/lib/allegro-client";
+import { accountRequest, type AccountInfo } from "@/lib/account-client";
 
 type Offer = { id: string; name: string; image: string; externalId: string; status: string; stock: number | null; shippingRateId: string | null; price: { amount: string; currency: string } | null };
 type Inventory = { offers: Offer[]; totalCount: number; count: number; limit: number; offset: number; fetchedAt: string };
@@ -12,6 +13,8 @@ const field = "min-w-0 w-full rounded-lg border border-white/20 bg-[#0d1117] px-
 const button = "rounded-lg border border-white/20 px-3 py-2 text-sm font-bold hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40";
 
 export function InventoryPanel() {
+  const [ovokoPreviewAllowed, setOvokoPreviewAllowed] = useState(false);
+  useEffect(() => { let mounted = true; void accountRequest<AccountInfo>("/me").then(info => { if (mounted) setOvokoPreviewAllowed(info.isAdmin); }).catch(() => {}); return () => { mounted = false; }; }, []);
   const [draft, setDraft] = useState(initial);
   const [filters, setFilters] = useState(initial);
   const [offset, setOffset] = useState(0);
@@ -79,7 +82,7 @@ export function InventoryPanel() {
           <thead className="bg-white/5 text-white/70"><tr><th className="p-3"><input type="checkbox" aria-label="Zaznacz widoczna strone" disabled={!result.offers.length} checked={!!result.offers.length && selected.size === result.offers.length} onChange={event => setSelected(event.target.checked ? new Set(result.offers.map(offer => offer.id)) : new Set())} /></th><th className="p-3">Oferta</th><th className="p-3">Cena</th><th className="p-3">Szt.</th><th className="p-3">Status</th><th className="p-3">Cennik wysylki</th></tr></thead>
           <tbody>{result.offers.map((offer, index) => <tr key={offer.id} className={`border-t border-white/10 ${selected.has(offer.id) ? "bg-orange-500/10" : ""}`}>
             <td className="p-3 align-top"><label className="flex flex-col items-center gap-2"><span className="text-xs text-white/50">{offset + index + 1}</span><input type="checkbox" aria-label={`Zaznacz oferte ${offer.id}`} checked={selected.has(offer.id)} onChange={event => toggle(offer.id, event.target.checked)} /></label></td>
-            <td className="p-3 align-top"><div className="flex gap-3">{offer.image ? <img src={offer.image} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-16 w-16 shrink-0 rounded-lg bg-white/5 object-contain" /> : <span className="grid h-16 w-16 shrink-0 place-items-center rounded-lg bg-white/5 text-xs text-white/45">Brak zdjecia</span>}<div className="min-w-0 max-w-sm"><a href={`https://allegro.pl/oferta/${offer.id}`} target="_blank" rel="noopener noreferrer" className="font-bold text-white hover:text-[#ff8a3d]">{offer.name || "Oferta bez tytulu"}</a><p className="mt-1 text-xs text-white/50">Allegro: {offer.id}</p>{offer.externalId && <p className="mt-1 break-all text-xs text-white/50">ID zewnetrzne: {offer.externalId}</p>}</div></div></td>
+            <td className="p-3 align-top"><div className="flex gap-3">{offer.image ? <img src={offer.image} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-16 w-16 shrink-0 rounded-lg bg-white/5 object-contain" /> : <span className="grid h-16 w-16 shrink-0 place-items-center rounded-lg bg-white/5 text-xs text-white/45">Brak zdjecia</span>}<div className="min-w-0 max-w-sm"><a href={`https://allegro.pl/oferta/${offer.id}`} target="_blank" rel="noopener noreferrer" className="font-bold text-white hover:text-[#ff8a3d]">{offer.name || "Oferta bez tytulu"}</a><p className="mt-1 text-xs text-white/50">Allegro: {offer.id}</p>{offer.externalId && <p className="mt-1 break-all text-xs text-white/50">ID zewnetrzne: {offer.externalId}</p>}{ovokoPreviewAllowed && <a className="mt-2 inline-block rounded-lg border border-orange-400/40 px-2 py-1 text-xs font-bold text-orange-300" href={`/panel/inventory/prepare-ovoko?offerId=${offer.id}`}>Przygotuj do Ovoko</a>}</div></div></td>
             <td className="whitespace-nowrap p-3 align-top font-bold">{offer.price ? `${Number(offer.price.amount).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${offer.price.currency}` : "Brak danych"}</td>
             <td className="p-3 align-top">{offer.stock ?? "Brak danych"}</td><td className="p-3 align-top"><span className={offer.status === "ACTIVE" ? "text-emerald-300" : "text-white/60"}>{statuses[offer.status] || offer.status}</span></td><td className="max-w-48 break-words p-3 align-top text-white/75">{rateName(offer.shippingRateId)}</td>
           </tr>)}</tbody>
