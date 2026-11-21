@@ -43,7 +43,7 @@ try {
   assert.equal(await page.getByText(/Zablokowano przypisanie konta Allegro/).count(), 0, "Foreign origins cannot inject a binding failure");
   await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { origin: location.origin, source: window.fixturePopup, data: { type: "wystawiacz-allegro-complete", ok: false, code: "seller_not_allowed", message: "private-provider-error" } })));
   await page.getByText(/Kod: seller_not_allowed/).waitFor();
-  for (const code of ["oauth_configuration", "oauth_database_config", "oauth_cookie_missing", "oauth_encryption", "oauth_cookie_invalid", "oauth_session_invalid", "oauth_denied", "oauth_code_missing", "oauth_token_unavailable", "oauth_token_rejected", "oauth_invalid_grant", "oauth_invalid_client", "oauth_invalid_request", "oauth_token_response", "oauth_seller_read", "oauth_seller_binding", "oauth_connection_save"]) {
+  for (const code of ["oauth_configuration", "oauth_database_config", "oauth_cookie_missing", "oauth_encryption", "oauth_cookie_invalid", "oauth_session_invalid", "oauth_denied", "oauth_code_missing", "oauth_token_unavailable", "oauth_token_rejected", "oauth_invalid_grant", "oauth_invalid_client", "oauth_invalid_request", "oauth_token_response", "oauth_seller_read", "oauth_seller_binding", "oauth_admin_check", "oauth_admin_audit", "oauth_connection_save"]) {
     await page.evaluate(code => window.dispatchEvent(new MessageEvent("message", { origin: location.origin, source: window.fixturePopup, data: { type: "wystawiacz-allegro-complete", ok: false, code } })), code);
     await page.getByText(new RegExp(`Kod: ${code}\\.`)).waitFor();
   }

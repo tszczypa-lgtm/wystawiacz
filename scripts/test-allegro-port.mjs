@@ -33,6 +33,7 @@ globalThis.fetch = async (url, options = {}) => {
     assert.equal(headers.get("Authorization"), "Bearer user-session");
     return Response.json({ id: owner });
   }
+  if (url.includes("/rest/v1/account_admins")) return Response.json([]);
   if (url.includes("/rest/v1/allegro_connections")) {
     assert.equal(headers.get("apikey"), "server-only");
     if (options.method === "POST") {

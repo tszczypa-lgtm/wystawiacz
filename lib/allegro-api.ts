@@ -16,6 +16,8 @@ type Connection = {
   accessToken?: string;
   refreshToken?: string;
   expiresAt?: number;
+  authorizedAsAdmin?: boolean;
+  sellerId?: string;
 };
 type OAuthCookie = { owner: string; state: string; verifier: string; expiresAt: number; clientId: string; redirectUri: string };
 const oauthCookieName = "__Host-wystawiacz-oauth";
@@ -129,6 +131,23 @@ function appConfig(env: Env, origin: string) {
   if (env.ALLEGRO_REDIRECT_URI !== `${origin}/api/allegro/auth/callback` || !origin.startsWith("https://")) throw new ApiError(503, "Nieprawidłowy adres powrotu Allegro w ustawieniach serwera.");
   return { clientId: env.ALLEGRO_CLIENT_ID, clientSecret: env.ALLEGRO_CLIENT_SECRET, redirectUri: env.ALLEGRO_REDIRECT_URI };
 }
+async function activeAllegroAdmin(owner: string, env: Env) {
+  const base = env.NEXT_PUBLIC_SUPABASE_URL || "https://wgshalvkjfefavnbccil.supabase.co";
+  const headers = { apikey: env.SUPABASE_SERVICE_ROLE_KEY!, Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}` };
+  async function read(table: string, select: string) {
+    const query = new URLSearchParams({ owner_id: `eq.${owner}`, select, limit: "1" });
+    const response = await fetch(`${base}/rest/v1/${table}?${query}`, { headers, signal: AbortSignal.timeout(10000) });
+    if (!response.ok) throw new ApiError(503, "Nie udalo sie sprawdzic uprawnien administratora Allegro.");
+    const rows = await response.json();
+    if (!Array.isArray(rows) || rows.length > 1) throw new ApiError(503, "Nieprawidlowa odpowiedz uprawnien administratora.");
+    return rows;
+  }
+  const roles = await read("account_admins", "owner_id");
+  if (!roles.length) return false;
+  if (roles[0]?.owner_id !== owner) throw new ApiError(503, "Nieprawidlowa odpowiedz uprawnien administratora.");
+  const profiles = await read("customer_accounts", "owner_id,suspended");
+  return profiles.length === 1 && profiles[0]?.owner_id === owner && profiles[0]?.suspended === false;
+}
 function callbackPage(origin: string, ok: boolean, code = "") {
   const nonce = crypto.randomUUID();
   const message = ok ? "Konto Allegro połączone. Możesz wrócić do Wystawiacza." : code === "seller_not_allowed" ? "To konto Allegro nie jest dozwolone dla tej firmy. Administrator musi zatwierdzic drugie konto lub zmiane. Dotychczasowe polaczenie pozostalo bez zmian." : `Nie potwierdzono polaczenia konta Allegro. Kod diagnostyczny: ${code}. Odswiez status polaczenia. Nie zmieniono ofert.`;
@@ -169,20 +188,31 @@ async function completeOAuth(request: Request, env: Env) {
     failureCode = "oauth_token_response";
     const tokens = await response.json() as RemotePayload;
     if (!tokens.access_token || !tokens.refresh_token || !Number.isFinite(tokens.expires_in)) throw new Error("Invalid token response");
-    failureCode = "oauth_encryption";
-    const sealed = await sealConnection({ clientId: config.clientId, clientSecret: "", accessToken: tokens.access_token, refreshToken: tokens.refresh_token, expiresAt: Date.now() + (tokens.expires_in - 60) * 1000 }, key, pending.owner);
     const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL || "https://wgshalvkjfefavnbccil.supabase.co";
+    let authorizedAsAdmin = false, sellerId: string | undefined;
     if (env.ALLEGRO_PAIRING_ENFORCED === "true") {
       failureCode = "oauth_seller_read";
       const sellerResponse = await fetch(`${apiBase}/me`, { headers: { Authorization: `Bearer ${tokens.access_token}`, Accept: accept } });
       if (!sellerResponse.ok) throw new Error("Seller verification failed");
       const seller = await sellerResponse.json() as { id: string };
       if (!/^\d+$/.test(seller.id)) throw new Error("Invalid seller");
-      failureCode = "oauth_seller_binding";
-      const claim = await fetch(`${supabaseUrl}/rest/v1/rpc/claim_allegro_seller`, { method: "POST", headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ p_owner: pending.owner, p_seller: seller.id }) });
-      if (!claim.ok) throw new Error("Binding database unavailable");
-      if (await claim.json() !== true) { failureCode = "seller_not_allowed"; throw new Error("Seller not permitted"); }
+      failureCode = "oauth_admin_check";
+      authorizedAsAdmin = await activeAllegroAdmin(pending.owner, env);
+      if (authorizedAsAdmin) {
+        sellerId = seller.id;
+        failureCode = "oauth_admin_audit";
+        // Records an authorized attempt before saving; never transfers an existing seller binding.
+        const audit = await fetch(`${supabaseUrl}/rest/v1/account_audit`, { method: "POST", headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json", Prefer: "return=minimal" }, body: JSON.stringify({ actor_id: pending.owner, target_id: pending.owner, action: "allegro_admin_oauth", reason: `Zatwierdzono administracyjna autoryzacje Allegro ${seller.id} przed zapisem polaczenia. Bez przenoszenia przypisan uzytkownikow.` }) });
+        if (!audit.ok) throw new Error("Admin authorization audit failed");
+      } else {
+        failureCode = "oauth_seller_binding";
+        const claim = await fetch(`${supabaseUrl}/rest/v1/rpc/claim_allegro_seller`, { method: "POST", headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ p_owner: pending.owner, p_seller: seller.id }) });
+        if (!claim.ok) throw new Error("Binding database unavailable");
+        if (await claim.json() !== true) { failureCode = "seller_not_allowed"; throw new Error("Seller not permitted"); }
+      }
     }
+    failureCode = "oauth_encryption";
+    const sealed = await sealConnection({ clientId: config.clientId, clientSecret: "", accessToken: tokens.access_token, refreshToken: tokens.refresh_token, expiresAt: Date.now() + (tokens.expires_in - 60) * 1000, ...(authorizedAsAdmin ? { authorizedAsAdmin: true, sellerId } : {}) }, key, pending.owner);
     failureCode = "oauth_connection_save";
     const saved = await fetch(`${supabaseUrl}/rest/v1/allegro_connections?on_conflict=owner_id`, { method: "POST", headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates" }, body: JSON.stringify({ owner_id: pending.owner, sealed, updated_at: new Date().toISOString() }) });
     if (!saved.ok) throw new Error("Connection save failed");
@@ -228,6 +258,14 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
     const rowResponse = await db(`?owner_id=eq.${encodeURIComponent(user.id)}&select=sealed`);
     const rows = await rowResponse.json() as { sealed: string }[];
     let connection: Connection | null = rows[0] ? await openConnection(rows[0].sealed, key, user.id) : null;
+    let adminValidation: Promise<void> | null = null;
+    async function validateAdminConnection() {
+      if (connection?.authorizedAsAdmin !== true) return;
+      if (!adminValidation) adminValidation = (async () => {
+        if (!/^\d+$/.test(connection?.sellerId || "") || !await activeAllegroAdmin(user.id, env)) throw new ApiError(403, "To polaczenie Allegro wymaga aktywnych uprawnien administratora. Polacz konto ponownie zgodnie z uprawnieniami. Nie zmieniono ofert.");
+      })();
+      await adminValidation;
+    }
     async function save(value: Connection) {
       await db("?on_conflict=owner_id", { method: "POST", headers: { Prefer: "resolution=merge-duplicates" }, body: JSON.stringify({ owner_id: user.id, sealed: await sealConnection(value, key, user.id), updated_at: new Date().toISOString() }) });
       connection = value;
@@ -249,6 +287,7 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
       return fetch(oauthBase + path, { method: "POST", headers: { Authorization: `Basic ${base64(utf8.encode(`${current.clientId}:${env.ALLEGRO_CLIENT_SECRET}`))}`, "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(values) });
     }
     async function accessToken() {
+      await validateAdminConnection();
       if (!connection?.accessToken) throw new ApiError(409, "Najpierw połącz konto Allegro.");
       if ((connection.expiresAt || 0) <= Date.now()) {
         if (!connection.refreshToken) throw new ApiError(409, "Połącz konto Allegro ponownie.");
@@ -322,7 +361,7 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
         const seller = await remote("/me");
         return json(await remote(`/sale/shipping-rates?seller.id=${encodeURIComponent(seller.id)}`));
       }
-      if (path === "/health") return json({ ok: true, connected: Boolean(connection?.accessToken), build: "2026-06-02.35", mode: "web" });
+      if (path === "/health") { await validateAdminConnection(); return json({ ok: true, connected: Boolean(connection?.accessToken), adminMode: connection?.authorizedAsAdmin === true, build: "2026-06-02.35", mode: "web" }); }
       const routes: Record<string, string> = { "/me": "/me", "/responsible-producers": "/sale/responsible-producers", "/responsible-persons": "/sale/responsible-persons" };
       if (routes[path]) return json(await remote(routes[path]));
       if (["/return-policies", "/implied-warranties", "/warranties"].includes(path)) {
@@ -360,10 +399,12 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
       }
       if (path === "/auth/start") {
         const config = appConfig(env, url.origin);
-        if (env.ALLEGRO_PAIRING_ENFORCED === "true" && connection?.accessToken) {
-          const currentSeller = await remote("/me");
-          const allowed = await workspaceDb("rpc/claim_allegro_seller", { method: "POST", body: JSON.stringify({ p_owner: user.id, p_seller: currentSeller.id }) });
-          if (allowed !== true) throw new ApiError(409, "Obecne konto Allegro wymaga zatwierdzenia przez administratora.");
+        if (env.ALLEGRO_PAIRING_ENFORCED === "true" && connection?.accessToken && connection.authorizedAsAdmin !== true) {
+          if (!await activeAllegroAdmin(user.id, env)) {
+            const currentSeller = await remote("/me");
+            const allowed = await workspaceDb("rpc/claim_allegro_seller", { method: "POST", body: JSON.stringify({ p_owner: user.id, p_seller: currentSeller.id }) });
+            if (allowed !== true) throw new ApiError(409, "Obecne konto Allegro wymaga zatwierdzenia przez administratora.");
+          }
         }
         const state = base64url(crypto.getRandomValues(new Uint8Array(32)));
         const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));

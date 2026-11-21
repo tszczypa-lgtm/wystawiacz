@@ -20,8 +20,10 @@ const callbackErrors: Record<string, string> = {
   oauth_token_response: "Allegro nie zwrocilo prawidlowych danych dostepu.",
   oauth_seller_read: "Uzyskano token, ale nie udalo sie potwierdzic tozsamosci sprzedawcy przez API Allegro.",
   oauth_seller_binding: "Nie udalo sie sprawdzic przypisania sprzedawcy w bazie. To nie jest potwierdzone odrzucenie konta.",
+  oauth_admin_check: "Nie udalo sie potwierdzic uprawnien administratora na serwerze. Nie zmieniono przypisan Allegro.",
+  oauth_admin_audit: "Nie udalo sie zapisac historii autoryzacji administracyjnej. Polaczenie nie zostalo zapisane.",
   oauth_connection_save: "Autoryzacja przeszla, ale nie potwierdzono zapisu polaczenia w bazie Wystawiacza. Odswiez status przed kolejna proba.",
-  seller_not_allowed: "Zablokowano przypisanie konta Allegro: jest juz przypisane do innego konta Wystawiacza albo osiagnieto limit kont Allegro. Administrator nie omija tej blokady. Nie rozlaczaj dzialajacego konta; najpierw sprawdzimy przypisanie.",
+  seller_not_allowed: "Zablokowano przypisanie konta Allegro: jest juz przypisane do innego konta Wystawiacza albo osiagnieto limit kont Allegro. To logowanie nie zostalo zatwierdzone jako administracyjne. Nie rozlaczaj dzialajacego konta; najpierw sprawdzimy przypisanie.",
 };
 
 export function AllegroConnection() {
@@ -76,6 +78,8 @@ export function AllegroConnection() {
       <a href="/panel/inventory" className="rounded-xl border border-white/20 px-5 py-3 font-bold">Moje oferty</a>
     </div>
     <p className="text-sm leading-6 text-white/60">To samo polaczenie obsluguje formularz wystawiania i podglad ofert. Haslo wpisujesz wylacznie na stronie Allegro; nie podawaj nam kluczy ani hasla.</p>
+    <p className="rounded-xl border border-white/15 p-4 text-sm leading-6 text-white/70">Aktywny administrator moze polaczyc dowolne konto Allegro po normalnym logowaniu i zgodzie jego wlasciciela. Jedno aktywne polaczenie naraz: ponowne polaczenie zmienia tylko konto obslugiwane przez tego administratora, nie przypisania ani tokeny innych uzytkownikow. Wyjatek nie dotyczy zwyklych kont Wystawiacza.</p>
+    <p className="text-sm text-amber-200">Po zmianie konta Allegro odswiez otwarte formularze i sprawdz aktualnego sprzedawce przed wystawianiem. Cenniki i robocze dane nie sa automatycznie dopasowywane do nowego konta.</p>
     <p className="text-sm text-white/60">Po zakonczonym logowaniu, jesli status nie zmieni sie automatycznie, kliknij Odswiez status.</p>
   </div>;
 }
