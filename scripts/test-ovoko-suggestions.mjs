@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 const compiled = ts.transpileModule(readFileSync(new URL("../lib/ovoko-suggestions.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-const { suggestPartNumbers, suggestOvokoCategories, suggestionSearchMatches } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
+const { suggestPartNumbers, suggestOvokoCategories, suggestionSearchMatches, suggestOvokoBrands, suggestOvokoModels, vehicleSuggestionText } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
 const numbers = (title, parameters) => suggestPartNumbers(title, parameters).map(item => item.number);
 for (const suffix of ["E", "EA", "ABCD", "e", "1"]) {
   const code = `5Q0959593${suffix}`;
@@ -38,4 +38,15 @@ assert.equal(suggestOvokoCategories("STEROWNIK ZAMKA AUDI", categories)[0].id, "
 assert.deepEqual(suggestOvokoCategories("FORmentor 5Q0959593E", categories), [], "Car model and part number alone are not category evidence");
 const original = JSON.stringify(categories); suggestOvokoCategories("pompa", categories); assert.equal(JSON.stringify(categories), original, "Never mutate supplier dictionaries");
 assert.equal(suggestionSearchMatches("Układ hamulcowy / Części", "uklad"), true); assert.equal(suggestionSearchMatches("Sterownik silnika", "ZAMEK"), false);
-console.log("Ovoko suggestions: complete contiguous/separated suffixes, leading zeros, numeric groups, date/model exclusions, multiple candidates, title-as-MPN rejection, no shortened parameter override, category levels/evidence/ambiguity and immutable dictionaries passed.");
+const brands = [{ id: "1", name: "Audi" }, { id: "2", name: "Volkswagen" }];
+assert.deepEqual(suggestOvokoBrands("AUDI A4", brands).map(row => row.id), ["1"]);
+assert.deepEqual(suggestOvokoBrands("VW GOLF", brands).map(row => row.id), ["2"]);
+assert.equal(suggestOvokoBrands("AUDITOR 5Q0959593E", brands).length, 0);
+assert.equal(suggestOvokoBrands("AUDI VW", brands).length, 2, "Ambiguous brands stay ambiguous");
+assert.equal(vehicleSuggestionText("Pompa", [{ name: "Producent", values: ["Bosch"] }, { name: "Marka pojazdu", values: ["Audi"] }]), "Pompa Audi");
+const models = [{ id: "10", name: "A4, S4 (B8)", years: "2008 - 2015" }, { id: "11", name: "A4, S4 (B9)", years: "2015 - " }];
+assert.equal(suggestOvokoModels("AUDI A4 B9", models)[0].id, "11");
+assert.equal(suggestOvokoModels("AUDI A4 B9", [models[0]]).length, 0, "Never suggest a conflicting generation even if only one model is returned");
+const ambiguous = suggestOvokoModels("AUDI A4", models); assert.equal(ambiguous[0].score, ambiguous[1].score);
+assert.equal(suggestOvokoModels("AUDI A40 5Q0959593E", models).length, 0, "No substring or MPN compatibility guessing");
+console.log("Ovoko suggestions: complete indexed codes, categories, vehicle-specific parameters, brand boundaries and aliases, model generation ranking and ambiguity passed.");

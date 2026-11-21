@@ -60,6 +60,30 @@ export function suggestPartNumbers(title: string, parameters: { name: string; va
 
 export type CategorySuggestion = { id: string; path: string; matches: string[]; score: number; weak: boolean };
 const fold = (value: string) => value.toLowerCase().replace(/ł/g, "l").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+export function vehicleSuggestionText(title: string, parameters: { name: string; values: string[] }[]) {
+  const labels = new Set(["marka pojazdu", "marka samochodu", "model pojazdu", "model samochodu"]);
+  return [title, ...parameters.filter(row => labels.has(fold(row.name).trim())).flatMap(row => row.values)].join(" ");
+}
+export function suggestOvokoBrands(title: string, brands: OvokoReadRow[]) {
+  const text = ` ${fold(title).replace(/[^a-z0-9]+/g, " ")} `;
+  return brands.filter(row => {
+    const names = [row.name, ...(fold(row.name) === "volkswagen" ? ["VW"] : [])];
+    return names.some(name => text.includes(` ${fold(name).replace(/[^a-z0-9]+/g, " ").trim()} `));
+  });
+}
+export function suggestOvokoModels(title: string, models: OvokoReadRow[]) {
+  const tokens = new Set(fold(title).match(/[a-z0-9]+/g) || []);
+  return models.map(row => {
+    const names = fold(row.name).split("(")[0].match(/[a-z0-9]+/g) || [];
+    const matches = names.filter(token => token.length >= 2 && tokens.has(token));
+    const generation = (fold(row.name).split("(")[1] || "").match(/[a-z0-9]+/g) || [];
+    const generations = generation.filter(token => /^[bdefgw]\d{1,3}$/.test(token));
+    const conflict = generations.some(token => [...tokens].some(source => source[0] === token[0] && /^[bdefgw]\d{1,3}$/.test(source))) && !generations.some(token => tokens.has(token));
+    if (conflict) return { ...row, score: 0 };
+    const score = matches.length ? matches.length + generation.filter(token => tokens.has(token)).length * 2 : 0;
+    return { ...row, score };
+  }).filter(row => row.score > 0).sort((a, b) => b.score - a.score || a.name.localeCompare(b.name)).slice(0, 20);
+}
 export function suggestionSearchMatches(value: string, query: string) { return fold(value).includes(fold(query.trim())); }
 const words: Record<string, string> = {
   pompa: "pompa", pompy: "pompa", pomp: "pompa", pompek: "pompa", pompka: "pompa",

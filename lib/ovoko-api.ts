@@ -59,10 +59,15 @@ export async function handleOvokoApi(request: Request, env: OvokoEnv): Promise<R
     const credentials = useSaved ? await loadOvokoConnection(context, key!) : validateOvokoCredentials(values);
     const plan = url.pathname === "/api/ovoko/read" ? ovokoReadPlan(values) : null;
     const form = new URLSearchParams(credentials);
-    const now = Date.now(), recent = (attempts.get(context.user.id) || []).filter(time => now - time < 60000);
-    if (recent.length >= 3) return reply({ message: "Maksymalnie 3 proby na minute. Odczekaj chwile." }, 429);
-    if (attempts.size >= 1000 && !attempts.has(context.user.id)) attempts.delete(attempts.keys().next().value!);
-    attempts.set(context.user.id, [...recent, now]);
+    // Dictionary reads have a separate bounded budget for automatic form initialization.
+    // Inventory, connection probes and credentials verification retain their original limit.
+    const dictionary = plan && plan.operation !== "parts";
+    const attemptKey = `${context.user.id}:${dictionary ? "dictionary" : "probe"}`;
+    const limit = dictionary ? 12 : 3;
+    const now = Date.now(), recent = (attempts.get(attemptKey) || []).filter(time => now - time < 60000);
+    if (recent.length >= limit) return reply({ message: `Maksymalnie ${limit} odczytow na minute. Odczekaj chwile.` }, 429);
+    if (attempts.size >= 1000 && !attempts.has(attemptKey)) attempts.delete(attempts.keys().next().value!);
+    attempts.set(attemptKey, [...recent, now]);
     // Fixed read-only probe. Never accept caller-supplied URLs or forward redirects with credentials.
     const response = await fetch(`https://api.rrr.lt${plan?.path || "/get/car_brands"}`, { method: "POST", redirect: "manual", signal: AbortSignal.timeout(20000), headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" }, body: form.toString() });
     if (response.status >= 300 && response.status < 400) {

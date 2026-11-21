@@ -108,6 +108,17 @@ try {
     assert.equal((await handleOvokoApi(req("/read", { body: { ...credentials, ...body } }), env)).status, 400);
     assert.equal(calls.length, before);
   }
+  user++;
+  const dictionaryFixture = readCases.find(item => item.operation === "categories");
+  expectedPath = dictionaryFixture.path; fixtureResult = dictionaryFixture.result;
+  for (let i = 0; i < 12; i++) assert.equal((await handleOvokoApi(req("/read", { body: { ...credentials, operation: "categories" } }), env)).status, 200);
+  const beforeDictionaryLimit = calls.length;
+  assert.equal((await handleOvokoApi(req("/read", { body: { ...credentials, operation: "categories" } }), env)).status, 429);
+  assert.equal(calls.length, beforeDictionaryLimit, "Automatic dictionary initialization retains a bounded upstream budget");
+  const partsFixture = readCases.find(item => item.operation === "parts");
+  expectedPath = partsFixture.path; fixtureResult = partsFixture.result;
+  for (let i = 0; i < 3; i++) assert.equal((await handleOvokoApi(req("/read", { body: { ...credentials, operation: "parts" } }), env)).status, 200);
+  assert.equal((await handleOvokoApi(req("/read", { body: { ...credentials, operation: "parts" } }), env)).status, 429, "Inventory still allows only three reads per minute");
   admin = false; assert.equal((await handleOvokoApi(req("/read"), env)).status, 403); admin = true;
   const { parseOvokoRead } = load(path.join(root, "lib/ovoko-read.ts"));
   assert.deepEqual(parseOvokoRead("parts", { data: [], pagination: { page: 1, limit: 20, total_count: 0 } }), { rows: [], pagination: { page: 1, limit: 20, total: 0 } });
