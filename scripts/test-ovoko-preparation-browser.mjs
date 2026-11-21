@@ -17,6 +17,8 @@ try {
   let admin = true, failure = false, dictionaryFailure = false, currency = "PLN";
   let offerTitle = "Pompa ABS 123456", numberParameter = "ABC123";
   let holdAudi = false, releaseAudi = null, audiStarted = null;
+  let condition = "Używany", stock = 1, publication = "ACTIVE";
+  let holdStatuses = false, releaseStatuses = null, statusesStarted = null;
   const id = "1234567891";
   page.on("pageerror", error => errors.push(error.message)); page.on("request", request => allRequests.push(request.url()));
   await page.route("**/*", async route => {
@@ -29,7 +31,7 @@ try {
     if (url.pathname === `/api/allegro/own-offers/${id}`) {
       assert.equal(request.method(), "GET");
       if (failure) return route.fulfill({ status: 404, json: { message: "Oferta nie nalezy do polaczonego konta." } });
-      return route.fulfill({ json: { id, name: offerTitle, stock: { available: 1 }, publication: { status: "ACTIVE" }, productSet: [{ quantity: { value: 1 }, product: { parameters: [{ id: "mpn", name: "Numer katalogowy części", values: [numberParameter] }] } }], category: { id: "999" }, sellingMode: { price: { amount: "123.45", currency } }, delivery: { shippingRates: { id: "rate-1" } }, description: { sections: [{ items: [{ type: "TEXT", content: '<p>Opis <b>czesci</b></p><script>window.injected=true</script><iframe src="https://evil.test"></iframe><img src="https://evil.test/pic"><style>body{display:none}</style>' }] }] }, images: ["https://a.allegroimg.com/photo", "https://evil.test/x.jpg"] } });
+      return route.fulfill({ json: { id, name: offerTitle, parameters: condition ? [{ id: "11323", name: "Stan", values: [condition] }] : [], stock: { available: stock }, publication: { status: publication }, productSet: [{ quantity: { value: 1 }, product: { parameters: [{ id: "mpn", name: "Numer katalogowy części", values: [numberParameter] }] } }], category: { id: "999" }, sellingMode: { price: { amount: "123.45", currency } }, delivery: { shippingRates: { id: "rate-1" } }, description: { sections: [{ items: [{ type: "TEXT", content: '<p>Opis <b>czesci</b></p><script>window.injected=true</script><iframe src="https://evil.test"></iframe><img src="https://evil.test/pic"><style>body{display:none}</style>' }] }] }, images: ["https://a.allegroimg.com/photo", "https://evil.test/x.jpg"] } });
     }
     if (url.pathname === "/api/allegro/shipping-rates") { assert.equal(request.method(), "GET"); return route.fulfill({ json: { shippingRates: [{ id: "rate-1", name: "Maly kurier" }] } }); }
     assert.ok(["/api/ovoko/read", "/api/ovoko/test"].includes(url.pathname), "Only dictionary reads, no publication or local save endpoints"); assert.equal(request.method(), "POST");
@@ -42,7 +44,8 @@ try {
       return route.fulfill({ json: { ok: true, readOnly: true, operation: "models", rows: payload.brandId === "1" ? [{ id: "10", name: "A4 (B8)", years: "2008 - 2015" }, { id: "11", name: "A4 (B9)", years: "2015 - " }] : [{ id: "20", name: "Golf VII", years: "2012 - 2020" }] } });
     }
     if (dictionaryFailure) return route.fulfill({ status: 502, json: { message: "Blad slownika" } });
-    return route.fulfill({ json: { ok: true, readOnly: true, operation: payload.operation, rows: payload.operation === "categories" ? [{ id: "1", name: "Rodzic", level: "1" }, { id: "3", name: "Pompy", level: "3" }] : [{ id: "0", name: "Wartosc zero" }] } });
+    if (holdStatuses && payload.operation === "statuses") { statusesStarted?.(); await new Promise(resolve => { releaseStatuses = resolve; }); }
+    return route.fulfill({ json: { ok: true, readOnly: true, operation: payload.operation, rows: payload.operation === "categories" ? [{ id: "1", name: "Rodzic", level: "1" }, { id: "3", name: "Pompy", level: "3" }] : payload.operation === "qualities" ? [{ id: "0", name: "Używany" }, { id: "1", name: "Nowy" }, { id: "3", name: "Uszkodzony" }, { id: "4", name: "Regenerowany" }] : [{ id: "0", name: "Na stanie" }, { id: "2", name: "Sprzedano" }] } });
   });
   async function mount(query = `offerId=${id}`) { await page.goto(`https://prepare.test/panel/inventory/prepare-ovoko?${query}`); await page.addStyleTag({ content: css.css }); await page.addScriptTag({ content: bundle.outputFiles[0].text }); }
   await mount(); await page.getByLabel("Nazwa robocza", { exact: true }).waitFor();
@@ -56,6 +59,8 @@ try {
   await page.getByRole("button", { name: "Uzyj numeru ABC123", exact: true }).click();
   assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "ABC123");
   assert.equal(await page.getByLabel("Kategoria Ovoko", { exact: true }).inputValue(), "3");
+  assert.equal(await page.getByLabel("Jakosc czesci Ovoko", { exact: true }).inputValue(), "0", "Used condition maps without a click, including ID zero");
+  assert.equal(await page.getByLabel("Status rekordu Ovoko", { exact: true }).inputValue(), "0", "Active positive-stock offers map automatically to In stock");
   const beforeEdit = calls.length;
   await page.getByLabel("Cena robocza").fill("99.00"); await page.getByLabel("Waluta", { exact: true }).selectOption("EUR");
   assert.equal(await page.getByLabel("Cena robocza").inputValue(), "99.00"); assert.equal(calls.length, beforeEdit, "Editing is memory-only, with no saves or FX calls");
@@ -94,8 +99,8 @@ try {
   const beforeFilter = calls.length;
   await page.getByLabel("Szukaj w pobranych kategoriach").fill("No matches");
   assert.equal(await page.getByLabel("Kategoria Ovoko", { exact: true }).inputValue(), "3", "Search never erases an existing manual choice"); assert.equal(calls.length, beforeFilter);
-  assert.equal(await page.getByLabel("Jakosc czesci Ovoko", { exact: true }).inputValue(), "");
-  assert.equal(await page.getByLabel("Status rekordu Ovoko", { exact: true }).inputValue(), "");
+  assert.equal(await page.getByLabel("Jakosc czesci Ovoko", { exact: true }).inputValue(), "0");
+  assert.equal(await page.getByLabel("Status rekordu Ovoko", { exact: true }).inputValue(), "0");
   assert.equal(await page.getByLabel("ID samochodu-dawcy Ovoko - roboczo, niezweryfikowane").inputValue(), "");
   assert.equal(await page.getByLabel("Marka auta Ovoko").inputValue(), "1");
   assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "", "No model is guessed from a part number alone");
@@ -106,6 +111,7 @@ try {
   await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="11"]').waitFor({ state: "attached" });
   assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "11");
   assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "5Q0959593E");
+  assert.doesNotMatch(await page.getByLabel("Braki przygotowania").textContent(), /Numer czesci wymaga recznego zatwierdzenia|Wybierz jakosc|Wybierz status/, "Certain automatic fields do not require individual confirmations");
   assert.equal(await page.getByLabel("ID samochodu-dawcy Ovoko - roboczo, niezweryfikowane").inputValue(), "", "Model IDs never become donor IDs");
   mkdirSync(new URL("../outputs/ovoko-preparation-preview/", import.meta.url), { recursive: true });
   await page.screenshot({ path: fileURLToPath(new URL("../outputs/ovoko-preparation-preview/desktop.png", import.meta.url)), fullPage: true });
@@ -122,6 +128,22 @@ try {
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "20", "A stale model response never overwrites the new brand selection");
   assert.equal(await page.getByLabel("Model auta Ovoko").locator('option[value="11"]').count(), 0);
+  holdStatuses = true;
+  const waitingForStatuses = new Promise(resolve => { statusesStarted = resolve; });
+  await mount(); await waitingForStatuses;
+  await page.getByLabel("Jakosc czesci Ovoko", { exact: true }).selectOption("1");
+  releaseStatuses(); holdStatuses = false;
+  await page.getByLabel("Marka auta Ovoko").locator('option[value="1"]').waitFor({ state: "attached" });
+  assert.equal(await page.getByLabel("Jakosc czesci Ovoko", { exact: true }).inputValue(), "1", "Later automatic fields never override manual condition edits");
+  condition = "Uszkodzony"; stock = 0;
+  await mount(); await page.getByLabel("Marka auta Ovoko").locator('option[value="1"]').waitFor({ state: "attached" });
+  assert.equal(await page.getByLabel("Jakosc czesci Ovoko", { exact: true }).inputValue(), "3");
+  assert.equal(await page.getByLabel("Status rekordu Ovoko", { exact: true }).inputValue(), "", "Zero stock is never available");
+  condition = "Nowy"; stock = 5; publication = "ENDED";
+  await mount(); await page.getByLabel("Marka auta Ovoko").locator('option[value="1"]').waitFor({ state: "attached" });
+  assert.equal(await page.getByLabel("Jakosc czesci Ovoko", { exact: true }).inputValue(), "1");
+  assert.equal(await page.getByLabel("Status rekordu Ovoko", { exact: true }).inputValue(), "", "Ended offers are not treated as in stock");
+  condition = "Używany"; publication = "ACTIVE"; stock = 1;
   currency = "CZK"; await mount(); await page.getByLabel("Cena robocza").waitFor(); assert.equal(await page.getByLabel("Cena robocza").inputValue(), "");
   assert.equal(await page.getByLabel("ID samochodu-dawcy Ovoko - roboczo, niezweryfikowane").inputValue(), "", "Draft never persists across reloads");
   failure = true; await mount(); await page.getByRole("alert").filter({ hasText: "Oferta nie nalezy" }).waitFor(); assert.equal(await page.getByLabel("Nazwa robocza", { exact: true }).count(), 0);

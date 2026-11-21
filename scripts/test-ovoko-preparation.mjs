@@ -11,6 +11,15 @@ assert.deepEqual(preview.images, ["https://a.allegroimg.com/picture"]); assert.e
 assert.equal(preview.suggestedCode, "ABC123"); assert.equal(preview.shippingRateId, "rate-id"); assert.equal(preview.bundle, false);
 assert.equal(preview.description, "Text");
 const draft = initialOvokoDraft(preview); assert.equal(draft.price, "123.45"); assert.equal(draft.currency, "PLN");
+assert.equal(preview.condition, "");
+for (const [name, expected] of [["Używany", "used"], ["Nowy", "new"], ["Uszkodzony", "damaged"], ["Regenerowany", "restored"], ["Powystawowy", ""]]) {
+  assert.equal(ovokoSourcePreview({ ...offer, parameters: [{ id: "11323", name: "Stan", values: [name] }] }, "123", html => html).condition, expected);
+}
+assert.equal(ovokoSourcePreview({ ...offer, parameters: [{ id: "11323", valuesIds: ["11323_2"] }] }, "123", html => html).condition, "used");
+assert.equal(ovokoSourcePreview({ ...offer, parameters: [{ id: "11323", valuesIds: ["11323_999"] }] }, "123", html => html).condition, "");
+assert.equal(ovokoSourcePreview({ ...offer, parameters: [{ id: "11323", values: ["__proto__"] }] }, "123", html => html).condition, "");
+assert.equal(ovokoSourcePreview({ ...offer, parameters: [{ id: "11323", values: ["Używany", "Uszkodzony"] }] }, "123", html => html).condition, "", "Conflicting condition claims are not guessed");
+assert.equal(ovokoSourcePreview({ ...offer, parameters: [{ id: "11323", values: ["Uszkodzony"] }], productSet: [{ product: { parameters: [{ id: "11323", values: ["Nowy"] }] } }] }, "123", html => html).condition, "damaged", "Offer condition takes precedence over catalogue metadata");
 assert.equal(draft.manufacturerCode, "", "MPN requires explicit user choice even when the parameter looks plausible");
 assert.equal(draft.categoryId, ""); assert.equal(draft.donorId, ""); assert.equal(draft.qualityId, ""); assert.equal(draft.statusId, ""); assert.equal(draft.shippingPlan, "");
 const issues = ovokoPreparationIssues(preview, draft); assert.ok(issues.some(item => item.includes("formatu"))); assert.ok(issues.some(item => item.includes("Cennik Allegro")));

@@ -1,11 +1,28 @@
 type Parameter = { id: string; name: string; values: string[] };
+export type OvokoSourceCondition = "used" | "new" | "damaged" | "restored" | "";
 export type OvokoSourcePreview = {
   id: string; title: string; description: string; images: string[]; skippedImages: number;
   price: string; currency: string; stock: number | null; status: string; categoryId: string;
-  shippingRateId: string; externalId: string; parameters: Parameter[]; suggestedCode: string; bundle: boolean;
+  shippingRateId: string; externalId: string; parameters: Parameter[]; suggestedCode: string; bundle: boolean; condition: OvokoSourceCondition;
 };
 const object = (value: unknown): Record<string, any> => value && typeof value === "object" && !Array.isArray(value) ? value : {};
 const text = (value: unknown, limit = 1000) => typeof value === "string" ? value.slice(0, limit) : "";
+const normalized = (value: string) => value.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+function sourceCondition(parameters: unknown[]): OvokoSourceCondition {
+  const names: Record<string, OvokoSourceCondition> = { uzywany: "used", used: "used", nowy: "new", new: "new", uszkodzony: "damaged", "with defects": "damaged", regenerowany: "restored", restored: "restored" };
+  const ids: Record<string, OvokoSourceCondition> = { "11323_1": "new", "11323_2": "used" };
+  const claims = new Set<OvokoSourceCondition>(); let unknown = false;
+  for (const input of parameters) {
+    const row = object(input);
+    if (row.id !== "11323" && normalized(text(row.name)) !== "stan") continue;
+    const values = Array.isArray(row.values) ? row.values.filter((value: unknown) => typeof value === "string" && value.trim()) : [];
+    // Text comes from the offer's condition; dictionary-only responses retain known Allegro IDs.
+    const mapped = values.length ? values.map((value: string) => Object.hasOwn(names, normalized(value)) ? names[normalized(value)] : undefined) : (Array.isArray(row.valuesIds) ? row.valuesIds.map((id: unknown) => typeof id === "string" && Object.hasOwn(ids, id) ? ids[id] : undefined) : []);
+    if (!mapped.length || mapped.some((value: OvokoSourceCondition | undefined) => !value)) unknown = true;
+    for (const value of mapped) if (value) claims.add(value);
+  }
+  return !unknown && claims.size === 1 ? [...claims][0] : "";
+}
 export function offerDescriptionText(html: string): string {
   // An inert template parses markup without attaching provider HTML to the page.
   const template = document.createElement("template"); template.innerHTML = html;
@@ -18,6 +35,9 @@ export function ovokoSourcePreview(input: unknown, expectedId: string, toText: (
   const source = object(input);
   if (!/^\d{1,30}$/.test(expectedId) || source.id !== expectedId || typeof source.name !== "string" || !source.name.trim()) throw new Error("Nieprawidlowe lub niezgodne dane oferty Allegro. Nie utworzono podgladu.");
   const products = Array.isArray(source.productSet) ? source.productSet : [];
+  const offerParameters = Array.isArray(source.parameters) ? source.parameters.slice(0, 500) : [];
+  const hasOfferCondition = offerParameters.some(value => object(value).id === "11323" || normalized(text(object(value).name)) === "stan");
+  const condition = sourceCondition(hasOfferCondition ? offerParameters : products.flatMap(item => Array.isArray(object(object(item).product).parameters) ? object(object(item).product).parameters.slice(0, 500) : []));
   const parameters: Parameter[] = [...(Array.isArray(source.parameters) ? source.parameters : []), ...products.flatMap(item => Array.isArray(object(object(item).product).parameters) ? object(object(item).product).parameters : [])].slice(0, 500).map(value => {
     const parameter = object(value);
     return { id: text(parameter.id, 40), name: text(parameter.name, 300), values: (Array.isArray(parameter.values) ? parameter.values : []).filter((value: unknown): value is string => typeof value === "string").slice(0, 30).map((value: string) => value.slice(0, 1000)) };
@@ -37,7 +57,7 @@ export function ovokoSourcePreview(input: unknown, expectedId: string, toText: (
     price: typeof price.amount === "string" && price.amount.length <= 30 && /^\d+(\.\d+)?$/.test(price.amount) ? price.amount : "", currency: typeof price.currency === "string" && /^[A-Z]{3}$/.test(price.currency) ? price.currency : "",
     stock: Number.isSafeInteger(stock) && stock >= 0 ? stock : null, status: text(object(source.publication).status, 40), categoryId: text(object(source.category).id, 40),
     shippingRateId: text(object(object(source.delivery).shippingRates).id, 100), externalId: text(object(source.external).id, 1000), parameters, suggestedCode: candidates.length === 1 ? candidates[0] : "",
-    bundle: products.length !== 1 || Number(object(object(products[0]).quantity).value ?? 1) !== 1 };
+    bundle: products.length !== 1 || Number(object(object(products[0]).quantity).value ?? 1) !== 1, condition };
 }
 export type OvokoPreparationDraft = { title: string; notes: string; manufacturerCode: string; price: string; currency: string; categoryId: string; donorId: string; qualityId: string; statusId: string; shippingPlan: string };
 export function initialOvokoDraft(source: OvokoSourcePreview): OvokoPreparationDraft {

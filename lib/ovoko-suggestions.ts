@@ -1,4 +1,21 @@
 import type { OvokoReadRow } from "./ovoko-read";
+import type { OvokoSourcePreview, OvokoPreparationDraft } from "./ovoko-preparation";
+
+export function ovokoAutomaticFields(source: OvokoSourcePreview, dictionaries: Record<string, OvokoReadRow[]>): Partial<OvokoPreparationDraft> {
+  const fields: Partial<OvokoPreparationDraft> = {};
+  const numbers = suggestPartNumbers(source.title, source.parameters);
+  if (numbers.length === 1 && !numbers[0].warnings.length) fields.manufacturerCode = numbers[0].number;
+  const categories = suggestOvokoCategories(source.title, dictionaries.categories || []);
+  if (categories.length && (!categories[1] || categories[0].score > categories[1].score)) fields.categoryId = categories[0].id;
+  const qualityNames: Record<string, string[]> = { used: ["uzywany", "used"], new: ["nowy", "new"], damaged: ["uszkodzony", "with defects"], restored: ["regenerowany", "restored"] };
+  const qualities = (dictionaries.qualities || []).filter(row => (qualityNames[source.condition] || []).includes(fold(row.name).trim()));
+  if (qualities.length === 1) fields.qualityId = qualities[0].id;
+  if (source.status === "ACTIVE" && source.stock !== null && source.stock > 0 && !source.bundle) {
+    const statuses = (dictionaries.statuses || []).filter(row => ["na stanie", "in stock"].includes(fold(row.name).trim()));
+    if (statuses.length === 1) fields.statusId = statuses[0].id;
+  }
+  return fields;
+}
 
 export type NumberSuggestion = { number: string; evidence: { raw: string; source: string }[]; warnings: string[] };
 const normalizeNumber = (value: string) => value.toUpperCase().replace(/[ .-]/g, "");

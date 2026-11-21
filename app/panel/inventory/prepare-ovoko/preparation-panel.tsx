@@ -6,7 +6,7 @@ import { allegroRequest } from "@/lib/allegro-client";
 import { createSupabaseBrowserClient } from "@/lib/supabase";
 import { initialOvokoDraft, offerDescriptionText, ovokoPreparationIssues, ovokoSourcePreview, type OvokoPreparationDraft, type OvokoSourcePreview } from "@/lib/ovoko-preparation";
 import type { OvokoReadResult, OvokoReadRow } from "@/lib/ovoko-read";
-import { suggestPartNumbers, suggestOvokoCategories, suggestionSearchMatches, suggestOvokoBrands, suggestOvokoModels, vehicleSuggestionText } from "@/lib/ovoko-suggestions";
+import { suggestPartNumbers, suggestOvokoCategories, suggestionSearchMatches, suggestOvokoBrands, suggestOvokoModels, vehicleSuggestionText, ovokoAutomaticFields } from "@/lib/ovoko-suggestions";
 
 const button = "rounded-lg border border-white/20 px-3 py-2 text-sm font-bold disabled:opacity-40";
 const field = "mt-1 w-full rounded-lg border border-white/20 bg-[#0d1117] px-3 py-2 text-white";
@@ -48,9 +48,10 @@ export function OvokoPreparationPanel() {
         const offer = await allegroRequest<unknown>(`/own-offers/${ids[0]}`, { signal: controller.signal });
         const preview = ovokoSourcePreview(offer, ids[0], offerDescriptionText);
         if (!controller.signal.aborted) {
-          const numbers = suggestPartNumbers(preview.title, preview.parameters);
+          const automatic = ovokoAutomaticFields(preview, {});
           setSource(preview);
-          setDraft({ ...initialOvokoDraft(preview), manufacturerCode: numbers.length === 1 && !numbers[0].warnings.length ? numbers[0].number : "" });
+          setDraft({ ...initialOvokoDraft(preview), ...automatic });
+          setNumberAccepted(automatic.manufacturerCode || "");
         }
       } catch (error) { if (!controller.signal.aborted) setError(error instanceof Error ? error.message : "Nie udalo sie pobrac oferty."); }
       finally { if (!controller.signal.aborted) setBusy(false); }
@@ -63,6 +64,7 @@ export function OvokoPreparationPanel() {
     setDictionaryBusy(true); setDictionaryError("");
     void (async () => {
       const failures: string[] = [];
+      const loaded: Record<string, OvokoReadRow[]> = {};
       // Sequential, bounded reads: no polling, automatic retries or offer mutations.
       for (const operation of ["categories", "qualities", "statuses", "brands"]) {
         if (controller.signal.aborted) return;
@@ -70,12 +72,17 @@ export function OvokoPreparationPanel() {
           const rows = await readOvoko(operation, controller.signal);
           if (!controller.signal.aborted) {
             setDictionaries(previous => ({ ...previous, [operation]: rows }));
-            if (operation === "categories") {
-              const matches = suggestOvokoCategories(source.title, rows);
-              if (matches.length && (!matches[1] || matches[0].score > matches[1].score)) {
-                setDraft(previous => previous && !touched.current.has("categoryId") && !previous.categoryId ? { ...previous, categoryId: matches[0].id } : previous);
+            loaded[operation] = rows;
+            const automatic = ovokoAutomaticFields(source, loaded);
+            setDraft(previous => {
+              if (!previous) return previous;
+              const next = { ...previous };
+              for (const name of Object.keys(automatic) as (keyof OvokoPreparationDraft)[]) {
+                if (!touched.current.has(name) && !next[name] && automatic[name] !== undefined) next[name] = automatic[name]!;
               }
-            }
+              return next;
+            });
+            if (automatic.categoryId && !touched.current.has("categoryId")) setCategoryAccepted(automatic.categoryId);
             if (operation === "brands") {
               const matches = suggestOvokoBrands(vehicleSuggestionText(source.title, source.parameters), rows);
               if (matches.length === 1 && !touched.current.has("brandId")) setBrandId(previous => previous || matches[0].id);
@@ -133,6 +140,7 @@ export function OvokoPreparationPanel() {
       <div className="grid gap-5 xl:grid-cols-2">
         <section className="min-w-0 self-start space-y-4 rounded-2xl border border-white/10 p-4"><h2 className="text-xl font-bold">Zrodlo: Allegro</h2><a className="font-bold underline" href={`https://allegro.pl/oferta/${source.id}`} target="_blank" rel="noopener noreferrer">{source.title}</a>
           <p className="text-sm">Oferta ID: {source.id}; status: {source.status || "brak"}; liczba sztuk: {source.stock ?? "nieznana"}</p>
+          <p className="text-sm">Stan czesci Allegro: {({ used: "Uzywany", new: "Nowy", damaged: "Uszkodzony", restored: "Regenerowany", "": "Brak jednoznacznej wartosci" })[source.condition]}</p>
           <p>Cena zrodlowa: {source.price || "brak"} {source.currency}</p><p className="break-all text-sm">ID zewnetrzne: {source.externalId || "brak"}; kategoria Allegro ID: {source.categoryId || "brak"}</p>
           <p className="break-all text-sm">Cennik Allegro: {shippingName || source.shippingRateId || "brak"}</p>
           <div className="grid grid-cols-3 gap-2" aria-label="Zdjecia z Allegro">{source.images.map((url, index) => <img key={url} src={url} alt={`Zdjecie zrodlowe ${index + 1}`} loading="lazy" referrerPolicy="no-referrer" className="aspect-square w-full rounded-lg bg-white/5 object-contain" />)}</div>
@@ -140,6 +148,7 @@ export function OvokoPreparationPanel() {
           <details><summary className="cursor-pointer text-sm font-bold">Parametry zrodlowe Allegro (bez mapowania ID)</summary><ul className="max-h-60 overflow-auto text-sm">{source.parameters.map((parameter, index) => <li key={index} className="mt-2 break-words">{parameter.name || parameter.id}: {parameter.values.join(", ") || "Brak wartosci tekstowej"}</li>)}</ul></details>
         </section>
         <section className="min-w-0 space-y-4 rounded-2xl border border-white/10 p-4"><h2 className="text-xl font-bold">Robocze dane do Ovoko</h2>
+          <p className="rounded-lg bg-emerald-400/10 p-3 text-sm text-emerald-200">Jednoznaczne dane uzupelniamy automatycznie, bez osobnego zatwierdzania kazdego pola. Poprawiasz tylko wyjatki. Niczego nie publikujemy.</p>
           <label className="block text-sm">Nazwa robocza<input className={field} value={draft.title} maxLength={500} onChange={event => change("title", event.target.value)} /></label><p className="text-xs text-white/60">Nie jest to gotowy tytul importu. W Ovoko nazwa czesci wynika z kategorii.</p>
           <label className="block text-sm">Numer katalogowy - propozycja do sprawdzenia<input className={field} value={draft.manufacturerCode} maxLength={255} onChange={event => change("manufacturerCode", event.target.value)} /></label><p className="text-xs text-white/60">Jedno oznaczenie bez ostrzezen wpisujemy od razu, z calym indeksem. Sprawdz je przed publikacja.</p>
           <details className="space-y-3 rounded-xl border border-violet-400/30 p-3"><summary className="cursor-pointer text-sm font-bold">Podpowiedzi numeru ({numberSuggestions.length})</summary>
@@ -150,7 +159,7 @@ export function OvokoPreparationPanel() {
             <ul className="max-h-72 space-y-3 overflow-auto" aria-label="Propozycje numerow">{numberSuggestions.slice(0, 12).map(candidate => <li key={candidate.number} className="rounded-lg border border-white/10 p-2"><p className="break-all font-mono text-sm font-bold">{candidate.number}</p>{candidate.evidence.map((item, index) => <p key={index} className="break-words text-xs text-white/60">{item.source}: <span className="font-mono">{item.raw}</span></p>)}{candidate.warnings.map(warning => <p key={warning} className="mt-1 text-xs text-amber-200">{warning}</p>)}<button className={`${button} mt-2`} type="button" onClick={() => { change("manufacturerCode", candidate.number); setNumberAccepted(candidate.number); }}>Uzyj numeru {candidate.number}</button></li>)}</ul>
             {numberSuggestions.length > 12 && <p className="text-xs">Pokazano 12 z {numberSuggestions.length} propozycji. Pozostale oznaczenia sprawdz w tytule lub wpisz recznie.</p>}
             <button className={button} type="button" disabled={!draft.manufacturerCode.trim()} onClick={() => setNumberAccepted(draft.manufacturerCode)}>Zatwierdz wpisany numer</button>
-            <p role="status" className={`text-xs ${numberAccepted && numberAccepted === draft.manufacturerCode ? "text-emerald-300" : "text-amber-200"}`}>{numberAccepted && numberAccepted === draft.manufacturerCode ? "Numer zatwierdzony recznie w tej sesji. Nie zweryfikowano go w katalogu producenta." : "Propozycja numeru wymaga sprawdzenia."}</p>
+            <p role="status" className={`text-xs ${numberAccepted && numberAccepted === draft.manufacturerCode ? "text-emerald-300" : "text-amber-200"}`}>{numberAccepted && numberAccepted === draft.manufacturerCode ? "Numer uzupelniony. Nie wymaga osobnego zatwierdzenia. Nie zweryfikowano go w katalogu producenta." : "Propozycja numeru wymaga sprawdzenia."}</p>
           </details>
           <div className="grid grid-cols-2 gap-3"><label className="text-sm">Cena robocza<input className={field} inputMode="decimal" value={draft.price} maxLength={30} onChange={event => change("price", event.target.value)} /></label><label className="text-sm">Waluta<select aria-label="Waluta" className={field} value={draft.currency} onChange={event => change("currency", event.target.value)}><option value="">Wybierz</option><option>PLN</option><option>EUR</option></select></label></div><p className="text-xs text-amber-200">Nie przeliczamy walut. Zmiana PLN/EUR nie zmienia wpisanej kwoty.</p>
           {([ ["categories", "categoryId", "Kategoria Ovoko"], ["qualities", "qualityId", "Jakosc czesci Ovoko"], ["statuses", "statusId", "Status rekordu Ovoko"] ] as const).map(([operation, name, label]) => <div key={operation} className="space-y-2">
@@ -160,7 +169,9 @@ export function OvokoPreparationPanel() {
               <label className="block text-sm">Szukaj w pobranych kategoriach<input type="search" className={field} value={categorySearch} onChange={event => setCategorySearch(event.target.value)} maxLength={100} /></label>
             </details>}
             <label className="block text-sm">{label}<select aria-label={label} className={field} value={draft[name]} disabled={!dictionaries[operation]} onChange={event => change(name, event.target.value)}><option value="">Nie wybrano</option>{(dictionaries[operation] || []).filter(row => operation !== "categories" || row.level === "3").filter(row => operation !== "categories" || row.id === draft.categoryId || suggestionSearchMatches(dictionaryLabel(operation, row), categorySearch)).map(row => <option key={row.id} value={row.id}>{dictionaryLabel(operation, row)}</option>)}</select></label>
-            {operation === "categories" && <p className={`text-xs ${categoryAccepted && categoryAccepted === draft.categoryId ? "text-emerald-300" : "text-amber-200"}`}>{categoryAccepted && categoryAccepted === draft.categoryId ? "Kategorie wybrano recznie w tej sesji." : draft.categoryId ? "Kategoria dopasowana z tytulu - sprawdz." : "Wybierz kategorie; brak jednoznacznej propozycji."}</p>}
+            {operation === "categories" && <p className={`text-xs ${categoryAccepted && categoryAccepted === draft.categoryId ? "text-emerald-300" : "text-amber-200"}`}>{categoryAccepted && categoryAccepted === draft.categoryId ? "Kategoria uzupelniona, bez dodatkowego zatwierdzania." : "Wybierz kategorie; brak jednoznacznej propozycji."}</p>}
+            {operation === "qualities" && <p className="text-xs text-white/60">{source.condition ? "Stan przepisujemy z parametru Stan w Allegro, nie z samego faktu wystawienia." : "Brak jednoznacznego stanu Allegro - wybierz recznie."}</p>}
+            {operation === "statuses" && <p className="text-xs text-white/60">{source.status === "ACTIVE" && source.stock !== null && source.stock > 0 && !source.bundle ? `Aktywna oferta Allegro: ${source.stock} szt. Dostepnosc dopasowujemy do Na stanie. Nie zmniejszamy liczby do jednej sztuki.` : "Brak potwierdzenia aktywnej oferty z dodatnim stanem albo oferta jest zestawem - bez automatycznego Na stanie."} Status magazynowy nie oznacza jeszcze publikacji Ovoko.</p>}
             </div>)}
           {dictionaryBusy && <p role="status" className="text-sm text-violet-200">Dopasowuje slowniki Ovoko...</p>}
           <div className="space-y-3 rounded-xl border border-violet-400/30 p-3"><h3 className="text-sm font-bold">Samochod - marka i model</h3>
