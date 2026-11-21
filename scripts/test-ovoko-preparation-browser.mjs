@@ -15,6 +15,7 @@ const browser = await chromium.launch({ headless: true, channel: "chrome" });
 try {
   const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } }), calls = [], errors = [], allRequests = [];
   let admin = true, failure = false, dictionaryFailure = false, currency = "PLN";
+  let offerTitle = "Pompa ABS 123456", numberParameter = "ABC123";
   const id = "1234567891";
   page.on("pageerror", error => errors.push(error.message)); page.on("request", request => allRequests.push(request.url()));
   await page.route("**/*", async route => {
@@ -27,7 +28,7 @@ try {
     if (url.pathname === `/api/allegro/own-offers/${id}`) {
       assert.equal(request.method(), "GET");
       if (failure) return route.fulfill({ status: 404, json: { message: "Oferta nie nalezy do polaczonego konta." } });
-      return route.fulfill({ json: { id, name: "Pompa ABS 123456", stock: { available: 1 }, publication: { status: "ACTIVE" }, productSet: [{ quantity: { value: 1 }, product: { parameters: [{ id: "mpn", name: "Numer katalogowy części", values: ["ABC123"] }] } }], category: { id: "999" }, sellingMode: { price: { amount: "123.45", currency } }, delivery: { shippingRates: { id: "rate-1" } }, description: { sections: [{ items: [{ type: "TEXT", content: '<p>Opis <b>czesci</b></p><script>window.injected=true</script><iframe src="https://evil.test"></iframe><img src="https://evil.test/pic"><style>body{display:none}</style>' }] }] }, images: ["https://a.allegroimg.com/photo", "https://evil.test/x.jpg"] } });
+      return route.fulfill({ json: { id, name: offerTitle, stock: { available: 1 }, publication: { status: "ACTIVE" }, productSet: [{ quantity: { value: 1 }, product: { parameters: [{ id: "mpn", name: "Numer katalogowy części", values: [numberParameter] }] } }], category: { id: "999" }, sellingMode: { price: { amount: "123.45", currency } }, delivery: { shippingRates: { id: "rate-1" } }, description: { sections: [{ items: [{ type: "TEXT", content: '<p>Opis <b>czesci</b></p><script>window.injected=true</script><iframe src="https://evil.test"></iframe><img src="https://evil.test/pic"><style>body{display:none}</style>' }] }] }, images: ["https://a.allegroimg.com/photo", "https://evil.test/x.jpg"] } });
     }
     if (url.pathname === "/api/allegro/shipping-rates") { assert.equal(request.method(), "GET"); return route.fulfill({ json: { shippingRates: [{ id: "rate-1", name: "Maly kurier" }] } }); }
     assert.equal(url.pathname, "/api/ovoko/read", "Only dictionary reads, no publication or local save endpoints"); assert.equal(request.method(), "POST");
@@ -41,6 +42,8 @@ try {
   assert.equal(await page.getByLabel("Opis / uwagi robocze").inputValue(), "Opis czesci"); assert.equal(await page.evaluate(() => window.injected), undefined);
   assert.ok(allRequests.every(url => !url.includes("evil.test")));
   assert.equal(calls.filter(call => call.method === "POST").length, 0, "Opening preparation performs no Ovoko requests");
+  assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "", "No unconfirmed MPN is inserted");
+  await page.getByRole("button", { name: "Uzyj numeru ABC123", exact: true }).click();
   assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "ABC123");
   assert.equal(await page.getByLabel("Kategoria Ovoko", { exact: true }).inputValue(), "");
   const beforeEdit = calls.length;
@@ -59,6 +62,30 @@ try {
   assert.match(await page.getByLabel("Braki przygotowania").textContent(), /Publikacja jest wylaczona/);
   dictionaryFailure = true; await page.getByRole("button", { name: "Pobierz: Kategoria Ovoko", exact: true }).click(); await page.getByRole("alert").filter({ hasText: "Blad slownika" }).waitFor();
   assert.equal(await page.getByLabel("Kategoria Ovoko", { exact: true }).inputValue(), "3");
+  dictionaryFailure = false;
+  offerTitle = "AUDI POMPA ABS 2012-2020 5Q0959593E 5Q0959593F"; numberParameter = offerTitle;
+  await mount(); await page.getByLabel("Propozycje numerow").waitFor();
+  assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "");
+  assert.equal(await page.getByRole("button", { name: "Uzyj numeru 5Q0959593", exact: true }).count(), 0, "Never offer a truncated indexed title number");
+  assert.equal(await page.getByLabel("Propozycje numerow").locator("li").count(), 2, "A title pasted in MPN is not an extra number candidate");
+  const beforeSuggestions = calls.length;
+  await page.getByRole("button", { name: "Uzyj numeru 5Q0959593E", exact: true }).click();
+  assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "5Q0959593E");
+  await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").fill("5Q0959593");
+  await page.getByText("Numer niezatwierdzony. Nie nadpisujemy go samodzielnie.", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Uzyj numeru 5Q0959593F", exact: true }).click();
+  assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "5Q0959593F"); assert.equal(calls.length, beforeSuggestions, "Number inference and confirmation stay local");
+  await page.getByRole("button", { name: "Pobierz: Kategoria Ovoko", exact: true }).click();
+  await page.getByRole("button", { name: "Uzyj kategorii 3", exact: true }).waitFor();
+  assert.equal(await page.getByLabel("Kategoria Ovoko", { exact: true }).inputValue(), "", "Category ranking never auto-selects a dictionary entry");
+  await page.getByRole("button", { name: "Uzyj kategorii 3", exact: true }).click();
+  assert.equal(await page.getByLabel("Kategoria Ovoko", { exact: true }).inputValue(), "3");
+  const beforeFilter = calls.length;
+  await page.getByLabel("Szukaj w pobranych kategoriach").fill("No matches");
+  assert.equal(await page.getByLabel("Kategoria Ovoko", { exact: true }).inputValue(), "3", "Search never erases an existing manual choice"); assert.equal(calls.length, beforeFilter);
+  assert.equal(await page.getByLabel("Jakosc czesci Ovoko", { exact: true }).inputValue(), "");
+  assert.equal(await page.getByLabel("Status rekordu Ovoko", { exact: true }).inputValue(), "");
+  assert.equal(await page.getByLabel("ID samochodu-dawcy Ovoko - roboczo, niezweryfikowane").inputValue(), "");
   mkdirSync(new URL("../outputs/ovoko-preparation-preview/", import.meta.url), { recursive: true });
   await page.screenshot({ path: fileURLToPath(new URL("../outputs/ovoko-preparation-preview/desktop.png", import.meta.url)), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 }); assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));

@@ -42,7 +42,7 @@ export function ovokoSourcePreview(input: unknown, expectedId: string, toText: (
 export type OvokoPreparationDraft = { title: string; notes: string; manufacturerCode: string; price: string; currency: string; categoryId: string; donorId: string; qualityId: string; statusId: string; shippingPlan: string };
 export function initialOvokoDraft(source: OvokoSourcePreview): OvokoPreparationDraft {
   const supported = ["PLN", "EUR"].includes(source.currency);
-  return { title: source.title, notes: source.description, manufacturerCode: source.suggestedCode, price: supported ? source.price : "", currency: supported ? source.currency : "", categoryId: "", donorId: "", qualityId: "", statusId: "", shippingPlan: "" };
+  return { title: source.title, notes: source.description, manufacturerCode: "", price: supported ? source.price : "", currency: supported ? source.currency : "", categoryId: "", donorId: "", qualityId: "", statusId: "", shippingPlan: "" };
 }
 export function ovokoPreparationIssues(source: OvokoSourcePreview, draft: OvokoPreparationDraft): string[] {
   const issues = ["Publikacja jest wylaczona w tym etapie. Ten podglad nie wysyla danych oferty do Ovoko.", "Samochod-dawca wymaga odczytu i potwierdzenia na Twoim koncie Ovoko; wpisany numer nie jest zweryfikowany.", "Pozostaje sprawdzenie wymaganych atrybutow zaleznych od kategorii oraz zasad wysylki Ovoko."];

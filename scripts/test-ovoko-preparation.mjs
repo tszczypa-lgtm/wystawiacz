@@ -11,6 +11,7 @@ assert.deepEqual(preview.images, ["https://a.allegroimg.com/picture"]); assert.e
 assert.equal(preview.suggestedCode, "ABC123"); assert.equal(preview.shippingRateId, "rate-id"); assert.equal(preview.bundle, false);
 assert.equal(preview.description, "Text");
 const draft = initialOvokoDraft(preview); assert.equal(draft.price, "123.45"); assert.equal(draft.currency, "PLN");
+assert.equal(draft.manufacturerCode, "", "MPN requires explicit user choice even when the parameter looks plausible");
 assert.equal(draft.categoryId, ""); assert.equal(draft.donorId, ""); assert.equal(draft.qualityId, ""); assert.equal(draft.statusId, ""); assert.equal(draft.shippingPlan, "");
 const issues = ovokoPreparationIssues(preview, draft); assert.ok(issues.some(item => item.includes("formatu"))); assert.ok(issues.some(item => item.includes("Cennik Allegro")));
 const filled = { ...draft, categoryId: "3", donorId: "36", qualityId: "0", statusId: "0", shippingPlan: "Check" };
