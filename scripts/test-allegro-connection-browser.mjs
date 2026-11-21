@@ -36,6 +36,15 @@ try {
   await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { origin: location.origin, source: window, data: { type: "wystawiacz-allegro-complete", ok: true } })));
   assert.equal(calls.filter(call => call.path.endsWith("/me")).length, 1, "Unrelated windows cannot complete OAuth");
   await popup.goto("https://connection.test/callback");
+  await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { origin: "https://unsafe.test", source: window.fixturePopup, data: { type: "wystawiacz-allegro-complete", ok: false, code: "seller_not_allowed" } })));
+  assert.equal(await page.getByText(/Zablokowano przypisanie konta Allegro/).count(), 0, "Foreign origins cannot inject a binding failure");
+  await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { origin: location.origin, source: window.fixturePopup, data: { type: "wystawiacz-allegro-complete", ok: false, code: "seller_not_allowed", message: "private-provider-error" } })));
+  await page.getByText(/Kod: seller_not_allowed/).waitFor();
+  assert.equal(calls.filter(call => call.path.endsWith("/me")).length, 1, "Binding rejection never reloads or reconnects automatically");
+  assert.equal(await page.getByText("private-provider-error").count(), 0);
+  await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { origin: location.origin, source: window.fixturePopup, data: { type: "wystawiacz-allegro-complete", ok: false, code: "private-unknown-code" } })));
+  await page.getByText(/Nie potwierdzono, ze przyczyna jest przypisanie sprzedawcy/).waitFor();
+  assert.equal(await page.getByText(/private-unknown-code/).count(), 0, "Unknown error codes are not echoed");
   connected = true;
   await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { origin: location.origin, source: window.fixturePopup, data: { type: "wystawiacz-allegro-complete", ok: true } })));
   await page.getByText("Testowy sprzedawca", { exact: true }).waitFor();

@@ -13,8 +13,13 @@ export function AllegroConnection() {
     void allegroRequest<{ id: string; login?: string }>("/me").then(data => { if (mounted) setSeller(data); }).catch(error => { if (mounted) setMessage(error.message); });
     const receive = (event: MessageEvent) => {
       if (event.origin !== window.location.origin || !popup.current || event.source !== popup.current || event.data?.type !== "wystawiacz-allegro-complete") return;
-      if (event.data.ok) window.location.reload();
-      else { setBusy(false); setMessage("Nie udalo sie polaczyc konta. Dotychczasowe polaczenie pozostalo bez zmian."); }
+      if (event.data.ok === true) window.location.reload();
+      else {
+        setBusy(false);
+        setMessage(event.data.code === "seller_not_allowed"
+          ? "Zablokowano przypisanie konta Allegro: jest juz przypisane do innego konta Wystawiacza albo osiagnieto limit kont Allegro. Administrator nie omija tej blokady. Nie rozlaczaj dzialajacego konta; najpierw sprawdzimy przypisanie. Kod: seller_not_allowed. Dotychczasowe polaczenie pozostalo bez zmian."
+          : "Nie udalo sie polaczyc konta. Nie potwierdzono, ze przyczyna jest przypisanie sprzedawcy. Dotychczasowe polaczenie pozostalo bez zmian.");
+      }
     };
     window.addEventListener("message", receive);
     return () => { mounted = false; window.removeEventListener("message", receive); };
