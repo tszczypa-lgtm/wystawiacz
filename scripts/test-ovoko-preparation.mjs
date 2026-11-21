@@ -24,7 +24,7 @@ assert.equal(draft.manufacturerCode, "", "MPN requires explicit user choice even
 assert.equal(draft.categoryId, ""); assert.equal(draft.donorId, ""); assert.equal(draft.qualityId, ""); assert.equal(draft.statusId, ""); assert.equal(draft.shippingPlan, "");
 const issues = ovokoPreparationIssues(preview, draft); assert.ok(issues.some(item => item.includes("formatu"))); assert.ok(issues.some(item => item.includes("Cennik Allegro")));
 const filled = { ...draft, categoryId: "3", donorId: "36", qualityId: "0", statusId: "0", shippingPlan: "Check" };
-assert.ok(ovokoPreparationIssues(preview, filled).some(item => item.includes("Publikacja jest wylaczona")), "Filling every field must never enable publishing");
+assert.ok(ovokoPreparationIssues(preview, filled).some(item => item.includes("Samochod-dawca")), "Filling a donor ID does not verify provenance");
 assert.ok(ovokoPreparationIssues(preview, filled).some(item => item.includes("nie jest zweryfikowany")));
 assert.equal(initialOvokoDraft({ ...preview, currency: "CZK" }).price, "", "Never reinterpret or convert unsupported currency");
 assert.equal(initialOvokoDraft({ ...preview, currency: "CZK" }).currency, "");
@@ -32,4 +32,4 @@ assert.equal(ovokoSourcePreview({ ...offer, parameters: [] }, "123", html => htm
 assert.equal(ovokoSourcePreview({ ...offer, parameters: [...offer.parameters, { name: "Kod producenta", values: ["OTHER"] }] }, "123", html => html).suggestedCode, "", "Ambiguous MPN is not auto-selected");
 assert.ok(ovokoPreparationIssues({ ...preview, stock: 2 }, filled).some(item => item.includes("fizyczna czescia")));
 for (const value of [null, [], {}, { ...offer, id: "456" }]) assert.throws(() => ovokoSourcePreview(value, "123", html => html), /Nieprawidlowe/);
-console.log("Ovoko preparation: matching source ID, safe photo hosts, explicit MPN proposal, no ID mapping, no FX conversion, stock/bundle warnings and permanently disabled publication passed.");
+console.log("Ovoko preparation: matching source ID, condition text/IDs and precedence, safe photos, draft-only initialization, no FX, stock/bundle warnings and unverified donor separation passed.");

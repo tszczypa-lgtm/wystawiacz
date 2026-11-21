@@ -338,13 +338,20 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
         if (!/^[A-Z0-9 .\/-]{3,40}$/i.test(number) || !/\d/.test(number)) throw new ApiError(400, "Wpisz numer czesci.");
         return json(await remote(`/sale/offers?name=${encodeURIComponent(number)}&publication.status=ACTIVE&limit=100`));
       }
-      if (path.startsWith("/own-offers/")) {
-        const id = path.slice("/own-offers/".length);
+      if (path.startsWith("/own-offers/") || path.startsWith("/ovoko-source/")) {
+        const forOvoko = path.startsWith("/ovoko-source/");
+        const id = path.slice((forOvoko ? "/ovoko-source/" : "/own-offers/").length);
         if (!/^\d+$/.test(id)) throw new ApiError(400, "Nieprawidlowa oferta.");
         // /sale/offers is restricted to the authenticated seller's assortment.
         const owned = await remote(`/sale/offers?offer.id=${id}&limit=1`);
         if (!Array.isArray(owned.offers) || !owned.offers.some((item: { id: string }) => item.id === id)) throw new ApiError(404, "Oferta nie nalezy do polaczonego konta.");
-        return json(await remote(`/sale/product-offers/${id}`));
+        const offer = await remote(`/sale/product-offers/${id}`);
+        if (forOvoko) {
+          const seller = await remote("/me");
+          if (!/^\d{1,30}$/.test(seller.id)) throw new ApiError(502, "Niepotwierdzony sprzedawca Allegro.");
+          return json({ offer, sellerId: seller.id });
+        }
+        return json(offer);
       }
       if (path === "/catalog-products") {
         const number = url.searchParams.get("number") || "";

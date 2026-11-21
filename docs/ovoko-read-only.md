@@ -1,5 +1,7 @@
 # Ovoko - pierwszy test odczytu
 
+Historia etapow odczytu i przygotowania. Aktualna pojedyncza proba zapisu (domyslnie wylaczona flaga serwera), migracja 012 i blokada duplikatow sa opisane w [ovoko-single-publication.md](ovoko-single-publication.md). Ponizsze opisy starszego podgladu nie okreslaja aktualnego zakresu przycisku wysylki.
+
 - Panel `/panel/ovoko`, link widoczny tylko administratorom. API osobno sprawdza uprawnienia i zawieszenie konta.
 - `GET /api/ovoko/status` sprawdza dostep lokalny oraz metadane zapisanego polaczenia, bez kontaktu z Ovoko. Nie zwraca loginu, hasla, tokena ani szyfrogramu. Brak szyfrowania umozliwia tylko odczyty jednorazowe.
 - `POST /api/ovoko/test` przyjmuje login, haslo i user_token z formularza i wywoluje WYLACZNIE `POST https://api.rrr.lt/get/car_brands` jako form data. Nie przyjmuje docelowego URL ani operacji od klienta. Redirecty sa blokowane.

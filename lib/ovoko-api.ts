@@ -1,8 +1,9 @@
 import { accountContext, type AccountEnv } from "./account-api";
 import { OvokoError, ovokoReadPlan, parseOvokoRead } from "./ovoko-read";
 import { loadOvokoConnection, ovokoConnectionKey, ovokoConnectionStatus, removeOvokoConnection, saveOvokoConnection, validateOvokoCredentials, type OvokoKeyEnv } from "./ovoko-connection";
+import { publishOvokoPart, type OvokoPublishEnv } from "./ovoko-publish";
 
-type OvokoEnv = AccountEnv & OvokoKeyEnv & { OVOKO_TEST_ENABLED?: string };
+type OvokoEnv = AccountEnv & OvokoKeyEnv & OvokoPublishEnv & { OVOKO_TEST_ENABLED?: string };
 const attempts = new Map<string, number[]>();
 async function boundedText(input: Pick<Request, "body" | "headers">, limit: number) {
   if (Number(input.headers.get("Content-Length")) > limit) throw new OvokoError(413, "Odpowiedz lub formularz przekracza limit rozmiaru.");
@@ -40,14 +41,21 @@ export async function handleOvokoApi(request: Request, env: OvokoEnv): Promise<R
       const status = storageReady ? await ovokoConnectionStatus(context) : { connected: false, verifiedAt: null };
       return reply({ allowed: true, readOnly: true, storageReady, credentialsStored: status.connected, ...status });
     }
-    if (!["/api/ovoko/test", "/api/ovoko/read", "/api/ovoko/connect", "/api/ovoko/disconnect"].includes(url.pathname)) return reply({ message: "Nieznana operacja Ovoko. Zapis ofert nie jest dostepny." }, 404);
+    if (!["/api/ovoko/test", "/api/ovoko/read", "/api/ovoko/connect", "/api/ovoko/disconnect", "/api/ovoko/publish"].includes(url.pathname)) return reply({ message: "Nieznana operacja Ovoko." }, 404);
     if (request.method !== "POST") return reply({ message: "Nieprawidlowa metoda." }, 405);
     if (request.headers.get("Origin") !== url.origin || (env.APP_ORIGIN && env.APP_ORIGIN !== url.origin)) return reply({ message: "Nieprawidlowe zrodlo zadania." }, 403);
     if (request.headers.get("Content-Type")?.split(";")[0].trim() !== "application/json") return reply({ message: "Nieprawidlowy format formularza." }, 415);
     let input: unknown;
-    try { input = JSON.parse(await boundedText(request, 8192)); } catch (error) { if (error instanceof OvokoError) throw error; throw new OvokoError(400, "Nieprawidlowy formularz."); }
+    try { input = JSON.parse(await boundedText(request, url.pathname === "/api/ovoko/publish" ? 200000 : 8192)); } catch (error) { if (error instanceof OvokoError) throw error; throw new OvokoError(400, "Nieprawidlowy formularz."); }
     if (!input || typeof input !== "object" || Array.isArray(input)) throw new OvokoError(400, "Nieprawidlowy formularz.");
     const values = input as Record<string, unknown>;
+    if (url.pathname === "/api/ovoko/publish") {
+      const now = Date.now(), key = `${context.user.id}:publish`, recent = (attempts.get(key) || []).filter(time => now - time < 60000);
+      if (recent.length >= 3) throw new OvokoError(429, "Maksymalnie 3 pojedyncze proby na minute.");
+      if (attempts.size >= 1000 && !attempts.has(key)) attempts.delete(attempts.keys().next().value!);
+      attempts.set(key, [...recent, now]);
+      return reply(await publishOvokoPart(request, env, context, values));
+    }
     if (url.pathname === "/api/ovoko/disconnect") {
       await removeOvokoConnection(context);
       return reply({ ok: true, connected: false, credentialsStored: false, readOnly: true });

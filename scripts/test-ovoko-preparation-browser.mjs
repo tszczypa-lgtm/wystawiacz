@@ -19,6 +19,7 @@ try {
   let holdAudi = false, releaseAudi = null, audiStarted = null;
   let condition = "Używany", stock = 1, publication = "ACTIVE";
   let holdStatuses = false, releaseStatuses = null, statusesStarted = null;
+  let validImages = false, publicationFailure = false;
   const id = "1234567891";
   page.on("pageerror", error => errors.push(error.message)); page.on("request", request => allRequests.push(request.url()));
   await page.route("**/*", async route => {
@@ -31,9 +32,15 @@ try {
     if (url.pathname === `/api/allegro/own-offers/${id}`) {
       assert.equal(request.method(), "GET");
       if (failure) return route.fulfill({ status: 404, json: { message: "Oferta nie nalezy do polaczonego konta." } });
-      return route.fulfill({ json: { id, name: offerTitle, parameters: condition ? [{ id: "11323", name: "Stan", values: [condition] }] : [], stock: { available: stock }, publication: { status: publication }, productSet: [{ quantity: { value: 1 }, product: { parameters: [{ id: "mpn", name: "Numer katalogowy części", values: [numberParameter] }] } }], category: { id: "999" }, sellingMode: { price: { amount: "123.45", currency } }, delivery: { shippingRates: { id: "rate-1" } }, description: { sections: [{ items: [{ type: "TEXT", content: '<p>Opis <b>czesci</b></p><script>window.injected=true</script><iframe src="https://evil.test"></iframe><img src="https://evil.test/pic"><style>body{display:none}</style>' }] }] }, images: ["https://a.allegroimg.com/photo", "https://evil.test/x.jpg"] } });
+      return route.fulfill({ json: { id, name: offerTitle, parameters: condition ? [{ id: "11323", name: "Stan", values: [condition] }] : [], stock: { available: stock }, publication: { status: publication }, productSet: [{ quantity: { value: 1 }, product: { parameters: [{ id: "mpn", name: "Numer katalogowy części", values: [numberParameter] }] } }], category: { id: "999" }, sellingMode: { price: { amount: "123.45", currency } }, delivery: { shippingRates: { id: "rate-1" } }, description: { sections: [{ items: [{ type: "TEXT", content: '<p>Opis <b>czesci</b></p><script>window.injected=true</script><iframe src="https://evil.test"></iframe><img src="https://evil.test/pic"><style>body{display:none}</style>' }] }] }, images: validImages ? ["https://a.allegroimg.com/photo"] : ["https://a.allegroimg.com/photo", "https://evil.test/x.jpg"] } });
     }
     if (url.pathname === "/api/allegro/shipping-rates") { assert.equal(request.method(), "GET"); return route.fulfill({ json: { shippingRates: [{ id: "rate-1", name: "Maly kurier" }] } }); }
+    if (url.pathname === "/api/ovoko/publish") {
+      assert.equal(request.method(), "POST"); const body = request.postDataJSON();
+      assert.equal(body.offerId, id); assert.equal(body.donorId, "13"); assert.equal(body.modelId, "11"); assert.equal(body.confirmSingle, true); assert.equal(body.donorConfirmed, true); assert.equal(body.shippingConfirmed, true); assert.equal(body.qualityId, "0"); assert.equal(body.statusId, "0");
+      assert.equal(body.photos, undefined); assert.equal(body.username, undefined);
+      return route.fulfill(publicationFailure ? { status: 409, json: { message: "Wynik wysylki jest niepewny. Sprawdz Ovoko." } } : { json: { ok: true, partId: "77", visibilityConfirmed: false } });
+    }
     assert.ok(["/api/ovoko/read", "/api/ovoko/test"].includes(url.pathname), "Only dictionary reads, no publication or local save endpoints"); assert.equal(request.method(), "POST");
     const payload = request.postDataJSON(); assert.equal(payload.useSaved, true);
     if (url.pathname === "/api/ovoko/test") { assert.deepEqual(payload, { useSaved: true }); return route.fulfill({ json: { ok: true, readOnly: true, brands: [{ id: "1", name: "Audi" }, { id: "2", name: "Volkswagen" }] } }); }
@@ -54,7 +61,7 @@ try {
   await page.getByLabel("Marka auta Ovoko").locator('option[value="1"]').waitFor({ state: "attached" });
   assert.equal(calls.filter(call => call.method === "POST").length, 4, "Opening preparation automatically loads four fixed dictionaries");
   assert.equal(await page.getByRole("button", { name: /Pobierz|Odczytaj/ }).count(), 0);
-  assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "", "No unconfirmed MPN is inserted");
+  assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "ABC123", "One complete number is inserted without an extra confirmation");
   await page.getByText("Podpowiedzi numeru (1)", { exact: true }).click();
   await page.getByRole("button", { name: "Uzyj numeru ABC123", exact: true }).click();
   assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "ABC123");
@@ -72,8 +79,8 @@ try {
   await page.getByText("Cennik Allegro: Maly kurier", { exact: true }).waitFor();
   await page.getByLabel("ID samochodu-dawcy Ovoko - roboczo, niezweryfikowane").fill("36");
   await page.getByLabel("Plan wysylki do sprawdzenia").fill("Sprawdze gabaryt i cene wysylki");
-  assert.equal(await page.getByRole("button", { name: /Wystaw|Opublikuj|Publikuj|Usun|Wycofaj/ }).count(), 0);
-  assert.match(await page.getByLabel("Braki przygotowania").textContent(), /Publikacja jest wylaczona/);
+  assert.equal(await page.getByRole("button", { name: "Sprawdz pojedyncza wysylke", exact: true }).isDisabled(), true, "Incomplete photos block even the confirmation step");
+  assert.equal(calls.filter(call => call.path === "/api/ovoko/publish").length, 0);
   dictionaryFailure = true; await mount(); await page.getByRole("alert").filter({ hasText: "Blad slownika" }).waitFor();
   await page.getByLabel("Cena robocza").fill("88"); assert.equal(await page.getByLabel("Cena robocza").inputValue(), "88", "Failed metadata reads leave the draft editable");
   dictionaryFailure = false;
@@ -144,6 +151,30 @@ try {
   assert.equal(await page.getByLabel("Jakosc czesci Ovoko", { exact: true }).inputValue(), "1");
   assert.equal(await page.getByLabel("Status rekordu Ovoko", { exact: true }).inputValue(), "", "Ended offers are not treated as in stock");
   condition = "Używany"; publication = "ACTIVE"; stock = 1;
+  validImages = true;
+  await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="11"]').waitFor({ state: "attached" });
+  await page.getByLabel("ID samochodu-dawcy Ovoko - roboczo, niezweryfikowane").fill("13");
+  await page.getByRole("button", { name: "Sprawdz pojedyncza wysylke", exact: true }).click();
+  const send = page.getByRole("button", { name: "Wyslij 1 czesc do Ovoko", exact: true });
+  assert.equal(await send.isDisabled(), true);
+  await page.getByLabel("Potwierdzam rzeczywistego dawce tej czesci, nie tylko pasujacy model.").check();
+  assert.equal(await send.isDisabled(), true);
+  await page.getByLabel("Sprawdzilem zasady i koszt wysylki w Ovoko. Cennik Allegro nie zostanie przeniesiony.").check();
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), "Confirmation fits the mobile viewport");
+  await page.screenshot({ path: fileURLToPath(new URL("../outputs/ovoko-preparation-preview/confirmation-mobile.png", import.meta.url)), fullPage: true });
+  assert.equal(calls.filter(call => call.path === "/api/ovoko/publish").length, 0, "No write before explicit final action");
+  await send.dblclick(); await page.getByRole("status").filter({ hasText: "utworzenie czesci ID 77" }).waitFor();
+  assert.equal(calls.filter(call => call.path === "/api/ovoko/publish").length, 1, "Double click sends only one publication request");
+  assert.equal(await send.isDisabled(), true);
+  assert.equal(await page.getByLabel("Cena robocza").isDisabled(), true);
+  publicationFailure = true;
+  await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="11"]').waitFor({ state: "attached" });
+  await page.getByLabel("ID samochodu-dawcy Ovoko - roboczo, niezweryfikowane").fill("13");
+  await page.getByRole("button", { name: "Sprawdz pojedyncza wysylke", exact: true }).click();
+  await page.getByLabel("Potwierdzam rzeczywistego dawce tej czesci, nie tylko pasujacy model.").check();
+  await page.getByLabel("Sprawdzilem zasady i koszt wysylki w Ovoko. Cennik Allegro nie zostanie przeniesiony.").check();
+  await send.click(); await page.getByRole("alert").filter({ hasText: "Wynik wysylki jest niepewny" }).waitFor();
+  assert.equal(await send.isDisabled(), true, "Uncertain responses cannot be retried automatically");
   currency = "CZK"; await mount(); await page.getByLabel("Cena robocza").waitFor(); assert.equal(await page.getByLabel("Cena robocza").inputValue(), "");
   assert.equal(await page.getByLabel("ID samochodu-dawcy Ovoko - roboczo, niezweryfikowane").inputValue(), "", "Draft never persists across reloads");
   failure = true; await mount(); await page.getByRole("alert").filter({ hasText: "Oferta nie nalezy" }).waitFor(); assert.equal(await page.getByLabel("Nazwa robocza", { exact: true }).count(), 0);
@@ -151,5 +182,5 @@ try {
   await mount(); await page.getByRole("alert").filter({ hasText: "administratora" }).waitFor(); assert.equal(calls.filter(call => call.path.includes("own-offers")).length, beforeDenied);
   admin = true; const beforeInvalid = calls.length; await mount("offerId=123&offerId=456"); await page.getByRole("alert").filter({ hasText: "Wybierz jedna" }).waitFor(); assert.equal(calls.length, beforeInvalid);
   assert.equal(await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage })), "{}"); assert.deepEqual(errors, []);
-  console.log("Ovoko preparation browser: automatic bounded dictionary reads, complete number/category suggestions, brand/model selection, no donor guessing, inert HTML, memory-only draft, admin/error guards and desktop/mobile layout passed.");
+  console.log("Ovoko preparation browser: autofill, no automatic publication, required confirmations, single explicit send, double-click/no-retry guards, donor separation, inert HTML, roles and desktop/mobile passed. No live services.");
 } finally { await browser.close(); }

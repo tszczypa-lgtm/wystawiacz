@@ -32,6 +32,7 @@ globalThis.fetch = async (address, options = {}) => {
     assert.equal(url.pathname, `/sale/product-offers/${ownedId}`); assert.equal(options.method || "GET", "GET");
     calls.push({ url, auth }); return Response.json({ id: ownedId, name: "Owned source preview" });
   }
+  if (detailMode && url.pathname === "/me") { assert.equal(options.method || "GET", "GET"); return Response.json({ id: auth === "Bearer seller-0" ? "555" : "666" }); }
   assert.equal(url.pathname, "/sale/offers");
   assert.equal(options.method || "GET", "GET", "No seller mutations allowed");
   calls.push({ url, auth });
@@ -71,6 +72,9 @@ try {
   assert.equal((await handleAllegroApi(sourceRequest("1234567890", 1), env)).status, 404, "Foreign seller's detail cannot be used as a preparation source");
   assert.equal(calls.filter(call => call.url.pathname.startsWith("/sale/product-offers/")).length, detailsBefore, "Detail is never fetched when ownership check fails");
   assert.equal((await (await handleAllegroApi(sourceRequest("2234567890", 1), env)).json()).id, "2234567890");
+  const ovokoSourceRequest = (id, index = 0) => new Request(`https://example.test/api/allegro/ovoko-source/${id}`, { headers: { Authorization: `Bearer user-${index}` } });
+  assert.deepEqual(await (await handleAllegroApi(ovokoSourceRequest("1234567890"), env)).json(), { offer: { id: "1234567890", name: "Owned source preview" }, sellerId: "555" });
+  assert.equal((await handleAllegroApi(ovokoSourceRequest("1234567890", 1), env)).status, 404, "The publication-specific source route also rejects a foreign seller");
   assert.equal(inventoryQuery(new URLSearchParams("shippingRate=none")).remote.get("delivery.shippingRates.id.empty"), "true");
   console.log("Inventory API: seller isolation, read-only methods, bounded pagination beyond 100k, strict filters, shipping IDs, no-store and failure handling passed. No live requests.");
 } finally { globalThis.fetch = originalFetch; }

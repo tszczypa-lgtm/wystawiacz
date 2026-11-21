@@ -19,6 +19,8 @@ export function OvokoPreparationPanel() {
   const [categorySearch, setCategorySearch] = useState("");
   const [brandId, setBrandId] = useState(""), [modelId, setModelId] = useState("");
   const [modelsBusy, setModelsBusy] = useState(false), [modelError, setModelError] = useState("");
+  const [review, setReview] = useState(false), [donorConfirmed, setDonorConfirmed] = useState(false), [shippingConfirmed, setShippingConfirmed] = useState(false);
+  const [publishing, setPublishing] = useState(false), [attempted, setAttempted] = useState(false), [publicationMessage, setPublicationMessage] = useState(""), [partId, setPartId] = useState("");
   const vehicleText = source ? vehicleSuggestionText(source.title, source.parameters) : "";
   const brandSuggestions = useMemo(() => suggestOvokoBrands(vehicleText, dictionaries.brands || []), [vehicleText, dictionaries.brands]);
   const modelSuggestions = useMemo(() => suggestOvokoModels(vehicleText, dictionaries.models || []), [vehicleText, dictionaries.models]);
@@ -116,7 +118,9 @@ export function OvokoPreparationPanel() {
       .finally(() => { if (!controller.signal.aborted) setModelsBusy(false); });
     return () => controller.abort();
   }, [brandId, vehicleText]);
+  useEffect(() => { setReview(false); setDonorConfirmed(false); setShippingConfirmed(false); }, [brandId, modelId]);
   function change(name: keyof OvokoPreparationDraft, value: string) {
+    setReview(false); setDonorConfirmed(false); setShippingConfirmed(false);
     touched.current.add(name);
     if (name === "manufacturerCode") setNumberAccepted("");
     if (name === "categoryId") setCategoryAccepted(value);
@@ -130,9 +134,25 @@ export function OvokoPreparationPanel() {
     }
     return `${names.join(" / ")} (ID ${row.id})`;
   }
+  const canPublish = Boolean(source && draft && !busy && !dictionaryBusy && !modelsBusy && source.status === "ACTIVE" && source.stock === 1 && !source.bundle && source.images.length && !source.skippedImages && brandId && modelId && /^[1-9]\d{0,11}$/.test(draft.donorId) && draft.categoryId && draft.qualityId && draft.statusId && /^[A-Z0-9]{6,32}$/.test(draft.manufacturerCode) && /^\d+(\.\d{1,2})?$/.test(draft.price) && Number(draft.price) > 0 && ["PLN", "EUR"].includes(draft.currency));
+  async function publishSingle() {
+    if (!canPublish || !source || !draft || publishing || attempted || !review || !donorConfirmed || !shippingConfirmed) return;
+    setPublishing(true); setAttempted(true); setPublicationMessage("");
+    try {
+      const { data } = await createSupabaseBrowserClient().auth.getSession();
+      if (!data.session) throw new Error("Zaloguj sie ponownie. Nie potwierdzono wysylki.");
+      const response = await fetch("/api/ovoko/publish", { method: "POST", cache: "no-store", headers: { Authorization: `Bearer ${data.session.access_token}`, "Content-Type": "application/json" }, body: JSON.stringify({ offerId: source.id, brandId, modelId, donorId: draft.donorId, categoryId: draft.categoryId, qualityId: draft.qualityId, statusId: draft.statusId, manufacturerCode: draft.manufacturerCode, price: draft.price, currency: draft.currency, notes: draft.notes, confirmSingle: true, donorConfirmed, shippingConfirmed, expectedSource: { title: source.title, price: source.price, currency: source.currency, stock: source.stock, status: source.status, condition: source.condition, images: source.images } }) });
+      const result = await response.json() as { ok?: boolean; partId?: string; alreadyCreated?: boolean; message?: string };
+      if (!response.ok || result.ok !== true || !result.partId || !/^\d{1,12}$/.test(result.partId)) throw new Error(result.message || "Niepotwierdzony wynik wysylki. Sprawdz Ovoko przed ponowieniem.");
+      setPartId(result.partId);
+      setPublicationMessage(`${result.alreadyCreated ? "Ta oferta byla juz wyslana; nie wyslano jej ponownie i nie zmieniono ceny ani opisu." : "Ovoko potwierdzilo utworzenie czesci"} ID ${result.partId}. Sprawdz zdjecia, cene, wysylke i widocznosc w sklepie Ovoko. Nie zmieniono oferty Allegro.`);
+    } catch (error) {
+      setPublicationMessage(error instanceof Error ? error.message : "Niepewny wynik wysylki. Sprawdz Ovoko; nie ponawiaj automatycznie.");
+    } finally { setPublishing(false); }
+  }
   return <section className="space-y-5">
     <h1 className="text-3xl font-black">Przygotuj do Ovoko</h1>
-    <p className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm leading-6"><strong>Tylko roboczy podglad jednej oferty.</strong> Nie publikujemy, nie tworzymy auta ani czesci w Ovoko. Niczego nie zmieniamy na Allegro. Zmiany formularza sa tylko w pamieci tej strony i znikna po jej zamknieciu lub odswiezeniu.</p>
+    <p className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm leading-6"><strong>Przygotowanie jednej oferty.</strong> Sam podglad niczego nie wysyla. Dopiero osobne potwierdzenie na dole tworzy jedna czesc w Ovoko. Nie tworzymy samochodu i nie zmieniamy Allegro. Edycja formularza pozostaje w pamieci; rejestr proby wysylki jest zapisywany na serwerze.</p>
     <a href="/panel/inventory" className="inline-block text-sm underline">Wroc do ofert Allegro</a>
     {busy && <p role="status">Sprawdzam uprawnienia i pobieram oferte z polaczonego konta Allegro...</p>}
     {error && <p role="alert" className="rounded-xl border border-amber-400/30 p-4">{error} Nie utworzono podgladu i nie zmieniono ofert.</p>}
@@ -147,10 +167,10 @@ export function OvokoPreparationPanel() {
           <p className="text-sm text-white/60">Adresow zdjec do sprawdzenia: {source.images.length}. Pominiete lub powtorzone: {source.skippedImages}. Nie wyslano zdjec do Ovoko.</p>
           <details><summary className="cursor-pointer text-sm font-bold">Parametry zrodlowe Allegro (bez mapowania ID)</summary><ul className="max-h-60 overflow-auto text-sm">{source.parameters.map((parameter, index) => <li key={index} className="mt-2 break-words">{parameter.name || parameter.id}: {parameter.values.join(", ") || "Brak wartosci tekstowej"}</li>)}</ul></details>
         </section>
-        <section className="min-w-0 space-y-4 rounded-2xl border border-white/10 p-4"><h2 className="text-xl font-bold">Robocze dane do Ovoko</h2>
-          <p className="rounded-lg bg-emerald-400/10 p-3 text-sm text-emerald-200">Jednoznaczne dane uzupelniamy automatycznie, bez osobnego zatwierdzania kazdego pola. Poprawiasz tylko wyjatki. Niczego nie publikujemy.</p>
+        <fieldset disabled={publishing || attempted} className="min-w-0 space-y-4 rounded-2xl border border-white/10 p-4"><h2 className="text-xl font-bold">Robocze dane do Ovoko</h2>
+          <p className="rounded-lg bg-emerald-400/10 p-3 text-sm text-emerald-200">Jednoznaczne dane uzupelniamy automatycznie. Poprawiasz tylko wyjatki; wysylke potwierdzasz osobno na dole.</p>
           <label className="block text-sm">Nazwa robocza<input className={field} value={draft.title} maxLength={500} onChange={event => change("title", event.target.value)} /></label><p className="text-xs text-white/60">Nie jest to gotowy tytul importu. W Ovoko nazwa czesci wynika z kategorii.</p>
-          <label className="block text-sm">Numer katalogowy - propozycja do sprawdzenia<input className={field} value={draft.manufacturerCode} maxLength={255} onChange={event => change("manufacturerCode", event.target.value)} /></label><p className="text-xs text-white/60">Jedno oznaczenie bez ostrzezen wpisujemy od razu, z calym indeksem. Sprawdz je przed publikacja.</p>
+          <label className="block text-sm">Numer katalogowy - propozycja do sprawdzenia<input className={field} value={draft.manufacturerCode} maxLength={255} onChange={event => change("manufacturerCode", event.target.value)} /></label><p className="text-xs text-white/60">Jeden znaleziony numer wpisujemy od razu, takze cyfrowy i z oddzielonym indeksem. Zachowujemy poczatkowe zera. Kilka numerow lub mozliwy VIN pozostawiamy do wyboru.</p>
           <details className="space-y-3 rounded-xl border border-violet-400/30 p-3"><summary className="cursor-pointer text-sm font-bold">Podpowiedzi numeru ({numberSuggestions.length})</summary>
             <h3 className="text-sm font-bold text-violet-200">Oznaczenia znalezione w tytule i parametrach</h3>
             <p className="text-xs leading-5 text-white/65">Przepisujemy cale znalezione oznaczenie razem z literami. Spacje, kropki i myslniki usuwamy tylko w propozycji zapisu. Nie dopisujemy brakujacego indeksu i nie potwierdzamy autentycznosci numeru OE. Pole parametru zawierajace caly tytul pomijamy.</p>
@@ -182,10 +202,20 @@ export function OvokoPreparationPanel() {
           <label className="block text-sm">ID samochodu-dawcy Ovoko - roboczo, niezweryfikowane<input className={field} value={draft.donorId} maxLength={12} inputMode="numeric" onChange={event => change("donorId", event.target.value)} /></label><p className="text-xs text-amber-200">To nie jest ID modelu, czesci ani miejsca skladowania. Nie tworz tego numeru na podstawie Allegro. Weryfikacja dawcy bedzie osobnym krokiem.</p>
           <label className="block text-sm">Plan wysylki do sprawdzenia<textarea className={field} value={draft.shippingPlan} maxLength={2000} rows={3} onChange={event => change("shippingPlan", event.target.value)} /></label><p className="text-xs text-white/60">Cennik Allegro jest tylko informacja zrodlowa. Nie przypisano wysylki Ovoko.</p>
           <label className="block text-sm">Opis / uwagi robocze<textarea className={field} value={draft.notes} maxLength={40000} rows={8} onChange={event => change("notes", event.target.value)} /></label><p className="text-xs text-white/60">Tekst bez formatowania HTML i ilustracji w opisie, do 40000 znakow. Sprawdz kompletnosc przed dalszym przygotowaniem.</p>
-        </section>
+        </fieldset>
       </div>
       {dictionaryError && <p role="alert" className="rounded-xl border border-amber-400/30 p-4">{dictionaryError} Dane robocze pozostaly bez zmian.</p>}
-      <section className="rounded-xl border border-amber-400/30 p-4"><h2 className="font-bold">Do sprawdzenia przed publikacja</h2><ul className="mt-3 list-disc space-y-2 pl-5 text-sm" aria-label="Braki przygotowania">{ovokoPreparationIssues(source, draft).map(issue => <li key={issue}>{issue}</li>)}{(!numberAccepted || numberAccepted !== draft.manufacturerCode) && <li>Numer czesci wymaga recznego zatwierdzenia razem z calym indeksem.</li>}</ul><p className="mt-4 font-bold text-amber-200">Nie opublikowano. Nie zapisano powiazania Allegro-Ovoko. Na tej stronie nie ma przycisku wystawiania.</p></section>
+      <section className="rounded-xl border border-amber-400/30 p-4"><h2 className="font-bold">Pierwsza pojedyncza wysylka do Ovoko</h2><ul className="mt-3 list-disc space-y-2 pl-5 text-sm" aria-label="Braki przygotowania">{ovokoPreparationIssues(source, draft).map(issue => <li key={issue}>{issue}</li>)}</ul>
+        <p className="my-3 text-sm">Tylko aktywna oferta z jedna sztuka, bez zestawu i brakujacych zdjec. Podaj ID istniejacego, prawdziwego auta-dawcy w Ovoko. Opony i felgi nie sa jeszcze obslugiwane. Brak automatu konczacego oferty po sprzedazy: podczas proby pilnuj dostepnosci na obu portalach.</p>
+        <button type="button" className={button} disabled={!canPublish || publishing || attempted} onClick={() => { setReview(true); setDonorConfirmed(false); setShippingConfirmed(false); }}>Sprawdz pojedyncza wysylke</button>
+        {!canPublish && <p className="mt-2 text-sm text-amber-200">Uzupelnij numer, kategorie, stan, dostepnosc, marke, model, rzeczywiste ID dawcy i cene. Zrodlo musi miec dokladnie jedna sztuke i komplet zdjec.</p>}
+        {review && <div className="mt-4 space-y-3 rounded-xl border border-orange-400/40 p-4"><h3 className="font-bold">Potwierdzenie: jedna czesc</h3><p>{source.title}</p><p>Numer: {draft.manufacturerCode}; cena: {draft.price} {draft.currency}; zdjec: {source.images.length}</p><p>Kategoria: {dictionaries.categories?.find(row => row.id === draft.categoryId)?.name}; stan: {dictionaries.qualities?.find(row => row.id === draft.qualityId)?.name}; dostepnosc: {dictionaries.statuses?.find(row => row.id === draft.statusId)?.name}</p><p>Auto: {dictionaries.brands?.find(row => row.id === brandId)?.name} {dictionaries.models?.find(row => row.id === modelId)?.name}; dawca ID: {draft.donorId}</p>
+          <label className="flex gap-2 text-sm"><input type="checkbox" checked={donorConfirmed} disabled={attempted} onChange={event => setDonorConfirmed(event.target.checked)} />Potwierdzam rzeczywistego dawce tej czesci, nie tylko pasujacy model.</label>
+          <label className="flex gap-2 text-sm"><input type="checkbox" checked={shippingConfirmed} disabled={attempted} onChange={event => setShippingConfirmed(event.target.checked)} />Sprawdzilem zasady i koszt wysylki w Ovoko. Cennik Allegro nie zostanie przeniesiony.</label>
+          <button type="button" className={`${button} bg-orange-600`} disabled={!canPublish || publishing || attempted || !donorConfirmed || !shippingConfirmed} onClick={() => void publishSingle()}>{publishing ? "Wysylam jedna czesc..." : "Wyslij 1 czesc do Ovoko"}</button><p className="text-xs text-white/60">Powstanie rzeczywisty rekord czesci. Nie zmieniamy istniejacych czesci, magazynow, aut ani Allegro. Po niepewnym wyniku nie ponawiamy automatycznie.</p>
+        </div>}
+        {publicationMessage && <p role={partId ? "status" : "alert"} className={`mt-4 rounded-lg border p-3 ${partId ? "border-emerald-400/40 text-emerald-200" : "border-amber-400/40 text-amber-200"}`}>{publicationMessage}</p>}
+      </section>
     </>}
   </section>;
 }

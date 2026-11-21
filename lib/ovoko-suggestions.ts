@@ -4,7 +4,8 @@ import type { OvokoSourcePreview, OvokoPreparationDraft } from "./ovoko-preparat
 export function ovokoAutomaticFields(source: OvokoSourcePreview, dictionaries: Record<string, OvokoReadRow[]>): Partial<OvokoPreparationDraft> {
   const fields: Partial<OvokoPreparationDraft> = {};
   const numbers = suggestPartNumbers(source.title, source.parameters);
-  if (numbers.length === 1 && !numbers[0].warnings.length) fields.manufacturerCode = numbers[0].number;
+  // A single numeric code is useful too; retain its warning, not an extra confirmation step.
+  if (numbers.length === 1 && numbers[0].number.length !== 17) fields.manufacturerCode = numbers[0].number;
   const categories = suggestOvokoCategories(source.title, dictionaries.categories || []);
   if (categories.length && (!categories[1] || categories[0].score > categories[1].score)) fields.categoryId = categories[0].id;
   const qualityNames: Record<string, string[]> = { used: ["uzywany", "used"], new: ["nowy", "new"], damaged: ["uszkodzony", "with defects"], restored: ["regenerowany", "restored"] };

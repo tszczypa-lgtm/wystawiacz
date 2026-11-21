@@ -52,6 +52,9 @@ assert.equal(suggestOvokoModels("AUDI A40 5Q0959593E", models).length, 0, "No su
 const metadata = { categories, qualities: [{ id: "0", name: "Używany" }, { id: "17", name: "Nowy" }, { id: "18", name: "Uszkodzony" }, { id: "19", name: "Regenerowany" }], statuses: [{ id: "0", name: "Na stanie" }, { id: "22", name: "Sprzedano" }] };
 const sourceOffer = { title: "AUDI POMPA ABS 5Q0959593E", parameters: [], condition: "used", stock: 1, status: "ACTIVE", bundle: false };
 const automatic = ovokoAutomaticFields(sourceOffer, metadata);
+assert.equal(ovokoAutomaticFields({ ...sourceOffer, title: "POMPA 0 281 010 038" }, metadata).manufacturerCode, "0281010038", "A unique numeric code is filled without losing its leading zero");
+assert.equal(ovokoAutomaticFields({ ...sourceOffer, title: "POMPA 5Q0 959 593 E" }, metadata).manufacturerCode, "5Q0959593E", "A separate index remains complete");
+assert.equal(ovokoAutomaticFields({ ...sourceOffer, title: "WAUZZZ8K9DA123456" }, metadata).manufacturerCode, undefined, "Potential VINs remain excluded");
 assert.deepEqual(automatic, { manufacturerCode: "5Q0959593E", categoryId: "3", qualityId: "0", statusId: "0" });
 for (const [condition, qualityId] of [["new", "17"], ["damaged", "18"], ["restored", "19"]]) assert.equal(ovokoAutomaticFields({ ...sourceOffer, condition }, metadata).qualityId, qualityId);
 assert.equal(ovokoAutomaticFields({ ...sourceOffer, condition: "" }, metadata).qualityId, undefined, "Availability does not prove condition");

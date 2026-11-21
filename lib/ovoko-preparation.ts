@@ -65,7 +65,7 @@ export function initialOvokoDraft(source: OvokoSourcePreview): OvokoPreparationD
   return { title: source.title, notes: source.description, manufacturerCode: "", price: supported ? source.price : "", currency: supported ? source.currency : "", categoryId: "", donorId: "", qualityId: "", statusId: "", shippingPlan: "" };
 }
 export function ovokoPreparationIssues(source: OvokoSourcePreview, draft: OvokoPreparationDraft): string[] {
-  const issues = ["Publikacja jest wylaczona w tym etapie. Ten podglad nie wysyla danych oferty do Ovoko.", "Samochod-dawca wymaga odczytu i potwierdzenia na Twoim koncie Ovoko; wpisany numer nie jest zweryfikowany.", "Pozostaje sprawdzenie wymaganych atrybutow zaleznych od kategorii oraz zasad wysylki Ovoko."];
+  const issues = ["Samochod-dawca wymaga odczytu i potwierdzenia na Twoim koncie Ovoko; wpisany numer nie jest zweryfikowany.", "Pozostaje sprawdzenie wymaganych atrybutow zaleznych od kategorii oraz zasad wysylki Ovoko."];
   if (source.bundle || source.stock !== 1) issues.push("Oferta jest zestawem lub liczba sztuk nie wynosi 1. Nie utozsamiamy jej automatycznie z jedna fizyczna czescia.");
   if (!source.images.length) issues.push("Brak bezpiecznych adresow zdjec do podgladu.");
   if (source.images.some(url => !/\.(jpg|jpeg|png)$/i.test(new URL(url).pathname))) issues.push("Adresy zdjec wymagaja sprawdzenia formatu wymaganego przez Ovoko; nie zmieniamy ich automatycznie.");
