@@ -3,10 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { allegroRequest } from "@/lib/allegro-client";
 import { ovokoBulkRequest, OvokoBulkClientError } from "@/lib/ovoko-bulk-client";
-import { adjustedOvokoPrice, type OvokoPriceAdjustment } from "@/lib/ovoko-bulk-price";
+import { adjustedOvokoPrice, sameOvokoMoney, type OvokoPriceAdjustment } from "@/lib/ovoko-bulk-price";
 import { offerDescriptionText, ovokoSourcePreview } from "@/lib/ovoko-preparation";
 
-type Offer = { id: string; name: string; price: { amount: string; currency: string } | null };
+export type BulkOffer = { id: string; name: string; price: { amount: string; currency: string } | null };
+type Offer = BulkOffer;
 type Job = { id: string; name: string; price: string; currency: string; state: "waiting" | "sending" | "done" | "skipped" | "error"; message: string };
 const field = "rounded-lg border border-white/20 bg-[#0d1117] px-3 py-2";
 const button = "rounded-lg border border-white/20 px-3 py-2 text-sm font-bold disabled:opacity-40";
@@ -29,6 +30,8 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: Offer[]; onFini
     if (lock.current || !offers.length || offers.length > 100) return;
     lock.current = true; stop.current = false; setRunning(true); setMessage("");
     const snapshot = offers.map(offer => ({ ...offer, price: offer.price ? { ...offer.price } : null })), rule = { ...adjustment };
+    let created = 0, skipped = 0, failed = 0;
+    const summary = () => `Przeniesiono: ${created}; pominieto: ${skipped}; bledy: ${failed}; niewyslane: ${snapshot.length - created - skipped - failed}.`;
     const update = (id: string, patch: Partial<Job>) => { if (mounted.current) setJobs(previous => previous.map(job => job.id === id ? { ...job, ...patch } : job)); };
     setJobs(snapshot.map(offer => ({ id: offer.id, name: offer.name, price: price(offer), currency: offer.price?.currency || "", state: "waiting", message: "Oczekuje" })));
     try {
@@ -43,7 +46,7 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: Offer[]; onFini
           const owned = await allegroRequest<{ offer: unknown; sellerId: string }>(`/ovoko-source/${offer.id}`);
           const source = ovokoSourcePreview(owned.offer, offer.id, offerDescriptionText);
           if (owned.sellerId !== session.binding.sellerId) throw new Error("Konto Allegro zmienilo sie. Zatrzymano partie.");
-          if (source.price !== offer.price?.amount || source.currency !== offer.price?.currency) throw new OvokoBulkClientError("Cena Allegro zmienila sie od zaznaczenia. Odswiez oferte.", 400);
+          if (!sameOvokoMoney(source.price, offer.price?.amount) || source.currency !== offer.price?.currency) throw new OvokoBulkClientError(`Cena Allegro zmienila sie od zaznaczenia (${offer.price?.amount} ${offer.price?.currency} -> ${source.price} ${source.currency}). Odswiez oferte.`, 400);
           if (stop.current) { update(offer.id, { state: "waiting", message: "Nie wyslano" }); break; }
           // Do not abort or retry an in-flight write: its durable publication lock owns the outcome.
           const item = { offerId: offer.id, binding: session.binding, adjustment: rule, notes: source.description, expectedSource: { title: source.title, price: source.price, currency: source.currency, stock: source.stock, status: source.status, condition: source.condition, images: source.images } };
@@ -52,17 +55,19 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: Offer[]; onFini
           if (!preparation.alreadyCreated && stop.current) { update(offer.id, { state: "waiting", message: "Auto przygotowane. Czesc nie zostala wyslana." }); break; }
           const result = preparation.alreadyCreated ? preparation : await ovokoBulkRequest<Outcome>({ ...item, operation: "item", prepared: preparation.prepared });
           if (!result.ok || !/^[1-9]\d{0,11}$/.test(String(result.partId))) throw new Error("Niepewny wynik wysylki. Sprawdz Ovoko; nie ponawiaj.");
+          if (result.alreadyCreated) skipped++; else created++;
           update(offer.id, { state: result.alreadyCreated ? "skipped" : "done", message: `${result.alreadyCreated ? "Juz przeniesiona, pominieto" : "Przeniesiono"}. Ovoko ID: ${result.partId}`, ...(result.price ? { price: result.price, currency: result.currency } : {}) });
         } catch (error) {
+          failed++;
           update(offer.id, { state: "error", message: error instanceof Error ? error.message : "Niepotwierdzony wynik." });
           if (!(error instanceof OvokoBulkClientError) || error.status !== 400) throw error;
         }
         // Pace calls below the server budget; never retry rate limits or ambiguous writes.
         if (i < snapshot.length - 1) for (let tick = 0; tick < 25 && !stop.current; tick++) await new Promise(resolve => setTimeout(resolve, 250));
       }
-      if (mounted.current) setMessage(stop.current ? "Zatrzymano. Pozostale pozycje nie zostaly wyslane." : "Partia zakonczona. Sprawdz wyniki ponizej; bledne pozycje mozesz przygotowac pojedynczo.");
+      if (mounted.current) setMessage(`${stop.current ? "Zatrzymano. Pozostale pozycje nie zostaly wyslane." : "Partia zakonczona."} ${summary()}`);
     } catch (error) {
-      if (mounted.current) setMessage(`Partia zatrzymana: ${error instanceof Error ? error.message : "nie potwierdzono wyniku"} Nie ponawiamy automatycznie.`);
+      if (mounted.current) setMessage(`Partia zatrzymana: ${error instanceof Error ? error.message : "nie potwierdzono wyniku"} ${summary()} Nie ponawiamy automatycznie.`);
     } finally {
       lock.current = false;
       if (mounted.current) { setJobs(previous => previous.map(job => job.state === "waiting" ? { ...job, message: "Nie wyslano w tej partii" } : job)); setRunning(false); onFinished(); }

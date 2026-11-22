@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { allegroRequest } from "@/lib/allegro-client";
 import { accountRequest, type AccountInfo } from "@/lib/account-client";
 import { ovokoTransferRequest, type OvokoTransfer } from "@/lib/ovoko-transfer-client";
-import { OvokoBulkPanel } from "./ovoko-bulk-panel";
+import { OvokoBulkLauncher } from "./ovoko-bulk-launcher";
 
 type Offer = { id: string; name: string; image: string; externalId: string; status: string; stock: number | null; shippingRateId: string | null; price: { amount: string; currency: string } | null; ovokoTransfer?: OvokoTransfer };
 type Inventory = { offers: Offer[]; totalCount: number; count: number; limit: number; offset: number; fetchedAt: string; nextOffset?: number | null; scanned?: number };
@@ -90,7 +90,7 @@ export function InventoryPanel() {
       {ovokoPreviewAllowed && <label className="space-y-1 text-sm"><span>Przeniesienie do Ovoko</span><select className={field} value={draft.transfer} onChange={event => setDraft({ ...draft, transfer: event.target.value })}><option value="all">Wszystkie</option>{Object.entries(transferNames).map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select><span className="block text-xs text-white/50">Dla aktualnych kont Allegro i Ovoko. To historia przeniesienia, nie synchronizacja sprzedazy.</span></label>}
       <div className="flex flex-wrap items-end gap-2 sm:col-span-2"><button className="rounded-lg bg-[#ff5a00] px-4 py-2 font-bold" type="submit">Pokaz oferty</button><button className={button} type="button" disabled={busy} onClick={() => setRevision(value => value + 1)}>Odswiez</button><button className={button} type="button" onClick={() => { setDraft(initial); setFilters({ ...initial }); setOffset(0); setHistory([]); }}>Wyczysc filtry</button></div>
     </form>
-    {ovokoPreviewAllowed && <OvokoBulkPanel offers={(result?.offers || []).filter(offer => selected.has(offer.id))} onFinished={() => setRevision(value => value + 1)} />}
+    {ovokoPreviewAllowed && <OvokoBulkLauncher offers={(result?.offers || []).filter(offer => selected.has(offer.id))} onFinished={() => setRevision(value => value + 1)} />}
     {ratesError && <p role="status" className="text-sm text-amber-200">{ratesError}</p>}
     {transferError && <p role="status" className="text-sm text-amber-200">{transferError} Status przeniesienia pozostaje nieustalony.</p>}
     {error && <div role="alert" className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-4"><p>{error}</p><p className="mt-2 text-sm">To blad odczytu, nie informacja o usunieciu ofert. Niczego nie zmieniono.</p><button className={`${button} mt-3`} onClick={() => setRevision(value => value + 1)}>Sprobuj ponownie</button> <a href="/panel/allegro" className="text-sm underline">Sprawdz polaczenie</a></div>}

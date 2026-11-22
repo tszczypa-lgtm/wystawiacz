@@ -8,7 +8,7 @@ import { automaticOvokoBrand, automaticOvokoModel, ovokoAutomaticFields, vehicle
 import { ovokoCarYear } from "./ovoko-car-selection";
 import { OvokoError, parseOvokoRead, type OvokoReadRow } from "./ovoko-read";
 import { ovokoWriteClient, ovokoWriteDigest } from "./ovoko-write-client";
-import { adjustedOvokoPrice, validateOvokoAdjustment } from "./ovoko-bulk-price";
+import { adjustedOvokoPrice, sameOvokoMoney, validateOvokoAdjustment } from "./ovoko-bulk-price";
 
 type Context = Awaited<ReturnType<typeof accountContext>>;
 export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, context: Context, input: Record<string, unknown>) {
@@ -35,7 +35,7 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
   if (!binding || binding.sellerId !== owned.sellerId || binding.fingerprint !== fingerprint) throw new OvokoError(409, "Polaczone konto zmienilo sie. Zatrzymano partie; rozpocznij ja ponownie po sprawdzeniu kont.");
   const source = ovokoSourcePreview(owned.offer, input.offerId as string, () => input.notes as string);
   const expected = input.expectedSource as Record<string, unknown> | null;
-  if (!expected || ["title", "price", "currency", "stock", "status", "condition"].some(key => expected[key] !== source[key as keyof typeof source]) || JSON.stringify(expected.images) !== JSON.stringify(source.images)) throw new OvokoError(409, "Oferta Allegro zmienila sie. Sprawdz dane przed ponownym przeniesieniem.");
+  if (!expected || !sameOvokoMoney(expected.price, source.price) || ["title", "currency", "stock", "status", "condition"].some(key => expected[key] !== source[key as keyof typeof source]) || JSON.stringify(expected.images) !== JSON.stringify(source.images)) throw new OvokoError(409, "Oferta Allegro zmienila sie. Sprawdz dane przed ponownym przeniesieniem.");
   // Look up the durable source-to-target key before creating even a vehicle record.
   let existing;
   try { existing = await context.db(`ovoko_single_publications?ovoko_account=eq.${account}&allegro_seller_id=eq.${owned.sellerId}&allegro_offer_id=eq.${source.id}&select=state,part_id&limit=1`); }

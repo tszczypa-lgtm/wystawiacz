@@ -3,7 +3,9 @@ import { readFile } from "node:fs/promises";
 import ts from "typescript";
 const source = await readFile(new URL("../lib/ovoko-bulk-price.ts", import.meta.url), "utf8");
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-const { adjustedOvokoPrice: price, validateOvokoAdjustment: validate } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
+const { adjustedOvokoPrice: price, validateOvokoAdjustment: validate, sameOvokoMoney: same } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
+for (const [left, right] of [["25", "25.00"], ["25.0", "25.00"], ["00025.00", "25"], ["0", "0.00"]]) assert.equal(same(left, right), true);
+for (const [left, right] of [["25", "25.01"], ["25", "26"], ["", "0"], [null, "25"], ["25.001", "25"], ["NaN", "NaN"]]) assert.equal(same(left, right), false);
 for (const [source, mode, value, expected] of [["100", "none", "0", "100.00"], ["100.00", "amount", "-10.25", "89.75"], ["100.00", "amount", "+10.25", "110.25"], ["220.00", "percent", "-10", "198.00"], ["100.10", "percent", "15.5", "115.62"], ["0.05", "percent", "-10", "0.05"], ["1", "percent", "1000", "11.00"], ["9999999999.99", "none", "0", "9999999999.99"]]) {
   assert.equal(price(source, "PLN", { mode, value }), expected);
   assert.equal(price(source, "EUR", { mode, value }), expected);

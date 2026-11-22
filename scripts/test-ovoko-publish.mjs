@@ -60,7 +60,7 @@ globalThis.fetch = async (input, options = {}) => {
     assert.equal(url.pathname, "/sale/product-offers/101"); sourceReads++;
     if (revokeAfterRead && sourceReads > 1) admin = false;
     const images = imageMode === "duplicates" ? [...snapshot.images, snapshot.images[0]] : imageMode === "unsafe" ? [...snapshot.images, "https://evil.test/private.jpg"] : imageMode === "changed" && sourceReads > 1 ? snapshot.images.slice(0, 1) : snapshot.images;
-    return Response.json({ id: "101", name: snapshot.title, parameters: [{ id: "11323", valuesIds: ["11323_2"] }], productSet: [{ quantity: { value: bundle ? 2 : 1 }, product: {} }], images, stock: { available: lateStock && sourceReads > 1 ? 0 : stock }, publication: { status: "ACTIVE" }, sellingMode: { price: { amount: "100.00", currency: "PLN" } } });
+    return Response.json({ id: "101", name: snapshot.title, parameters: [{ id: "11323", valuesIds: ["11323_2"] }], productSet: [{ quantity: { value: bundle ? 2 : 1 }, product: {} }], images, stock: { available: lateStock && sourceReads > 1 ? 0 : stock }, publication: { status: "ACTIVE" }, sellingMode: { price: { amount: mode === "price-format" && sourceReads > 1 ? "100" : mode === "price-change" && sourceReads > 1 ? "101.00" : "100.00", currency: "PLN" } } });
   }
   assert.equal(url.origin, "https://api.rrr.lt"); assert.equal(method, "POST"); assert.equal(options.redirect, "manual");
   const form = new URLSearchParams(options.body);
@@ -117,6 +117,9 @@ try {
   user++;
   assert.equal((await handleOvokoApi(req(), env)).status, 409, "Another Wystawiacz owner cannot bypass the target-account publication lock"); assert.equal(writes, 1);
   reset(); imageMode = "duplicates"; assert.equal((await handleOvokoApi(req(), env)).status, 200); assert.equal(writes, 1, "Duplicate URLs do not block a full unique gallery");
+  reset(); const formatted = payload(); formatted.expectedSource.price = "100"; assert.equal((await handleOvokoApi(req(formatted), env)).status, 200); assert.equal(writes, 1, "Equivalent decimal representations must not block publication");
+  reset(); mode = "price-format"; assert.equal((await handleOvokoApi(req(), env)).status, 200); assert.equal(writes, 1, "The last source recheck also compares monetary value, not decimal spelling");
+  reset(); mode = "price-change"; assert.equal((await handleOvokoApi(req(), env)).status, 409); assert.equal(writes, 0, "A true price change during recheck still blocks publication");
   reset(); extraCodes = "A1649020300\nA1649004200BA\nA1649020300\n0281010038"; assert.equal((await handleOvokoApi(req(), env)).status, 200); assert.equal(writes, 1);
   for (const additionalCodes of [["A1649020300"], "<script>", Array.from({ length: 21 }, (_, index) => `CODE${100000 + index}`).join("\n")]) {
     reset(); assert.equal((await handleOvokoApi(req({ ...payload(), additionalCodes }), env)).status, 400); assert.equal(writes, 0);
@@ -143,8 +146,9 @@ try {
     return result;
   }
   for (const [adjustment, price] of [[{ mode: "none", value: "0" }, "100.00"], [{ mode: "percent", value: "-10" }, "90.00"], [{ mode: "amount", value: "+25.50" }, "125.50"]]) {
-    reset(); bulk = true; expectedPrice = price;
-    const item = await bulkPlan(adjustment), result = await bulkSend(item);
+    reset(); bulk = true; expectedPrice = price; mode = "price-format";
+    const item = await bulkPlan(adjustment); item.expectedSource.price = "100";
+    const result = await bulkSend(item);
     assert.equal(result.status, 200, await result.clone().text()); assert.equal((await result.json()).price, price); assert.equal(writes, 1);
     const again = await bulkSend(item); assert.equal(again.status, 200); assert.equal((await again.json()).alreadyCreated, true); assert.equal(writes, 1);
   }

@@ -4,6 +4,7 @@ import { loadOvokoConnection, ovokoConnectionKey, type OvokoKeyEnv } from "./ovo
 import { ovokoSourcePreview, additionalOvokoCodes } from "./ovoko-preparation";
 import { OvokoError, parseOvokoRead, ovokoPageData } from "./ovoko-read";
 import { ovokoWriteClient, ovokoWriteDigest as digest } from "./ovoko-write-client";
+import { sameOvokoMoney } from "./ovoko-bulk-price";
 
 type Context = Awaited<ReturnType<typeof accountContext>>;
 export type OvokoPublishEnv = AccountEnv & OvokoKeyEnv & Parameters<typeof handleAllegroApi>[1] & { OVOKO_PUBLISH_ENABLED?: string };
@@ -33,7 +34,7 @@ export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, c
   const source = ovokoSourcePreview(owned.offer, offerId, () => "");
   if (source.status !== "ACTIVE" || source.stock !== 1 || source.bundle) throw new OvokoError(409, "Pierwsza proba wymaga aktywnej oferty z dokladnie jedna sztuka, bez zestawu. Nie wyslano czesci.");
   const expected = input.expectedSource as Record<string, unknown> | null;
-  if (!expected || ["title", "price", "currency", "stock", "status", "condition"].some(key => expected[key] !== source[key as keyof typeof source]) || JSON.stringify(expected.images) !== JSON.stringify(source.images)) throw new OvokoError(409, "Oferta Allegro zmienila sie od otwarcia podgladu. Odswiez dane i sprawdz ponownie.");
+  if (!expected || !sameOvokoMoney(expected.price, source.price) || ["title", "currency", "stock", "status", "condition"].some(key => expected[key] !== source[key as keyof typeof source]) || JSON.stringify(expected.images) !== JSON.stringify(source.images)) throw new OvokoError(409, "Oferta Allegro zmienila sie od otwarcia podgladu. Odswiez dane i sprawdz ponownie.");
   if (!source.images.length || source.rejectedImages) throw new OvokoError(400, "Zdjecia sa niepelne lub zawieraja nieobslugiwane adresy. Sprawdz oferte przed pierwsza proba.");
   const credentials = await loadOvokoConnection(context, await ovokoConnectionKey(env));
   if (binding && await digest(JSON.stringify(credentials)) !== binding.fingerprint) throw new OvokoError(409, "Konto Ovoko zmienilo sie. Nie wyslano czesci.");
@@ -75,7 +76,7 @@ export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, c
     if (!latestResponse.ok) throw new OvokoError(409, "Nie potwierdzono oferty Allegro bezposrednio przed wysylka.");
     const latest = await latestResponse.json() as typeof owned;
     const fresh = ovokoSourcePreview(latest.offer, offerId, () => "");
-    if (latest.sellerId !== seller || fresh.status !== "ACTIVE" || fresh.stock !== 1 || fresh.bundle || JSON.stringify(fresh.images) !== JSON.stringify(source.images) || fresh.rejectedImages || ["title", "price", "currency", "condition"].some(key => fresh[key as keyof typeof fresh] !== source[key as keyof typeof source])) throw new OvokoError(409, "Oferta lub konto Allegro zmienily sie podczas sprawdzania. Nie wyslano czesci.");
+    if (latest.sellerId !== seller || fresh.status !== "ACTIVE" || fresh.stock !== 1 || fresh.bundle || JSON.stringify(fresh.images) !== JSON.stringify(source.images) || fresh.rejectedImages || !sameOvokoMoney(fresh.price, source.price) || ["title", "currency", "condition"].some(key => fresh[key as keyof typeof fresh] !== source[key as keyof typeof source])) throw new OvokoError(409, "Oferta lub konto Allegro zmienily sie podczas sprawdzania. Nie wyslano czesci.");
     const permission = await accountContext(request, env);
     if (permission.user.id !== context.user.id || !permission.isAdmin || permission.account.suspended) throw new OvokoError(403, "Uprawnienia administratora zmienily sie podczas sprawdzania. Nie wyslano czesci.");
     const latestCredentials = await loadOvokoConnection(permission, await ovokoConnectionKey(env));

@@ -1,4 +1,13 @@
 export type OvokoPriceAdjustment = { mode: "none" | "amount" | "percent"; value: string };
+export function sameOvokoMoney(left: unknown, right: unknown): boolean {
+  const cents = (value: unknown) => {
+    if (typeof value !== "string" || !/^\d{1,10}(\.\d{1,2})?$/.test(value)) return null;
+    const [whole, fraction = ""] = value.split(".");
+    return BigInt(whole) * BigInt(100) + BigInt(fraction.padEnd(2, "0"));
+  };
+  const amount = cents(left);
+  return amount !== null && amount === cents(right);
+}
 export function validateOvokoAdjustment(input: unknown): OvokoPriceAdjustment {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("Wybierz sposob zmiany ceny.");
   const row = input as Record<string, unknown>;
