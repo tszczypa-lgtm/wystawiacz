@@ -12,7 +12,7 @@ function text(input: Record<string, unknown>, key: string, pattern: RegExp, max 
   if (typeof value !== "string" || !value || value.length > max || !pattern.test(value)) throw new OvokoError(400, `Sprawdz pole ${key}.`);
   return value;
 }
-export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, context: Context, input: Record<string, unknown>) {
+export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, context: Context, input: Record<string, unknown>, binding?: { sellerId: string; fingerprint: string }) {
   if (env.OVOKO_PUBLISH_ENABLED !== "true") throw new OvokoError(503, "Publikacja pojedyncza jest wylaczona. Wykonaj migracje 012 i ustaw OVOKO_PUBLISH_ENABLED=true w Cloudflare.");
   if (input.confirmSingle !== true) throw new OvokoError(400, "Uruchom pojedyncza wysylke przyciskiem Wystaw.");
   if (Object.keys(input).some(key => !["offerId", "brandId", "modelId", "donorId", "categoryId", "qualityId", "statusId", "manufacturerCode", "additionalCodes", "price", "currency", "notes", "confirmSingle", "shippingConfirmed", "donorConfirmed", "expectedSource"].includes(key))) throw new OvokoError(400, "Nieobslugiwane pole publikacji.");
@@ -29,12 +29,14 @@ export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, c
   if (!sourceResponse.ok) throw new OvokoError(409, "Nie potwierdzono aktualnej oferty na polaczonym koncie Allegro. Odswiez podglad.");
   const owned = await sourceResponse.json() as { offer: unknown; sellerId: string };
   if (typeof owned.sellerId !== "string" || !/^\d{1,30}$/.test(owned.sellerId)) throw new OvokoError(502, "Niepotwierdzony sprzedawca Allegro.");
+  if (binding && owned.sellerId !== binding.sellerId) throw new OvokoError(409, "Konto Allegro zmienilo sie. Nie wyslano czesci.");
   const source = ovokoSourcePreview(owned.offer, offerId, () => "");
   if (source.status !== "ACTIVE" || source.stock !== 1 || source.bundle) throw new OvokoError(409, "Pierwsza proba wymaga aktywnej oferty z dokladnie jedna sztuka, bez zestawu. Nie wyslano czesci.");
   const expected = input.expectedSource as Record<string, unknown> | null;
   if (!expected || ["title", "price", "currency", "stock", "status", "condition"].some(key => expected[key] !== source[key as keyof typeof source]) || JSON.stringify(expected.images) !== JSON.stringify(source.images)) throw new OvokoError(409, "Oferta Allegro zmienila sie od otwarcia podgladu. Odswiez dane i sprawdz ponownie.");
   if (!source.images.length || source.rejectedImages) throw new OvokoError(400, "Zdjecia sa niepelne lub zawieraja nieobslugiwane adresy. Sprawdz oferte przed pierwsza proba.");
   const credentials = await loadOvokoConnection(context, await ovokoConnectionKey(env));
+  if (binding && await digest(JSON.stringify(credentials)) !== binding.fingerprint) throw new OvokoError(409, "Konto Ovoko zmienilo sie. Nie wyslano czesci.");
   const remote = ovokoWriteClient(credentials);
   const account = await digest(credentials.username.trim().toLowerCase()), seller = owned.sellerId;
   const selector = `ovoko_account=eq.${account}&allegro_seller_id=eq.${seller}&allegro_offer_id=eq.${offerId}`;

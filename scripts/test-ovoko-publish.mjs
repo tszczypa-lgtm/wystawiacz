@@ -17,14 +17,14 @@ const { sealConnection } = load(path.join(root, "lib/allegro-api.ts"));
 const keyBytes = new Uint8Array(32).fill(7), key = await crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, ["encrypt", "decrypt"]);
 const env = { SUPABASE_SERVICE_ROLE_KEY: "fixture", ALLEGRO_ENCRYPTION_KEY: Buffer.from(keyBytes).toString("base64"), OVOKO_PUBLISH_ENABLED: "true" };
 const credentials = { username: "fixture-account", password: "private-password", user_token: "private-token" };
-let user = 1, admin, suspended, owns, stock, bundle, mode, donorModel, duplicate, failDb, sourceReads, lateStock, writes, categoryName, revokeAfterRead, imageMode, extraCodes;
+let user = 1, admin, suspended, owns, stock, bundle, mode, donorModel, duplicate, failDb, sourceReads, lateStock, writes, categoryName, revokeAfterRead, imageMode, extraCodes, bulk, expectedPrice, credentialReads, rotateAt;
 const owner = () => `00000000-0000-0000-0000-${String(user).padStart(12, "0")}`;
 const records = new Map(), calls = [];
 const snapshot = { title: "AUDI A4 POMPA 0281010038", price: "100.00", currency: "PLN", stock: 1, status: "ACTIVE", condition: "used", images: ["https://a.allegroimg.com/photo.jpg", "https://a.allegroimg.com/second.jpg", "https://a.allegroimg.com/label.jpg"] };
 const payload = () => ({ offerId: "101", brandId: "1", modelId: "11", donorId: "13", categoryId: "3", qualityId: "0", statusId: "0", manufacturerCode: "0281010038", additionalCodes: extraCodes, price: "100.00", currency: "PLN", notes: "Opis & uwagi + numer", confirmSingle: true, expectedSource: { ...snapshot } });
 const req = (body = payload(), headers = {}) => new Request("https://publish.test/api/ovoko/publish", { method: "POST", headers: { Authorization: "Bearer fixture", Origin: "https://publish.test", "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
 function reset() {
-  user++; admin = true; suspended = false; owns = true; stock = 1; bundle = false; mode = "ok"; donorModel = "11"; duplicate = false; failDb = ""; sourceReads = 0; lateStock = false; writes = 0; categoryName = "Pompy"; revokeAfterRead = false; imageMode = "normal"; extraCodes = ""; records.clear(); calls.length = 0;
+  user++; admin = true; suspended = false; owns = true; stock = 1; bundle = false; mode = "ok"; donorModel = "11"; duplicate = false; failDb = ""; sourceReads = 0; lateStock = false; writes = 0; categoryName = "Pompy"; revokeAfterRead = false; imageMode = "normal"; extraCodes = ""; bulk = false; expectedPrice = "100.00"; credentialReads = 0; rotateAt = Infinity; records.clear(); calls.length = 0;
 }
 const originalFetch = globalThis.fetch;
 globalThis.fetch = async (input, options = {}) => {
@@ -34,7 +34,8 @@ globalThis.fetch = async (input, options = {}) => {
   if (url.pathname === "/rest/v1/customer_accounts") return Response.json([{ owner_id: owner(), company: {}, suspended }]);
   if (url.pathname === "/rest/v1/account_admins") return Response.json(admin ? [{ owner_id: owner() }] : []);
   if (url.pathname === "/rest/v1/allegro_connections") return Response.json([{ sealed: await sealConnection({ accessToken: "seller-token", expiresAt: Date.now() + 3600000 }, key, owner()) }]);
-  if (url.pathname === "/rest/v1/ovoko_connections") return Response.json([{ sealed: await sealConnection(credentials, key, `ovoko:v1:${owner()}`) }]);
+  if (url.pathname === "/rest/v1/ovoko_connections") { credentialReads++; return Response.json([{ sealed: await sealConnection({ ...credentials, ...(credentialReads >= rotateAt ? { password: "private-changed" } : {}) }, key, `ovoko:v1:${owner()}`) }]); }
+  if (url.pathname === "/rest/v1/ovoko_vehicle_creations") { assert.equal(method, "GET", "Bulk reuses the saved vehicle without creating a duplicate"); return Response.json([]); }
   if (url.pathname === "/rest/v1/ovoko_single_publications") {
     if (failDb === method) return new Response("private-db-error", { status: 503 });
     if (method === "POST") {
@@ -45,7 +46,7 @@ globalThis.fetch = async (input, options = {}) => {
       if (records.has(id)) return Response.json([]);
       records.set(id, row); return Response.json([row], { status: 201 });
     }
-    assert.equal(url.searchParams.get("owner_id"), `eq.${owner()}`);
+    if (!bulk || url.searchParams.has("owner_id")) assert.equal(url.searchParams.get("owner_id"), `eq.${owner()}`);
     const id = ["ovoko_account", "allegro_seller_id", "allegro_offer_id"].map(key => url.searchParams.get(key)?.slice(3)).join(":"), row = records.get(id);
     if (method === "GET") return Response.json(row?.owner_id === owner() ? [row] : []);
     assert.equal(method, "PATCH");
@@ -65,16 +66,20 @@ globalThis.fetch = async (input, options = {}) => {
   const form = new URLSearchParams(options.body);
   for (const [key, value] of Object.entries(credentials)) assert.equal(form.get(key), value);
   if (url.pathname === "/get/categories") return Response.json({ status_code: "R200", list: [{ id: "3", parent_id: "0", level: "3", pl: categoryName }] });
+  if (url.pathname === "/get/car_brands") return Response.json({ status_code: "R200", list: [{ id: "1", name: "Audi" }] });
   if (url.pathname === "/get/part_quality") return Response.json({ status_code: "R200", list: { "0": { pl: "Używany" } } });
   if (url.pathname === "/get/part_status") return Response.json({ status_code: "R200", list: { "0": { pl: "Na stanie" }, "2": { pl: "Sprzedano" } } });
   if (url.pathname === "/get/car_models/1") return Response.json({ status_code: "R200", list: [{ id: "11", brand: "1", name: "A4", year_start: "2000", year_end: "2010" }] });
-  if (url.pathname === "/v2/get/cars") { assert.equal(url.searchParams.get("car_ids"), "13"); return Response.json({ status_code: "R200", data: [{ id: "13", car_model: donorModel }], pagination: { page: 1, limit: 1, total_count: 1 } }); }
+  if (url.pathname === "/v2/get/cars") {
+    if (bulk && url.searchParams.has("model_ids")) { assert.equal(url.searchParams.get("model_ids"), "11"); return Response.json({ status_code: "R200", data: [{ id: "13", car_model: donorModel, car_years: "2000" }], pagination: { page: 1, limit: 20, total_count: 1 } }); }
+    assert.equal(url.searchParams.get("car_ids"), "13"); return Response.json({ status_code: "R200", data: [{ id: "13", car_model: donorModel }], pagination: { page: 1, limit: 1, total_count: 1 } });
+  }
   if (url.pathname === "/v2/get/parts") { assert.equal(url.searchParams.get("external_ids"), "tymo:555:101"); return Response.json({ status_code: "R200", data: duplicate ? [{ id: "99" }] : [], pagination: { page: "1", limit: "1", total_count: duplicate ? "1" : "0" } }); }
   assert.equal(url.pathname, "/crm/importPart", "No arbitrary mutation, update, delete, status change, donor or warehouse operations");
   assert.equal(records.size, 1); assert.equal([...records.values()][0].state, "sending", "Durable reservation precedes every mutation");
   writes++;
   assert.equal(form.get("manufacturer_code"), "0281010038"); assert.equal(form.get("car_id"), "13"); assert.equal(form.get("quality"), "0"); assert.equal(form.get("status"), "0");
-  assert.equal(form.get("photo"), form.get("photos[0]")); assert.equal(form.get("original_currency"), "PLN"); assert.equal(form.get("price"), "100.00");
+  assert.equal(form.get("photo"), form.get("photos[0]")); assert.equal(form.get("original_currency"), "PLN"); assert.equal(form.get("price"), expectedPrice);
   assert.deepEqual([...form.entries()].filter(([name]) => /^photos\[\d+\]$/.test(name)).map(([, url]) => url), snapshot.images, "Transfer the complete gallery in source order, not just the thumbnail");
   assert.equal(form.get("notes"), "Opis & uwagi + numer"); assert.equal(form.get("place"), null); assert.equal(form.get("storage_id"), null);
   const expectedCodes = extraCodes ? ["A1649020300", "A1649004200BA"] : [];
@@ -122,5 +127,39 @@ try {
     const response = await handleOvokoApi(req(), env); assert.equal(response.status, 409); assert.ok(!(await response.text()).includes("private-")); assert.equal(writes, 1);
     const retry = await handleOvokoApi(req(), env); assert.equal(retry.status, 409); assert.equal(writes, 1, "Never retry uncertain writes, including an unrecorded success");
   }
-  console.log("Ovoko single publication: admin/CSRF/flag guards, owned live source, one unit, dictionaries, actual donor model, snapshots, duplicate preflight, durable unique lock, concurrent requests, replay and uncertain-result no-retry passed. All services mocked; nothing published live.");
+  const bulkReq = body => new Request("https://publish.test/api/ovoko/bulk", { method: "POST", headers: { Authorization: "Bearer fixture", Origin: "https://publish.test", "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  async function bulkPlan(adjustment) {
+    const response = await handleOvokoApi(bulkReq({ operation: "start", adjustment }), env); assert.equal(response.status, 200, await response.clone().text());
+    return { operation: "item", offerId: "101", adjustment, binding: (await response.json()).binding, notes: "Opis & uwagi + numer", expectedSource: { ...snapshot } };
+  }
+  async function bulkSend(item, checkBounds = true) {
+    const before = calls.length;
+    const preparation = await handleOvokoApi(bulkReq({ ...item, operation: "prepare" }), env);
+    if (checkBounds) assert.ok(calls.length - before < 50, "Preparation uses a bounded separate Worker request");
+    const data = await preparation.clone().json();
+    if (!preparation.ok || data.alreadyCreated) return preparation;
+    const ready = calls.length, result = await handleOvokoApi(bulkReq({ ...item, prepared: data.prepared }), env);
+    if (checkBounds) assert.ok(calls.length - ready < 50, "Publication uses a bounded separate Worker request");
+    return result;
+  }
+  for (const [adjustment, price] of [[{ mode: "none", value: "0" }, "100.00"], [{ mode: "percent", value: "-10" }, "90.00"], [{ mode: "amount", value: "+25.50" }, "125.50"]]) {
+    reset(); bulk = true; expectedPrice = price;
+    const item = await bulkPlan(adjustment), result = await bulkSend(item);
+    assert.equal(result.status, 200, await result.clone().text()); assert.equal((await result.json()).price, price); assert.equal(writes, 1);
+    const again = await bulkSend(item); assert.equal(again.status, 200); assert.equal((await again.json()).alreadyCreated, true); assert.equal(writes, 1);
+  }
+  reset(); bulk = true; const wrongBinding = await bulkPlan({ mode: "none", value: "0" }); wrongBinding.binding.fingerprint = "other";
+  assert.equal((await handleOvokoApi(bulkReq(wrongBinding), env)).status, 409); assert.equal(writes, 0);
+  reset(); bulk = true; const badPrice = await bulkPlan({ mode: "amount", value: "-100" }); assert.equal((await handleOvokoApi(bulkReq(badPrice), env)).status, 400); assert.equal(writes, 0); assert.equal(calls.some(call => call.url.includes("api.rrr.lt")), false);
+  reset(); bulk = true; const outdated = await bulkPlan({ mode: "none", value: "0" }); outdated.expectedSource.price = "99.00"; assert.equal((await handleOvokoApi(bulkReq(outdated), env)).status, 409); assert.equal(writes, 0);
+  reset(); bulk = true; categoryName = "Felgi"; const wheels = await bulkPlan({ mode: "none", value: "0" }); assert.equal((await bulkSend(wheels)).status, 400); assert.equal(writes, 0);
+  reset(); bulk = true; const uncertain = await bulkPlan({ mode: "none", value: "0" }); mode = "timeout";
+  assert.equal((await bulkSend(uncertain)).status, 409); assert.equal(writes, 1);
+  assert.equal((await bulkSend(uncertain)).status, 409); assert.equal(writes, 1);
+  reset(); bulk = true; const parallelItem = await bulkPlan({ mode: "none", value: "0" }); await Promise.all([bulkSend(parallelItem, false), bulkSend(parallelItem, false)]); assert.equal(writes, 1);
+  for (const rotate of [3, 5]) {
+    reset(); bulk = true; const item = await bulkPlan({ mode: "none", value: "0" }); rotateAt = rotate;
+    assert.equal((await bulkSend(item)).status, 409); assert.equal(writes, 0, "Credential changes during preparation/publication stop the batch before a part write");
+  }
+  console.log("Ovoko single + bulk publication: guards, source/target binding, signed amount/percent prices, auto matching and car reuse, snapshots, full photos, durable duplicate locks, concurrency and uncertain no-retry passed. All services mocked; nothing published live.");
 } finally { globalThis.fetch = originalFetch; }

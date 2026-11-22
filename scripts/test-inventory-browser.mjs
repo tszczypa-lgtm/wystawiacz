@@ -16,13 +16,26 @@ const browser = await chromium.launch({ headless: true, channel: process.env.PLA
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const errors = [], requests = [];
-  let fail = false, transferFail = false;
+  let fail = false, transferFail = false, bulkMode = "ok", releaseWrite;
+  const bulkCalls = [];
   const shipping = "2991e29e-5fbc-46f5-963a-65c326ba65c2";
   page.on("pageerror", error => errors.push(error.message));
   await page.route("https://inventory.test/**", async route => {
     const req = route.request(), url = new URL(req.url());
     if (!url.pathname.startsWith("/api/")) return route.fulfill({ contentType: "text/html", body: '<html><body style="background:#0d1117;color:white"><main id="root" style="max-width:1100px;margin:auto"></main></body></html>' });
     requests.push({ url, method: req.method() });
+    if (url.pathname === "/api/ovoko/bulk") {
+      assert.equal(req.method(), "POST"); const input = req.postDataJSON(); bulkCalls.push(input);
+      if (input.operation === "start") return route.fulfill({ json: { ok: true, binding: { sellerId: "555", fingerprint: "fixture" } } });
+      assert.deepEqual(input.adjustment, { mode: "percent", value: "-10" });
+      assert.equal(input.notes, "Opis z Allegro");
+      assert.equal(input.expectedSource.price, "220.00");
+      if (input.operation === "prepare") return route.fulfill({ json: input.offerId.endsWith("2") ? { ok: true, alreadyCreated: true, partId: "77" } : { ok: true, prepared: { donorId: "13" } } });
+      assert.equal(input.operation, "item");
+      if (bulkMode === "uncertain") return route.fulfill({ status: 409, json: { message: "Niepewny wynik wysylki. Nie ponawiaj." } });
+      if (bulkMode === "hold") await new Promise(resolve => { releaseWrite = resolve; });
+      return route.fulfill({ json: { ok: true, partId: "88", alreadyCreated: false, price: "198.00", currency: "PLN" } });
+    }
     if (url.pathname === "/api/ovoko/transfer-inventory") {
       assert.equal(req.method(), "POST");
       const input = req.postDataJSON();
@@ -34,6 +47,10 @@ try {
     assert.equal(req.method(), "GET");
     if (url.pathname === "/api/account/me") return route.fulfill({ json: { isAdmin: true } });
     if (url.pathname.endsWith("/shipping-rates")) return route.fulfill({ json: { shippingRates: [{ id: shipping, name: "Maly kurier" }] } });
+    if (url.pathname.includes("/ovoko-source/")) {
+      const id = url.pathname.split("/").at(-1);
+      return route.fulfill({ json: { sellerId: "555", offer: { id, name: `Pompa ABS 1234567 pozycja ${Number(id) - 1234567890}`, productSet: [{ product: {}, quantity: { value: 1 } }], parameters: [{ id: "11323", valuesIds: ["11323_2"] }], publication: { status: "ACTIVE" }, stock: { available: 1 }, images: ["https://a.allegroimg.com/photo.jpg"], sellingMode: { price: { amount: "220.00", currency: "PLN" } }, description: { sections: [{ items: [{ type: "TEXT", content: "<p>Opis z Allegro</p>" }] }] } } } });
+    }
     if (fail) return route.fulfill({ status: 502, json: { message: "Blad odczytu Allegro" } });
     const offset = Number(url.searchParams.get("offset")), limit = Number(url.searchParams.get("limit"));
     const status = url.searchParams.get("status") || "ENDED";
@@ -92,11 +109,41 @@ try {
   await page.getByText(/Status przeniesienia pozostaje nieustalony/).waitFor();
   assert.equal(await page.getByText("Nieustalony", { exact: true }).count(), 2);
   assert.equal(await page.locator("tbody").getByText("Nieprzeniesione", { exact: true }).count(), 0);
-  assert.ok(requests.every(request => request.method === "GET" || request.url.pathname === "/api/ovoko/transfer-inventory")); assert.deepEqual(errors, []);
+  transferFail = false;
+  await page.getByRole("button", { name: "Odswiez", exact: true }).click();
+  await page.getByText("Ovoko ID: 77", { exact: true }).waitFor();
+  await page.getByRole("checkbox", { name: "Zaznacz widoczna strone" }).check();
+  await page.getByLabel("Cena w Ovoko", { exact: true }).selectOption("percent");
+  await page.getByLabel("Procent (%)", { exact: true }).fill("-10");
+  assert.equal(await page.getByText("198.00 PLN", { exact: true }).count(), 2);
+  await page.screenshot({ path: fileURLToPath(new URL("../outputs/inventory-preview/bulk-prices.png", import.meta.url)), fullPage: true });
+  await page.getByRole("button", { name: "Przenies zaznaczone do Ovoko", exact: true }).click();
+  await page.getByText(/Partia zakonczona/).waitFor();
+  assert.equal(bulkCalls.filter(call => call.operation === "item").length, 1, "An already transferred offer is skipped before publication");
+  assert.ok(await page.getByText(/Juz przeniesiona, pominieto/).isVisible());
+  await page.screenshot({ path: fileURLToPath(new URL("../outputs/inventory-preview/bulk.png", import.meta.url)), fullPage: true });
+  bulkCalls.length = 0; bulkMode = "uncertain";
+  await page.locator("tbody tr").last().waitFor();
+  await page.getByRole("checkbox", { name: "Zaznacz widoczna strone" }).check();
+  await page.getByRole("button", { name: "Przenies zaznaczone do Ovoko", exact: true }).click();
+  await page.getByText(/Partia zatrzymana: Niepewny wynik/).waitFor();
+  assert.equal(bulkCalls.filter(call => call.operation === "prepare").length, 1);
+  assert.equal(bulkCalls.filter(call => call.operation === "item").length, 1, "Uncertain writes are not retried and stop the remainder");
+  bulkCalls.length = 0; bulkMode = "hold";
+  await page.getByText("Ovoko ID: 77", { exact: true }).waitFor();
+  await page.getByRole("checkbox", { name: "Zaznacz widoczna strone" }).check();
+  await page.getByRole("button", { name: "Przenies zaznaczone do Ovoko", exact: true }).click();
+  while (!releaseWrite) await new Promise(resolve => setTimeout(resolve, 10));
+  await page.getByRole("button", { name: "Zatrzymaj po biezacej", exact: true }).click();
+  releaseWrite();
+  await page.getByText(/Zatrzymano. Pozostale pozycje/).waitFor();
+  assert.equal(bulkCalls.filter(call => call.operation === "item").length, 1);
+  assert.equal(bulkCalls.filter(call => call.operation === "prepare").length, 1, "Stop finishes the current write without starting the next offer");
+  assert.ok(requests.every(request => request.method === "GET" || ["/api/ovoko/transfer-inventory", "/api/ovoko/bulk"].includes(request.url.pathname))); assert.deepEqual(errors, []);
   await mkdir(new URL("../outputs/inventory-preview/", import.meta.url), { recursive: true });
   await page.screenshot({ path: fileURLToPath(new URL("../outputs/inventory-preview/desktop.png", import.meta.url)), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), "Mobile viewport scroll is contained within the offer table");
   await page.screenshot({ path: fileURLToPath(new URL("../outputs/inventory-preview/mobile.png", import.meta.url)), fullPage: true });
-  console.log("Inventory browser: paging 100k+, ordinary and Ovoko filters, cursor history, part IDs, unknown-on-error, selection and no mutation controls passed.");
+  console.log("Inventory browser: filters, paging, selected-only bulk transfer, price previews, full descriptions, duplicate skip, uncertain-result stop and finish-current pause passed. All network mocked.");
 } finally { await browser.close(); }

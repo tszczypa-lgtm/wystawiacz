@@ -5,12 +5,13 @@ import { OvokoError, parseOvokoRead } from "./ovoko-read";
 import { ovokoWriteClient, ovokoWriteDigest } from "./ovoko-write-client";
 
 type Context = Awaited<ReturnType<typeof accountContext>>;
-export async function createOvokoCar(request: Request, env: OvokoPublishEnv, context: Context, input: Record<string, unknown>) {
+export async function createOvokoCar(request: Request, env: OvokoPublishEnv, context: Context, input: Record<string, unknown>, expectedFingerprint?: string) {
   if (env.OVOKO_PUBLISH_ENABLED !== "true") throw new OvokoError(503, "Tworzenie aut jest wylaczone flaga OVOKO_PUBLISH_ENABLED.");
   if (input.confirmCreate !== true || Object.keys(input).some(key => !["brandId", "modelId", "year", "confirmCreate"].includes(key))) throw new OvokoError(400, "Potwierdz utworzenie rekordu auta z wybranym modelem i rokiem.");
   const { brandId, modelId, year } = input;
   if (typeof brandId !== "string" || !/^[1-9]\d{0,11}$/.test(brandId) || typeof modelId !== "string" || !/^[1-9]\d{0,11}$/.test(modelId) || typeof year !== "string" || !/^\d{4}$/.test(year) || Number(year) < 1886 || Number(year) > new Date().getUTCFullYear() + 1) throw new OvokoError(400, "Wybierz marke, model i poprawny rok. Nie zgadujemy roku produkcji.");
   const credentials = await loadOvokoConnection(context, await ovokoConnectionKey(env));
+  if (expectedFingerprint && await ovokoWriteDigest(JSON.stringify(credentials)) !== expectedFingerprint) throw new OvokoError(409, "Konto Ovoko zmienilo sie. Nie utworzono auta.");
   const remote = ovokoWriteClient(credentials), account = await ovokoWriteDigest(credentials.username.trim().toLowerCase());
   const selector = `ovoko_account=eq.${account}&model_id=eq.${modelId}&vehicle_year=eq.${year}`;
   const db = async (query: string, options?: RequestInit) => {
