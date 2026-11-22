@@ -70,9 +70,10 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
   function failure(id: string, error: unknown) {
     const retryable = error instanceof OvokoBulkClientError && error.status === 400;
     update(id, { state: "error", retryable, message: error instanceof Error ? error.message : "Niepotwierdzony wynik." });
-    return retryable;
+    // A pre-existing car reservation blocks only this item; no part write was attempted.
+    return retryable || error instanceof OvokoBulkClientError && error.status === 409 && error.code === "vehicle_creation_locked";
   }
-  function finish() { lock.current = false; if (mounted.current) { setRunning(false); onFinished(); } }
+  function finish() { lock.current = false; if (mounted.current) { setJobs(previous => previous.map(job => job.state === "waiting" ? { ...job, message: "Nie wyslano w tej partii" } : job)); setRunning(false); onFinished(); } }
   async function start() {
     if (lock.current || !offers.length || offers.length > 200) return;
     lock.current = true; stop.current = false; setRunning(true); setMessage("");

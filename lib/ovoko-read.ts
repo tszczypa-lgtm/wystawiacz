@@ -1,5 +1,5 @@
 export class OvokoError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  constructor(public status: number, message: string, public code?: string) { super(message); }
 }
 export type OvokoReadOperation = "models" | "categories" | "statuses" | "qualities" | "parts" | "cars" | "inventory";
 export type OvokoReadRow = { id: string; name: string; image?: string; brand?: string; years?: string; modelId?: string; engineCode?: string; level?: string; parentId?: string; carId?: string; categoryId?: string; manufacturerCode?: string; externalId?: string; price?: string; status?: string; quality?: string };

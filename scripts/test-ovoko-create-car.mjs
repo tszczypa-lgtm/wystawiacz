@@ -132,8 +132,8 @@ try {
   reset(); const concurrent = await Promise.all([handleOvokoApi(req(), env), handleOvokoApi(req(), env)]); assert.equal(mutations, 1); assert.ok(concurrent.some(response => response.status === 200));
   for (const failure of ["timeout", "redirect", "reject", "missing-id", "log-failure", "verification-wrong", "verification-timeout", "verification-malformed"]) {
     reset(); mode = failure; if (failure === "log-failure") failDb = "PATCH";
-    const response = await handleOvokoApi(req(), env); assert.equal(response.status, 409); assert.ok(!(await response.text()).includes("private-")); assert.equal(mutations, 1);
-    assert.equal((await handleOvokoApi(req(), env)).status, 409); assert.equal(mutations, 1, "Uncertain vehicle creation is never retried");
+    const response = await handleOvokoApi(req(), env); assert.equal(response.status, 409); const failedBody = await response.json(); assert.ok(!JSON.stringify(failedBody).includes("private-")); assert.equal(failedBody.code, undefined, "A newly uncertain write is not treated as a pre-existing scoped lock"); assert.equal(mutations, 1);
+    const locked = await handleOvokoApi(req(), env); assert.equal(locked.status, 409); assert.equal((await locked.json()).code, "vehicle_creation_locked"); assert.equal(mutations, 1, "Uncertain vehicle creation is never retried");
   }
   for (const [failure, diagnosis, committed] of [
     ["confirmation-rejected", /status adaptera bazy: 503; rzeczywisty HTTP Supabase niedostepny/, false],

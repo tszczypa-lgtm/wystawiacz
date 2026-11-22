@@ -120,7 +120,7 @@ export async function handleOvokoApi(request: Request, env: OvokoEnv): Promise<R
     if (connecting) await saveOvokoConnection(context, key!, credentials, checkedAt);
     return reply({ ok: true, code: "R200", readOnly: true, credentialsStored: connecting || useSaved, connected: connecting || useSaved, checkedAt, brands: result.list.map(item => ({ id: String(item.id), name: item.name })) });
   } catch (error) {
-    if (error instanceof OvokoError) return reply({ message: error.message }, error.status);
+    if (error instanceof OvokoError) return reply({ message: error.message, ...(error.code ? { code: error.code } : {}) }, error.status);
     if (error instanceof Error && "status" in error && error.status === 401) return reply({ message: "Zaloguj sie ponownie do Wystawiacza." }, 401);
     if (error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name)) return reply({ message: "Przekroczono czas odczytu Ovoko. Nie ponawiamy automatycznie; nie zmieniono ofert." }, 504);
     return reply({ message: "Nie udalo sie wykonac testu Ovoko. Sprawdz dostep konta i polaczenie sieciowe. Nie zmieniono ofert." }, 503);

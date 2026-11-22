@@ -31,7 +31,7 @@ export async function createOvokoCar(request: Request, env: OvokoPublishEnv, con
   if (!Array.isArray(existing)) throw new OvokoError(503, "Nieprawidlowy rejestr tworzenia aut.");
   if (existing.length) {
     if (existing[0].state === "created" && /^[1-9]\d{0,11}$/.test(existing[0].car_id)) return { ok: true, carId: existing[0].car_id, modelId, year, reused: true };
-    throw new OvokoError(409, "Ten model i rok maja juz rozpoczeta lub niepewna probe utworzenia auta. Sprawdz Ovoko; nie tworzymy kolejnego rekordu.");
+    throw new OvokoError(409, "Auto do sprawdzenia: ten model i rok maja juz rozpoczeta lub niepewna probe utworzenia auta. Tej czesci nie wyslano. Sprawdz Ovoko; nie tworzymy kolejnego rekordu.", "vehicle_creation_locked");
   }
   try {
     const models = parseOvokoRead("models", await remote(`/get/car_models/${brandId}`), brandId).rows;
@@ -53,7 +53,7 @@ export async function createOvokoCar(request: Request, env: OvokoPublishEnv, con
     const latestCredentials = await loadOvokoConnection(permission, await ovokoConnectionKey(env));
     if (latestCredentials.username !== credentials.username || latestCredentials.user_token !== credentials.user_token || latestCredentials.password !== credentials.password) throw new OvokoError(409, "Polaczenie Ovoko zmienilo sie podczas sprawdzania. Nie utworzono auta.");
     const reserved = await db("?on_conflict=ovoko_account,model_id,vehicle_year", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=representation" }, body: JSON.stringify({ ovoko_account: account, model_id: modelId, vehicle_year: year, owner_id: context.user.id, state: "sending" }) });
-    if (!Array.isArray(reserved) || reserved.length !== 1 || reserved[0].owner_id !== context.user.id) throw new OvokoError(409, "Tworzenie tego auta jest juz zablokowane. Sprawdz Ovoko przed kolejna proba.");
+    if (!Array.isArray(reserved) || reserved.length !== 1 || reserved[0].owner_id !== context.user.id) throw new OvokoError(409, "Auto do sprawdzenia: tworzenie tego auta jest juz zablokowane. Tej czesci nie wyslano. Sprawdz Ovoko przed kolejna proba.", "vehicle_creation_locked");
     let writeStage = "importCar";
     let confirmationDiagnosis = "";
     try {

@@ -40,12 +40,13 @@ try {
       assert.equal(input.notes, "Opis z Allegro");
       assert.equal(input.expectedSource.price, sourceAmount);
       if (input.operation === "prepare") {
+        if (bulkMode === "vehicle-locked" && !input.offerId.endsWith("2")) return route.fulfill({ status: 409, json: { code: "vehicle_creation_locked", message: "Auto do sprawdzenia. Tej czesci nie wyslano." } });
         assert.equal(input.allowTechnicalModel, true, "The panel explicitly requests technical fallback; the API does not infer permission");
         if (bulkMode === "repair" && !input.offerId.endsWith("2") && !input.fallbackVehicle) return route.fulfill({ status: 400, json: { message: "Wybierz model auta Ovoko i kategorie." } });
         return route.fulfill({ json: input.offerId.endsWith("2") ? { ok: true, alreadyCreated: true, partId: "77" } : { ok: true, prepared: { donorId: "13" }, vehicle: { brand: "Citroen", model: "C5 Aircross", usedFallback: !!input.fallbackVehicle, evidence: input.fallbackVehicle ? "Wybor reczny" : "Katalog Allegro - pelny MPN" } } });
       }
       assert.equal(input.operation, "item");
-      if (bulkMode === "uncertain") return route.fulfill({ status: 409, json: { message: "Niepewny wynik wysylki. Nie ponawiaj." } });
+      if (bulkMode === "uncertain") return route.fulfill({ status: 409, json: { code: "vehicle_creation_locked", message: "Niepewny wynik wysylki. Nie ponawiaj." } });
       if (bulkMode === "hold") await new Promise(resolve => { releaseWrite = resolve; });
       return route.fulfill({ json: { ok: true, partId: "88", alreadyCreated: false, price: input.adjustment.mode === "fixed" ? "100.00" : "198.00", currency: "PLN" } });
     }
@@ -176,6 +177,16 @@ try {
   assert.equal(bulkCalls.filter(call => call.operation === "prepare").length, 1);
   assert.equal(bulkCalls.filter(call => call.operation === "item").length, 1, "Uncertain writes are not retried and stop the remainder");
   await uncertainWindow.close();
+  bulkCalls.length = 0; bulkMode = "vehicle-locked";
+  await page.getByText("Ovoko ID: 77", { exact: true }).waitFor();
+  await page.getByRole("checkbox", { name: "Zaznacz widoczna strone" }).check();
+  const lockedWindow = await openTransfer();
+  await lockedWindow.getByRole("button", { name: "Przenies zaznaczone do Ovoko", exact: true }).click();
+  await lockedWindow.getByText(/Partia zakonczona.*Przeniesiono: 0; pominieto: 1; bledy: 1; niewyslane: 0/).waitFor();
+  assert.equal(bulkCalls.filter(call => call.operation === "prepare").length, 2, "An existing car lock leaves one row for checking and continues the next offer");
+  assert.equal(bulkCalls.filter(call => call.operation === "item").length, 0, "The locked car never reaches publication or an automatic retry");
+  assert.equal(await lockedWindow.getByText("Uzupelnij i przenies", { exact: true }).count(), 0, "A lock cannot be cleared by editing fields");
+  await lockedWindow.close();
   bulkCalls.length = 0; bulkMode = "hold";
   await page.getByText("Ovoko ID: 77", { exact: true }).waitFor();
   await page.getByRole("checkbox", { name: "Zaznacz widoczna strone" }).check();
