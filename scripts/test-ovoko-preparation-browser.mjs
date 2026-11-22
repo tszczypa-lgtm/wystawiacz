@@ -49,8 +49,8 @@ try {
       assert.equal(request.method(), "POST"); const body = request.postDataJSON(); assert.equal(body.confirmCreate, true);
       assert.deepEqual(Object.keys(body).sort(), ["brandId", "confirmCreate", "modelId", "year"]);
       if (carCreationFailure) return route.fulfill({ status: 409, json: { message: "Niepewny wynik tworzenia auta. Sprawdz Ovoko." } });
-      assert.ok(["164", "71"].includes(body.modelId)); assert.ok(["2005", "2009", "2021"].includes(body.year));
-      const carId = body.modelId === "71" ? "371" : "301";
+      assert.ok(["164", "71", "30"].includes(body.modelId)); assert.ok(["2005", "2009", "2021", "2013"].includes(body.year));
+      const carId = body.modelId === "71" ? "371" : body.modelId === "30" ? "430" : "301";
       savedCars = [{ id: carId, name: `Auto ID ${carId}`, modelId: body.modelId, years: body.year }];
       return route.fulfill({ json: { ok: true, carId, modelId: body.modelId, year: body.year, reused: false } });
     }
@@ -221,8 +221,10 @@ try {
   await page.getByLabel("Kategoria Ovoko", { exact: true }).selectOption("");
   const beforeBlocked = calls.filter(call => ["/api/ovoko/create-car", "/api/ovoko/publish"].includes(call.path)).length;
   await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).click();
-  assert.match(await page.getByLabel("Blokady wystawienia").textContent(), /Moje samochody/);
-  assert.equal(calls.filter(call => ["/api/ovoko/create-car", "/api/ovoko/publish"].includes(call.path)).length, beforeBlocked, "Missing required category blocks all writes before car creation");
+  assert.match(await page.getByLabel("Blokady wystawienia").textContent(), /kategorie/);
+  await page.getByRole("alert").filter({ hasText: "Auto ID 430 jest uzupelnione" }).waitFor();
+  assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "430", "Missing part category no longer prevents automatic car ID");
+  assert.equal(calls.filter(call => ["/api/ovoko/create-car", "/api/ovoko/publish"].includes(call.path)).length, beforeBlocked + 1, "Only the car is prepared; missing category still blocks part publication");
   offerTitle = "FORD EDGE S-MAX MK2 KUGA CZYTNIK KART SD USB EM2T14F014AA EM2T-14F014-AA"; numberParameter = offerTitle;
   await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="42"]').waitFor({ state: "attached" });
   assert.equal(await page.getByLabel("Marka auta Ovoko").inputValue(), "5");

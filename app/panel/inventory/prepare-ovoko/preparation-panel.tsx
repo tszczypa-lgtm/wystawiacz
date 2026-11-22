@@ -35,6 +35,10 @@ export function OvokoPreparationPanel() {
   const yearSuggestion = useMemo(() => source ? ovokoCarYear(source, dictionaries.models?.find(row => row.id === modelId)) : { year: "", reason: "", technical: false }, [source, modelId, dictionaries.models]);
   const active = useRef<AbortController | null>(null);
   const publicationPanel = useRef<HTMLElement | null>(null);
+  const feedbackPanel = useRef<HTMLParagraphElement | null>(null);
+  useEffect(() => {
+    if (publicationMessage && !publishing) feedbackPanel.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [publicationMessage, publishing]);
   const touched = useRef(new Set<string>());
   async function readOvoko(operation: string, signal: AbortSignal, selectedBrand?: string) {
     const { data } = await createSupabaseBrowserClient().auth.getSession();
@@ -176,7 +180,10 @@ export function OvokoPreparationPanel() {
   const otherCodes = draft ? additionalOvokoCodes(draft.additionalCodes, draft.manufacturerCode) : [];
   async function createCar(): Promise<string | null> {
     const attemptKey = `${modelId}:${carYear}`;
-    if (!brandId || !modelId || !/^\d{4}$/.test(carYear) || creatingCar || carWriteLocks.current.has(attemptKey) || carAttempted || carsBusy || modelsBusy || dictionaryBusy) return null;
+    if (!brandId || !modelId || !/^\d{4}$/.test(carYear) || creatingCar || carWriteLocks.current.has(attemptKey) || carAttempted || carsBusy || modelsBusy || dictionaryBusy) {
+      setPublicationMessage(carWriteLocks.current.has(attemptKey) || carAttempted ? "Przygotowanie tego auta bylo juz uruchomione. Sprawdz komunikat przy aucie; nie ponawiamy niepewnego zapisu." : "Nie przygotowano auta: wybierz marke, model i poprawny rok lub poczekaj na zakonczenie odczytu.");
+      return null;
+    }
     carWriteLocks.current.add(attemptKey);
     setCreatingCar(true); setCarAttempted(true); setCarMessage(""); setReview(false);
     setDraft(previous => previous ? { ...previous, donorId: "" } : previous);
@@ -194,7 +201,10 @@ export function OvokoPreparationPanel() {
       setCarMessage(`${result.reused ? "Wykorzystano istniejacy" : "Utworzono nowy"} rekord auta ID ${result.carId}. ID uzupelniono automatycznie.`);
       setCarsRefresh(value => value + 1);
       return result.carId;
-    } catch (error) { setCarMessage(error instanceof Error ? error.message : "Niepewny wynik. Sprawdz Moje samochody Ovoko."); }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Niepewny wynik. Sprawdz Moje samochody Ovoko.";
+      setCarMessage(message); setPublicationMessage(message);
+    }
     finally { setCreatingCar(false); }
     return null;
   }
@@ -205,17 +215,21 @@ export function OvokoPreparationPanel() {
   }
   async function publishSingle() {
     if (!source || !draft || publishing || attempted || publicationLock.current || publicationSent.current || creatingCar || carsBusy || modelsBusy || dictionaryBusy) return;
-    const blockers = ovokoPublicationBlockers(source, { ...draft, donorId: draft.donorId || "1" }, brandId, modelId);
-    if (blockers.length || dictionaryError || modelError) {
-      setPublicationMessage([...blockers, carsError, dictionaryError, modelError].filter(Boolean).join(" "));
+    if (!brandId || !modelId || modelError || source.status !== "ACTIVE" || source.stock !== 1 || source.bundle) {
+      setPublicationMessage(modelError || "Przygotowanie auta wymaga marki, modelu i aktywnej pojedynczej oferty Allegro z jedna sztuka.");
       openPublicationReview(); return;
     }
     publicationLock.current = true;
     setPublishing(true); setPublicationMessage("");
     try {
       const donorId = draft.donorId || await createCar();
-      if (!donorId) { setPublicationMessage("Nie przygotowano auta. Sprawdz komunikat przy samochodzie. Nie wyslano czesci."); return; }
+      if (!donorId) { setPublicationMessage(previous => previous || "Nie przygotowano auta. Sprawdz komunikat przy samochodzie. Nie wyslano czesci."); return; }
       setReview(true);
+      const blockers = ovokoPublicationBlockers(source, { ...draft, donorId }, brandId, modelId);
+      if (blockers.length || dictionaryError) {
+        setPublicationMessage(`Auto ID ${donorId} jest uzupelnione. Nie wyslano czesci: ${[...blockers, dictionaryError].filter(Boolean).join(" ")}`);
+        return;
+      }
       const { data } = await createSupabaseBrowserClient().auth.getSession();
       if (!data.session) throw new Error("Zaloguj sie ponownie. Nie potwierdzono wysylki.");
       publicationSent.current = true; setAttempted(true);
@@ -230,6 +244,7 @@ export function OvokoPreparationPanel() {
   }
   return <section className="space-y-5">
     <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-3xl font-black">Przygotuj do Ovoko</h1><button type="button" className={`${button} bg-orange-600`} disabled={!source || busy || dictionaryBusy || modelsBusy || carsBusy || publishing || attempted || creatingCar} onClick={() => void publishSingle()}>{publishing ? "Wystawiam..." : "Wystaw 1 czesc w Ovoko"}</button></div>
+    {publicationMessage && <p ref={feedbackPanel} role={partId || publishing ? "status" : "alert"} className={`rounded-lg border p-3 ${partId ? "border-emerald-400/40 text-emerald-200" : "border-amber-400/40 text-amber-200"}`}>{publicationMessage}</p>}
     <p className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm leading-6"><strong>Jedno klikniecie Wystaw.</strong> Automat sprawdza dane, wykorzystuje zapisane auto albo tworzy brakujace i wysyla czesc ze zdjeciami. Bez dodatkowych checkboxow. Sam podglad niczego nie wysyla. Cennika wysylki Allegro nie przenosimy; obowiazuja ustawienia Ovoko. Nie zmieniamy Allegro. Niepewnych zapisow nie ponawiamy.</p>
     <a href="/panel/inventory" className="inline-block text-sm underline">Wroc do ofert Allegro</a>
     {busy && <p role="status">Sprawdzam uprawnienia i pobieram oferte z polaczonego konta Allegro...</p>}
@@ -304,7 +319,6 @@ export function OvokoPreparationPanel() {
         {review && <div className="mt-4 space-y-3 rounded-xl border border-orange-400/40 p-4"><h3 className="font-bold">Podsumowanie: jedna czesc</h3><p>{source.title}</p><p>Numer: {draft.manufacturerCode}; cena: {draft.price} {draft.currency}</p><p>Numery dodatkowe: {otherCodes?.join(", ") || "brak"}</p><p className="font-bold">Przenoszone zdjecia: {source.images.length} (cala galeria z Allegro)</p><p>Kategoria: {dictionaries.categories?.find(row => row.id === draft.categoryId)?.name}; stan: {dictionaries.qualities?.find(row => row.id === draft.qualityId)?.name}; dostepnosc: {dictionaries.statuses?.find(row => row.id === draft.statusId)?.name}</p><p>Auto: {dictionaries.brands?.find(row => row.id === brandId)?.name} {dictionaries.models?.find(row => row.id === modelId)?.name}; rekord auta ID: {draft.donorId}</p>
           <p className="text-xs text-white/60">Nie zmieniamy istniejacych czesci ani Allegro. Po niepewnym wyniku nie ponawiamy automatycznie.</p>
         </div>}
-        {publicationMessage && <p role={partId ? "status" : "alert"} className={`mt-4 rounded-lg border p-3 ${partId ? "border-emerald-400/40 text-emerald-200" : "border-amber-400/40 text-amber-200"}`}>{publicationMessage}</p>}
       </section>
     </>}
   </section>;
