@@ -27,6 +27,7 @@ function reset() {
   user++; admin = true; suspended = false; owns = true; stock = 1; bundle = false; mode = "ok"; donorModel = "11"; duplicate = false; failDb = ""; sourceReads = 0; lateStock = false; writes = 0; categoryName = "Pompy"; revokeAfterRead = false; imageMode = "normal"; extraCodes = ""; bulk = false; expectedPrice = "100.00"; credentialReads = 0; rotateAt = Infinity; records.clear(); calls.length = 0;
 }
 const originalFetch = globalThis.fetch;
+let vehicleParams = [], preparedVehicle, generationTest = false;
 globalThis.fetch = async (input, options = {}) => {
   const url = new URL(input), method = options.method || "GET";
   calls.push({ url: url.href, method });
@@ -60,18 +61,19 @@ globalThis.fetch = async (input, options = {}) => {
     assert.equal(url.pathname, "/sale/product-offers/101"); sourceReads++;
     if (revokeAfterRead && sourceReads > 1) admin = false;
     const images = imageMode === "duplicates" ? [...snapshot.images, snapshot.images[0]] : imageMode === "unsafe" ? [...snapshot.images, "https://evil.test/private.jpg"] : imageMode === "changed" && sourceReads > 1 ? snapshot.images.slice(0, 1) : snapshot.images;
-    return Response.json({ id: "101", name: snapshot.title, parameters: [{ id: "11323", valuesIds: ["11323_2"] }], productSet: [{ quantity: { value: bundle ? 2 : 1 }, product: {} }], images, stock: { available: lateStock && sourceReads > 1 ? 0 : stock }, publication: { status: "ACTIVE" }, sellingMode: { price: { amount: mode === "price-format" && sourceReads > 1 ? "100" : mode === "price-change" && sourceReads > 1 ? "101.00" : "100.00", currency: "PLN" } } });
+    return Response.json({ id: "101", name: snapshot.title, parameters: [{ id: "11323", valuesIds: ["11323_2"] }, ...vehicleParams], productSet: [{ quantity: { value: bundle ? 2 : 1 }, product: {} }], images, stock: { available: lateStock && sourceReads > 1 ? 0 : stock }, publication: { status: "ACTIVE" }, sellingMode: { price: { amount: mode === "price-format" && sourceReads > 1 ? "100" : mode === "price-change" && sourceReads > 1 ? "101.00" : "100.00", currency: "PLN" } } });
   }
   assert.equal(url.origin, "https://api.rrr.lt"); assert.equal(method, "POST"); assert.equal(options.redirect, "manual");
   const form = new URLSearchParams(options.body);
   for (const [key, value] of Object.entries(credentials)) assert.equal(form.get(key), value);
   if (url.pathname === "/get/categories") return Response.json({ status_code: "R200", list: [{ id: "3", parent_id: "0", level: "3", pl: categoryName }] });
-  if (url.pathname === "/get/car_brands") return Response.json({ status_code: "R200", list: [{ id: "1", name: "Audi" }] });
+  if (url.pathname === "/get/car_brands") return Response.json({ status_code: "R200", list: [{ id: "1", name: "Audi" }, { id: "2", name: "Volkswagen" }] });
   if (url.pathname === "/get/part_quality") return Response.json({ status_code: "R200", list: { "0": { pl: "Używany" } } });
   if (url.pathname === "/get/part_status") return Response.json({ status_code: "R200", list: { "0": { pl: "Na stanie" }, "2": { pl: "Sprzedano" } } });
-  if (url.pathname === "/get/car_models/1") return Response.json({ status_code: "R200", list: [{ id: "11", brand: "1", name: "A4", year_start: "2000", year_end: "2010" }] });
+  if (url.pathname === "/get/car_models/1") return Response.json({ status_code: "R200", list: [{ id: "11", brand: "1", name: generationTest ? "A4 (B8)" : "A4", year_start: "2000", year_end: "2010" }] });
+  if (url.pathname === "/get/car_models/2") return Response.json({ status_code: "R200", list: [{ id: "22", brand: "2", name: "Golf", year_start: "2000", year_end: "2010" }] });
   if (url.pathname === "/v2/get/cars") {
-    if (bulk && url.searchParams.has("model_ids")) { assert.equal(url.searchParams.get("model_ids"), "11"); return Response.json({ status_code: "R200", data: [{ id: "13", car_model: donorModel, car_years: "2000" }], pagination: { page: 1, limit: 20, total_count: 1 } }); }
+    if (bulk && url.searchParams.has("model_ids")) { assert.equal(url.searchParams.get("model_ids"), donorModel); return Response.json({ status_code: "R200", data: [{ id: "13", car_model: donorModel, car_years: "2000" }], pagination: { page: 1, limit: 20, total_count: 1 } }); }
     assert.equal(url.searchParams.get("car_ids"), "13"); return Response.json({ status_code: "R200", data: [{ id: "13", car_model: donorModel }], pagination: { page: 1, limit: 1, total_count: 1 } });
   }
   if (url.pathname === "/v2/get/parts") { assert.equal(url.searchParams.get("external_ids"), "tymo:555:101"); return Response.json({ status_code: "R200", data: duplicate ? [{ id: "99" }] : [], pagination: { page: "1", limit: "1", total_count: duplicate ? "1" : "0" } }); }
@@ -140,6 +142,7 @@ try {
     const preparation = await handleOvokoApi(bulkReq({ ...item, operation: "prepare" }), env);
     if (checkBounds) assert.ok(calls.length - before < 50, "Preparation uses a bounded separate Worker request");
     const data = await preparation.clone().json();
+    preparedVehicle = data.vehicle;
     if (!preparation.ok || data.alreadyCreated) return preparation;
     const ready = calls.length, result = await handleOvokoApi(bulkReq({ ...item, prepared: data.prepared }), env);
     if (checkBounds) assert.ok(calls.length - ready < 50, "Publication uses a bounded separate Worker request");
@@ -165,5 +168,32 @@ try {
     reset(); bulk = true; const item = await bulkPlan({ mode: "none", value: "0" }); rotateAt = rotate;
     assert.equal((await bulkSend(item)).status, 409); assert.equal(writes, 0, "Credential changes during preparation/publication stop the batch before a part write");
   }
-  console.log("Ovoko single + bulk publication: guards, source/target binding, signed amount/percent prices, auto matching and car reuse, snapshots, full photos, durable duplicate locks, concurrency and uncertain no-retry passed. All services mocked; nothing published live.");
+  const originalTitle = snapshot.title;
+  reset(); bulk = true; snapshot.title = "VW AUDI A4 POMPA 0281010038";
+  const otherMake = await bulkPlan({ mode: "none", value: "0" });
+  const otherResult = await bulkSend(otherMake); assert.equal(otherResult.status, 200, await otherResult.clone().text());
+  assert.equal(preparedVehicle.brand, "Audi", "Try other mentioned makes for a recognizable model before using a fallback"); assert.equal(preparedVehicle.usedFallback, false);
+  reset(); bulk = true; snapshot.title = "AUDI VW POMPA 0281010038";
+  const noModel = await bulkPlan({ mode: "none", value: "0" });
+  const missing = await bulkSend(noModel); assert.equal(missing.status, 400); assert.match(await missing.text(), /model pomocniczy/); assert.equal(writes, 0);
+  for (const [fallbackVehicle, model, brand] of [[{ brandId: "1", modelId: "11" }, "11", "Audi"], [{ brandId: "2", modelId: "22" }, "22", "Volkswagen"]]) {
+    reset(); bulk = true; donorModel = model;
+    const item = { ...await bulkPlan({ mode: "none", value: "0" }), fallbackVehicle };
+    const result = await bulkSend(item); assert.equal(result.status, 200, await result.clone().text()); assert.equal(writes, 1);
+    assert.equal(preparedVehicle.brand, brand); assert.equal(preparedVehicle.usedFallback, true);
+  }
+  for (const fallbackVehicle of [{ brandId: "3", modelId: "33" }, { brandId: "1", modelId: "22" }, { brandId: "../1", modelId: "11" }]) {
+    reset(); bulk = true; const item = { ...await bulkPlan({ mode: "none", value: "0" }), fallbackVehicle };
+    assert.equal((await bulkSend(item)).status, 400); assert.equal(writes, 0, "Unmentioned brands, wrong model dictionaries and malformed overrides never publish");
+  }
+  reset(); bulk = true; vehicleParams = [{ name: "Marka pojazdu", values: ["Audi"] }];
+  const explicit = { ...await bulkPlan({ mode: "none", value: "0" }), fallbackVehicle: { brandId: "2", modelId: "22" } };
+  assert.equal((await bulkSend(explicit)).status, 400); assert.equal(writes, 0); vehicleParams = [];
+  reset(); bulk = true; generationTest = true; snapshot.title = "AUDI A4 B9 POMPA 0281010038";
+  const conflict = { ...await bulkPlan({ mode: "none", value: "0" }), fallbackVehicle: { brandId: "1", modelId: "11" } };
+  assert.equal((await bulkSend(conflict)).status, 400); assert.equal(writes, 0, "A fallback cannot bypass an explicit conflicting generation"); generationTest = false;
+  reset(); bulk = true; snapshot.title = originalTitle;
+  const ignoredFallback = { ...await bulkPlan({ mode: "none", value: "0" }), fallbackVehicle: { brandId: "2", modelId: "22" } };
+  assert.equal((await bulkSend(ignoredFallback)).status, 200); assert.equal(preparedVehicle.usedFallback, false); assert.equal(preparedVehicle.brand, "Audi");
+  console.log("Ovoko single + bulk publication: guards, source/target binding, prices, multi-make model lookup, constrained fallback and generation/brand conflicts, car reuse, full photos, durable duplicate locks and uncertain no-retry passed. All services mocked; nothing published live.");
 } finally { globalThis.fetch = originalFetch; }

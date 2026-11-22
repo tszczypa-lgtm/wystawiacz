@@ -9,7 +9,7 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ? pathToFileURL(
 const root = fileURLToPath(new URL("../", import.meta.url));
 const css = await postcss([tailwind({ base: root })]).process(await readFile(new URL("../app/globals.css", import.meta.url), "utf8"), { from: fileURLToPath(new URL("../app/globals.css", import.meta.url)) });
 const bundle = await build({ stdin: { contents: 'import React from "react"; import { createRoot } from "react-dom/client"; import { InventoryPanel } from "./app/panel/inventory/inventory-panel"; import { OvokoTransferWindow } from "./app/panel/inventory/transfer-ovoko/transfer-window"; createRoot(document.getElementById("root")).render(location.pathname.endsWith("/transfer-ovoko") ? <OvokoTransferWindow /> : <InventoryPanel />);', resolveDir: root, loader: "tsx" }, bundle: true, write: false, platform: "browser", format: "iife", jsx: "automatic", define: { "process.env.NODE_ENV": '"production"' }, plugins: [{ name: "mock-session", setup(builder) {
-  builder.onResolve({ filter: /^\.\/supabase$/ }, () => ({ path: "supabase", namespace: "fixture" }));
+  builder.onResolve({ filter: /^(\.\/supabase|@\/lib\/supabase)$/ }, () => ({ path: "supabase", namespace: "fixture" }));
   builder.onLoad({ filter: /.*/, namespace: "fixture" }, () => ({ contents: 'export function createSupabaseBrowserClient(){return {auth:{getSession:async()=>({data:{session:{access_token:"test-only"}}})}}}', loader: "js" }));
 } }] });
 const browser = await chromium.launch({ headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || "chrome" });
@@ -26,13 +26,19 @@ try {
     const req = route.request(), url = new URL(req.url());
     if (!url.pathname.startsWith("/api/")) return route.fulfill({ contentType: "text/html", body: '<html><body style="background:#0d1117;color:white"><main id="root" style="max-width:1100px;margin:auto"></main></body></html>' });
     requests.push({ url, method: req.method() });
+    if (url.pathname === "/api/ovoko/test" || url.pathname === "/api/ovoko/read") {
+      assert.equal(req.method(), "POST"); const input = req.postDataJSON(); assert.equal(input.useSaved, true);
+      if (url.pathname.endsWith("/test")) return route.fulfill({ json: { ok: true, readOnly: true, brands: [{ id: "1", name: "Citroen" }] } });
+      assert.equal(input.operation, "models"); assert.equal(input.brandId, "1");
+      return route.fulfill({ json: { ok: true, readOnly: true, rows: [{ id: "11", name: "C5 Aircross", years: "2017 - 2024" }] } });
+    }
     if (url.pathname === "/api/ovoko/bulk") {
       assert.equal(req.method(), "POST"); const input = req.postDataJSON(); bulkCalls.push(input);
       if (input.operation === "start") return route.fulfill({ json: { ok: true, binding: { sellerId: "555", fingerprint: "fixture" } } });
       assert.deepEqual(input.adjustment, { mode: "percent", value: "-10" });
       assert.equal(input.notes, "Opis z Allegro");
       assert.equal(input.expectedSource.price, sourceAmount);
-      if (input.operation === "prepare") return route.fulfill({ json: input.offerId.endsWith("2") ? { ok: true, alreadyCreated: true, partId: "77" } : { ok: true, prepared: { donorId: "13" } } });
+      if (input.operation === "prepare") return route.fulfill({ json: input.offerId.endsWith("2") ? { ok: true, alreadyCreated: true, partId: "77" } : { ok: true, prepared: { donorId: "13" }, ...(input.fallbackVehicle ? { vehicle: { brand: "Citroen", model: "C5 Aircross", usedFallback: true } } : {}) } });
       assert.equal(input.operation, "item");
       if (bulkMode === "uncertain") return route.fulfill({ status: 409, json: { message: "Niepewny wynik wysylki. Nie ponawiaj." } });
       if (bulkMode === "hold") await new Promise(resolve => { releaseWrite = resolve; });
@@ -133,12 +139,18 @@ try {
     return child;
   }
   const transfer = await openTransfer();
+  await transfer.getByText("Model pomocniczy dla ofert bez rozpoznanego modelu (opcjonalnie)", { exact: true }).click();
+  await transfer.getByLabel("Marka pomocnicza", { exact: true }).selectOption("1");
+  await transfer.getByLabel("Model pomocniczy", { exact: true }).selectOption("11");
   assert.equal(await transfer.getByText("198.00 PLN", { exact: true }).count(), 2);
   await transfer.screenshot({ path: fileURLToPath(new URL("../outputs/inventory-preview/bulk-prices.png", import.meta.url)), fullPage: true });
   await transfer.getByRole("button", { name: "Przenies zaznaczone do Ovoko", exact: true }).click();
   await transfer.getByText(/Partia zakonczona/).waitFor();
   assert.ok(await transfer.getByText(/Przeniesiono: 1; pominieto: 1; bledy: 0/).isVisible());
   assert.equal(bulkCalls.filter(call => call.operation === "item").length, 1, "An already transferred offer is skipped before publication");
+  assert.ok(bulkCalls.filter(call => call.operation === "prepare").every(call => call.fallbackVehicle?.brandId === "1" && call.fallbackVehicle.modelId === "11"), "The chosen fallback is frozen into the preparation batch");
+  assert.ok(bulkCalls.filter(call => call.operation === "item").every(call => !call.fallbackVehicle), "Publication still uses only the server-prepared vehicle");
+  assert.ok(await transfer.getByText(/Auto: Citroen C5 Aircross \(model pomocniczy\)/).isVisible());
   assert.ok(await transfer.getByText(/Juz przeniesiona, pominieto/).isVisible());
   await transfer.screenshot({ path: fileURLToPath(new URL("../outputs/inventory-preview/bulk.png", import.meta.url)), fullPage: true });
   await transfer.close();
@@ -171,7 +183,7 @@ try {
   await changedWindow.getByText(/Przeniesiono: 0; pominieto: 0; bledy: 2/).waitFor();
   assert.equal(bulkCalls.filter(call => call.operation !== "start").length, 0, "Real price changes still block preparation and publication");
   await changedWindow.close();
-  assert.ok(requests.every(request => request.method === "GET" || ["/api/ovoko/transfer-inventory", "/api/ovoko/bulk"].includes(request.url.pathname))); assert.deepEqual(errors, []);
+  assert.ok(requests.every(request => request.method === "GET" || ["/api/ovoko/transfer-inventory", "/api/ovoko/bulk", "/api/ovoko/test", "/api/ovoko/read"].includes(request.url.pathname))); assert.deepEqual(errors, []);
   await mkdir(new URL("../outputs/inventory-preview/", import.meta.url), { recursive: true });
   await page.screenshot({ path: fileURLToPath(new URL("../outputs/inventory-preview/desktop.png", import.meta.url)), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });

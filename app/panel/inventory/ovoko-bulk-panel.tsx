@@ -5,6 +5,7 @@ import { allegroRequest } from "@/lib/allegro-client";
 import { ovokoBulkRequest, OvokoBulkClientError } from "@/lib/ovoko-bulk-client";
 import { adjustedOvokoPrice, sameOvokoMoney, type OvokoPriceAdjustment } from "@/lib/ovoko-bulk-price";
 import { offerDescriptionText, ovokoSourcePreview } from "@/lib/ovoko-preparation";
+import { OvokoFallbackVehicle, type FallbackVehicle } from "./ovoko-fallback-vehicle";
 
 export type BulkOffer = { id: string; name: string; price: { amount: string; currency: string } | null };
 type Offer = BulkOffer;
@@ -14,6 +15,7 @@ const button = "rounded-lg border border-white/20 px-3 py-2 text-sm font-bold di
 export function OvokoBulkPanel({ offers, onFinished }: { offers: Offer[]; onFinished: () => void }) {
   const [mode, setMode] = useState<OvokoPriceAdjustment["mode"]>("none"), [value, setValue] = useState("0");
   const [running, setRunning] = useState(false), [jobs, setJobs] = useState<Job[]>([]), [message, setMessage] = useState("");
+  const [fallbackVehicle, setFallbackVehicle] = useState<FallbackVehicle>();
   const lock = useRef(false), stop = useRef(false), mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; stop.current = true; }; }, []);
   useEffect(() => {
@@ -29,7 +31,7 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: Offer[]; onFini
   async function start() {
     if (lock.current || !offers.length || offers.length > 100) return;
     lock.current = true; stop.current = false; setRunning(true); setMessage("");
-    const snapshot = offers.map(offer => ({ ...offer, price: offer.price ? { ...offer.price } : null })), rule = { ...adjustment };
+    const snapshot = offers.map(offer => ({ ...offer, price: offer.price ? { ...offer.price } : null })), rule = { ...adjustment }, fallback = fallbackVehicle ? { ...fallbackVehicle } : undefined;
     let created = 0, skipped = 0, failed = 0;
     const summary = () => `Przeniesiono: ${created}; pominieto: ${skipped}; bledy: ${failed}; niewyslane: ${snapshot.length - created - skipped - failed}.`;
     const update = (id: string, patch: Partial<Job>) => { if (mounted.current) setJobs(previous => previous.map(job => job.id === id ? { ...job, ...patch } : job)); };
@@ -51,12 +53,14 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: Offer[]; onFini
           // Do not abort or retry an in-flight write: its durable publication lock owns the outcome.
           const item = { offerId: offer.id, binding: session.binding, adjustment: rule, notes: source.description, expectedSource: { title: source.title, price: source.price, currency: source.currency, stock: source.stock, status: source.status, condition: source.condition, images: source.images } };
           type Outcome = { ok: boolean; partId: string; alreadyCreated: boolean; price?: string; currency?: string; prepared?: Record<string, string> };
-          const preparation = await ovokoBulkRequest<Outcome>({ ...item, operation: "prepare" });
+          const preparation = await ovokoBulkRequest<Outcome & { vehicle?: { brand: string; model: string; usedFallback: boolean } }>({ ...item, operation: "prepare", ...(fallback ? { fallbackVehicle: fallback } : {}) });
+          if (preparation.vehicle) update(offer.id, { message: `Auto: ${preparation.vehicle.brand} ${preparation.vehicle.model}${preparation.vehicle.usedFallback ? " (model pomocniczy)" : ""}. Przygotowano do wysylki.` });
           if (!preparation.alreadyCreated && stop.current) { update(offer.id, { state: "waiting", message: "Auto przygotowane. Czesc nie zostala wyslana." }); break; }
           const result = preparation.alreadyCreated ? preparation : await ovokoBulkRequest<Outcome>({ ...item, operation: "item", prepared: preparation.prepared });
           if (!result.ok || !/^[1-9]\d{0,11}$/.test(String(result.partId))) throw new Error("Niepewny wynik wysylki. Sprawdz Ovoko; nie ponawiaj.");
           if (result.alreadyCreated) skipped++; else created++;
-          update(offer.id, { state: result.alreadyCreated ? "skipped" : "done", message: `${result.alreadyCreated ? "Juz przeniesiona, pominieto" : "Przeniesiono"}. Ovoko ID: ${result.partId}`, ...(result.price ? { price: result.price, currency: result.currency } : {}) });
+          const vehicle = preparation.vehicle ? ` Auto: ${preparation.vehicle.brand} ${preparation.vehicle.model}${preparation.vehicle.usedFallback ? " (model pomocniczy)" : ""}.` : "";
+          update(offer.id, { state: result.alreadyCreated ? "skipped" : "done", message: `${result.alreadyCreated ? "Juz przeniesiona, pominieto" : "Przeniesiono"}. Ovoko ID: ${result.partId}.${vehicle}`, ...(result.price ? { price: result.price, currency: result.currency } : {}) });
         } catch (error) {
           failed++;
           update(offer.id, { state: "error", message: error instanceof Error ? error.message : "Niepotwierdzony wynik." });
@@ -76,6 +80,7 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: Offer[]; onFini
   return <section className="space-y-3 rounded-2xl border border-orange-400/30 bg-orange-500/5 p-4" aria-label="Masowe przenoszenie do Ovoko">
     <h2 className="text-lg font-bold">{running ? `Trwa przenoszenie partii (${jobs.length})` : `Przenies zaznaczone do Ovoko (${offers.length})`}</h2>
     <p className="text-sm text-white/65">Kopiujemy zaznaczone oferty z tej strony ze zdjeciami, automatycznym dopasowaniem i ochrona przed duplikatem. Allegro pozostaje bez zmian. Nie ma jeszcze synchronizacji sprzedazy; obowiazuje wysylka ustawiona w Ovoko.</p>
+    <OvokoFallbackVehicle disabled={running} onChange={setFallbackVehicle} />
     <div className="flex flex-wrap items-end gap-3">
       <label className="flex flex-col gap-1 text-sm">Cena w Ovoko<select aria-label="Cena w Ovoko" className={field} value={mode} disabled={running} onChange={event => setMode(event.target.value as OvokoPriceAdjustment["mode"])}><option value="none">Bez zmiany</option><option value="amount">Zmien o kwote</option><option value="percent">Zmien procentowo</option></select></label>
       {mode !== "none" && <label className="flex flex-col gap-1 text-sm">{mode === "amount" ? "Kwota w walucie oferty" : "Procent (%)"}<input aria-label={mode === "amount" ? "Kwota w walucie oferty" : "Procent (%)"} className={`${field} w-48`} inputMode="decimal" value={value} disabled={running} onChange={event => setValue(event.target.value)} placeholder="np. -10 lub 15" /></label>}

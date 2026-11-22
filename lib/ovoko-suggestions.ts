@@ -93,17 +93,25 @@ export function suggestOvokoBrands(title: string, brands: OvokoReadRow[]) {
   return matches.filter(row => !matches.some(other => other !== row && fold(other.name).length > fold(row.name).length && ` ${fold(other.name)} `.includes(` ${fold(row.name)} `)));
 }
 export function automaticOvokoBrand(title: string, parameters: { name: string; values: string[] }[], brands: OvokoReadRow[]): string {
+  const firstMentioned = (text: string, rows: OvokoReadRow[]) => {
+    const normalized = ` ${fold(text).replace(/[^a-z0-9]+/g, " ")} `;
+    const position = (row: OvokoReadRow) => Math.min(...[row.name, ...(fold(row.name) === "volkswagen" ? ["VW"] : [])].map(name => {
+      const index = normalized.indexOf(` ${fold(name).replace(/[^a-z0-9]+/g, " ").trim()} `);
+      return index < 0 ? Infinity : index;
+    }));
+    return [...rows].sort((a, b) => position(a) - position(b) || a.id.localeCompare(b.id, "en", { numeric: true }))[0]?.id || "";
+  };
   const labels = new Set(["marka pojazdu", "marka samochodu", "marka auta", "producent pojazdu", "producent samochodu"]);
   const explicit = parameters.filter(row => labels.has(fold(row.name).trim())).flatMap(row => row.values);
   if (explicit.length) {
     const matches = suggestOvokoBrands(explicit.join(" "), brands);
-    // An explicit but conflicting/unrecognized vehicle brand must not be overridden by title guesses.
-    return matches.length === 1 ? matches[0].id : "";
+    // Vehicle parameters take precedence; multiple compatible makes use a stable first mention.
+    return firstMentioned(explicit.join(" "), matches);
   }
   const matches = suggestOvokoBrands(title, brands);
   const specific = matches.filter(row => fold(row.name).trim() !== "ac");
   const candidates = specific.length ? specific : matches;
-  if (candidates.length) return candidates.length === 1 ? candidates[0].id : "";
+  if (candidates.length) return firstMentioned(title, candidates);
   const producerLabels = new Set(["producent", "marka", "producent czesci", "marka czesci"]);
   const producers = suggestOvokoBrands(parameters.filter(row => producerLabels.has(fold(row.name).trim())).flatMap(row => row.values).join(" "), brands);
   // Only distinctive model names; shared names such as Master or Partner are intentionally excluded.
@@ -124,7 +132,7 @@ function vehicleGenerations(value: string) {
     return Object.hasOwn(romanGenerations, token) ? [`generation${romanGenerations[token]}`] : [];
   });
 }
-function rankOvokoModels(title: string, models: OvokoReadRow[]) {
+function rankOvokoModels(title: string, models: OvokoReadRow[], includeRejected = false) {
   const sourceTokens = vehicleTokens(title), tokens = new Set(sourceTokens), sourceGenerations = new Set(vehicleGenerations(title));
   return models.map(row => {
     const names = vehicleTokens(row.name.split("(")[0]);
@@ -136,8 +144,11 @@ function rankOvokoModels(title: string, models: OvokoReadRow[]) {
     const chassis = generations.filter(token => tokens.has(token));
     const score = (matches.length || chassis.length) && !conflict ? matches.length + chassis.length * 10 + numbered.filter(token => sourceGenerations.has(token)).length * 2 : 0;
     const order = Math.min(...[...matches, ...chassis].map(token => sourceTokens.indexOf(token)), sourceTokens.length);
-    return { ...row, matches, score, order, generationConflict: numberedConflict };
-  }).filter(row => row.score > 0).sort((a, b) => b.score - a.score || a.order - b.order || a.name.localeCompare(b.name) || a.id.localeCompare(b.id, "en", { numeric: true }));
+    return { ...row, matches, score, order, generationConflict: numberedConflict, chassisConflict: conflict };
+  }).filter(row => row.score > 0 || includeRejected && row.matches.length > 0).sort((a, b) => b.score - a.score || a.order - b.order || a.name.localeCompare(b.name) || a.id.localeCompare(b.id, "en", { numeric: true }));
+}
+export function ovokoModelHasConflict(title: string, model: OvokoReadRow): boolean {
+  return rankOvokoModels(title, [model], true).some(row => row.generationConflict || row.chassisConflict);
 }
 export function suggestOvokoModels(title: string, models: OvokoReadRow[]) {
   return rankOvokoModels(title, models).slice(0, 100);
