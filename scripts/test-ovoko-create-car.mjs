@@ -51,15 +51,16 @@ globalThis.fetch = async (input, options = {}) => {
   for (const [name, value] of Object.entries(credentials)) assert.equal(form.get(name), value);
   if (url.pathname === "/get/cars") {
     assert.ok(mode.startsWith("legacy-"));
-    return Response.json({ status_code: "R200", list: mode === "legacy-bad" ? null : mode === "legacy-saved" ? [{ id: "88", car_model: "164", car_years: "2009" }] : [] });
+    return Response.json({ status_code: "R200", list: mode === "legacy-bad" ? null : mode === "legacy-saved" ? [{ id: "88", car_model: "164", car_years: "2009" }] : mode === "legacy-other" ? [{ id: "89", car_model: "163", car_years: "2001" }] : [] });
   }
   if (url.pathname === "/get/car_models/1") return Response.json({ status_code: mode === "bad-metadata" ? "R404" : "R200", list: [{ id: "164", brand: "1", name: "M-Class (W164)", year_start: "2005", year_end: "2011" }] });
   if (url.pathname === "/v2/get/cars") {
+    assert.equal(url.searchParams.has("external_ids"), false, "Creation must not query unavailable external_id from the legacy export");
     if (mode.startsWith("legacy-")) return Response.json({ status_code: "R200", data: [] });
     if (mode === "no-cars") return Response.json({ status_code: "R004", msg: "No cars found" });
     if (url.searchParams.has("model_ids")) {
       assert.equal(url.searchParams.get("model_ids"), "164");
-      const data = mode === "saved-car" ? [{ id: 88, car_model: 164, car_years: 2008 }] : mode === "wrong-car" ? [{ id: "89", car_model: "163", car_years: "2009" }] : [];
+      const data = prior ? [{ id: "77", car_model: "164", car_years: "2009" }] : mode === "saved-car" ? [{ id: 88, car_model: 164, car_years: 2008 }] : mode === "wrong-car" ? [{ id: "89", car_model: "163", car_years: "2009" }] : [];
       return Response.json({ status_code: "R200", data, pagination: { page: 1, limit: 20, total_count: data.length } });
     }
     assert.equal(url.searchParams.get("external_ids"), "tymo:car:164:2009");
@@ -69,10 +70,16 @@ globalThis.fetch = async (input, options = {}) => {
     if (revoked) admin = false;
     return Response.json({ status_code: "R200", list: mode === "missing-status" ? { "1": { pl: "Kupiony" } } : { "1": { pl: "Kupiony" }, "6": { pl: "Dodano" } } });
   }
+  if (url.pathname === "/get/car/77") {
+    assert.equal(mutations, 1, "Verify returned ID only after the single import call");
+    if (mode === "verification-timeout") throw new DOMException("private-error", "TimeoutError");
+    return Response.json({ status_code: "R200", list: mode === "verification-malformed" ? [] : [[{ id: "77", car_model: mode === "verification-wrong" ? "163" : "164", car_years: "2009" }]] });
+  }
   assert.equal(url.pathname, "/crm/importCar", "The only mutation creates one vehicle; no part, purchase, warehouse, update or delete operations");
   assert.equal(rows.size, 1); assert.equal([...rows.values()][0].state, "sending"); mutations++;
   assert.deepEqual([...form.keys()].sort(), ["username", "password", "user_token", "car_model", "car_years", "status", "external_id"].sort());
   assert.equal(form.get("car_model"), "164"); assert.equal(form.get("car_years"), "2009"); assert.equal(form.get("status"), "6", "Use Added, never invent Purchased/Disassembled");
+  assert.equal(form.get("external_id"), "tymo:car:164:2009", "Stable provider-side idempotency key is retained");
   if (mode === "timeout") throw new DOMException("private-error", "TimeoutError");
   if (mode === "redirect") return new Response("private-error", { status: 302, headers: { Location: "https://evil.test" } });
   if (mode === "reject") return Response.json({ status_code: "R400", msg: "private-error" });
@@ -97,12 +104,13 @@ try {
   reset(); mode = "no-cars"; assert.equal((await handleOvokoApi(req(), env)).status, 200); assert.equal(mutations, 1, "Documented R004 empty lookup allows one guarded creation, never a retry");
   reset(); mode = "legacy-empty"; const legacyCreated = await handleOvokoApi(req(), env); assert.equal(legacyCreated.status, 200, await legacyCreated.clone().text()); assert.equal(mutations, 1, "Missing V2 pagination is recovered by the complete legacy export before creating");
   reset(); mode = "legacy-saved"; const legacyReused = await handleOvokoApi(req(), env); assert.equal(legacyReused.status, 200); assert.equal((await legacyReused.json()).carId, "88"); assert.equal(mutations, 0, "Fallback finds an existing vehicle instead of creating a duplicate");
+  reset(); mode = "legacy-other"; const withoutExternal = await handleOvokoApi(req(), env); assert.equal(withoutExternal.status, 200, await withoutExternal.clone().text()); assert.equal((await withoutExternal.json()).carId, "77"); assert.equal(mutations, 1, "Nonempty legacy export without external_id no longer blocks a different model's creation");
   reset(); mode = "legacy-bad"; assert.equal((await handleOvokoApi(req(), env)).status, 502); assert.equal(mutations, 0, "A broken fallback never means empty stock");
   reset(); const good = await handleOvokoApi(req(), env); assert.equal(good.status, 200, await good.clone().text()); assert.equal((await good.json()).carId, "77"); assert.equal(mutations, 1);
   const replay = await handleOvokoApi(req(), env); assert.equal(replay.status, 200); assert.equal((await replay.json()).reused, true); assert.equal(mutations, 1);
   user++; assert.equal((await handleOvokoApi(req(), env)).status, 409); assert.equal(mutations, 1, "Another owner cannot bypass a lock on the same Ovoko account/model/year");
   reset(); const concurrent = await Promise.all([handleOvokoApi(req(), env), handleOvokoApi(req(), env)]); assert.equal(mutations, 1); assert.ok(concurrent.some(response => response.status === 200));
-  for (const failure of ["timeout", "redirect", "reject", "missing-id", "log-failure"]) {
+  for (const failure of ["timeout", "redirect", "reject", "missing-id", "log-failure", "verification-wrong", "verification-timeout", "verification-malformed"]) {
     reset(); mode = failure; if (failure === "log-failure") failDb = "PATCH";
     const response = await handleOvokoApi(req(), env); assert.equal(response.status, 409); assert.ok(!(await response.text()).includes("private-")); assert.equal(mutations, 1);
     assert.equal((await handleOvokoApi(req(), env)).status, 409); assert.equal(mutations, 1, "Uncertain vehicle creation is never retried");

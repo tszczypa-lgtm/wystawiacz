@@ -1,7 +1,7 @@
 import { accountContext } from "./account-api";
 import { loadOvokoConnection, ovokoConnectionKey } from "./ovoko-connection";
 import type { OvokoPublishEnv } from "./ovoko-publish";
-import { OvokoError, parseOvokoRead, ovokoPageData } from "./ovoko-read";
+import { OvokoError, parseOvokoRead } from "./ovoko-read";
 import { ovokoWriteClient, ovokoWriteDigest } from "./ovoko-write-client";
 
 type Context = Awaited<ReturnType<typeof accountContext>>;
@@ -29,17 +29,11 @@ export async function createOvokoCar(request: Request, env: OvokoPublishEnv, con
     if (!model) throw new OvokoError(400, "Model nie nalezy do wybranej marki Ovoko.");
     const range = model.years?.match(/^(\d{4})? - (\d{4})?$/);
     if (range && ((range[1] && Number(year) < Number(range[1])) || (range[2] && Number(year) > Number(range[2])))) throw new OvokoError(400, "Podany rok nie pasuje do zakresu wybranego modelu Ovoko.");
-    // Find a reusable vehicle before the external-ID preflight, including older exports without external_id.
+    // Reuse by model; legacy exports need not contain external_id.
     const savedCars = parseOvokoRead("cars", await remote(`/v2/get/cars?model_ids=${modelId}&page=1&limit=20`), modelId).rows;
     const savedCar = savedCars.find(row => row.years === year) || savedCars[0];
     if (savedCar && /^[1-9]\d{0,11}$/.test(savedCar.id)) return { ok: true, carId: savedCar.id, modelId, year, reused: true };
     const externalId = `tymo:car:${modelId}:${year}`;
-    const prior = ovokoPageData(await remote(`/v2/get/cars?external_ids=${encodeURIComponent(externalId)}&page=1&limit=1`), { page: 1, limit: 1 }, "car-external");
-    if (prior.data.length) {
-      const row = prior.data[0];
-      if (prior.pagination.total !== 1 || !row || typeof row !== "object" || !/^[1-9]\d{0,11}$/.test(String(row.id)) || String(row.car_model) !== modelId || String(row.car_years) !== year) throw new OvokoError(409, "Znaleziono niezgodny rekord auta z tym powiazaniem. Nie nadpisujemy go.");
-      return { ok: true, carId: String(row.id), modelId, year, reused: true };
-    }
     const statuses = await remote("/get/car_status");
     if (!statuses.list || typeof statuses.list !== "object" || Array.isArray(statuses.list)) throw new Error("status shape");
     const added = Object.entries(statuses.list as Record<string, { pl?: string; en?: string }>).filter(([id, row]) => /^[1-9]\d{0,11}$/.test(id) && ["dodano", "added"].includes(String(row?.pl || row?.en || "").trim().toLowerCase()));
@@ -50,17 +44,24 @@ export async function createOvokoCar(request: Request, env: OvokoPublishEnv, con
     if (latestCredentials.username !== credentials.username || latestCredentials.user_token !== credentials.user_token || latestCredentials.password !== credentials.password) throw new OvokoError(409, "Polaczenie Ovoko zmienilo sie podczas sprawdzania. Nie utworzono auta.");
     const reserved = await db("?on_conflict=ovoko_account,model_id,vehicle_year", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=representation" }, body: JSON.stringify({ ovoko_account: account, model_id: modelId, vehicle_year: year, owner_id: context.user.id, state: "sending" }) });
     if (!Array.isArray(reserved) || reserved.length !== 1 || reserved[0].owner_id !== context.user.id) throw new OvokoError(409, "Tworzenie tego auta jest juz zablokowane. Sprawdz Ovoko przed kolejna proba.");
+    let writeStage = "importCar";
     try {
       // Minimal user-confirmed catalogue record. No fabricated VIN, engine, purchase or storage data.
       const result = await remote("/crm/importCar", new URLSearchParams({ car_model: modelId, car_years: year, status: added[0][0], external_id: externalId }));
       if (!/^[1-9]\d{0,11}$/.test(String(result.car_id))) throw new Error("missing id");
       const carId = String(result.car_id);
+      writeStage = "sprawdzenie zwroconego car_id";
+      // importCar returns an existing ID for the same external_id; verify it before accepting it.
+      const verified = await remote(`/get/car/${carId}`);
+      const car = Array.isArray(verified.list) && verified.list.length === 1 && Array.isArray(verified.list[0]) && verified.list[0].length === 1 ? verified.list[0][0] : null;
+      if (!car || String(car.id) !== carId || String(car.car_model) !== modelId || String(car.car_years) !== year) throw new Error("unverified car");
+      writeStage = "zapis potwierdzenia";
       const saved = await db(`?${selector}&owner_id=eq.${context.user.id}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ state: "created", car_id: carId, updated_at: new Date().toISOString() }) });
       if (!Array.isArray(saved) || saved.length !== 1 || saved[0].car_id !== carId) throw new Error("log");
       return { ok: true, carId, modelId, year, reused: false };
     } catch {
       try { await db(`?${selector}&owner_id=eq.${context.user.id}&state=eq.sending`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ state: "uncertain", updated_at: new Date().toISOString() }) }); } catch { /* Sending remains a durable lock. */ }
-      throw new OvokoError(409, "Niepewny wynik tworzenia auta. Moglo powstac w Ovoko. Nie ponawiaj; sprawdz Moje samochody. Blokada duplikatu pozostaje aktywna.");
+      throw new OvokoError(409, `Niepewny wynik tworzenia auta (etap: ${writeStage}). Moglo powstac w Ovoko. Nie ponawiaj; sprawdz Moje samochody. Blokada duplikatu pozostaje aktywna.`);
     }
   } catch (error) {
     if (error instanceof OvokoError) throw error;
