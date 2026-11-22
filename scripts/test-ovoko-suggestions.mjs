@@ -48,11 +48,31 @@ const variants = suggestPartNumbers("5Q0959593E 5Q0 959 593 E"); assert.equal(va
 const categories = [{ id: "1", name: "Uklad hamulcowy", level: "1", parentId: "0" }, { id: "2", name: "ABS", level: "2", parentId: "1" }, { id: "3", name: "Pompy ABS", level: "3", parentId: "2" }, { id: "4", name: "Pompa paliwa", level: "3", parentId: "0" }, { id: "5", name: "Sterownik zamka", level: "3", parentId: "0" }, { id: "6", name: "Sterowniki silnika", level: "3", parentId: "0" }, { id: "7", name: "Nadwozie", level: "3", parentId: "0" }];
 const suggestions = suggestOvokoCategories("AUDI POMPA ABS 5Q0959593E", categories);
 assert.equal(suggestions[0].id, "3"); assert.deepEqual(suggestions[0].matches, ["pompa", "abs"]); assert.equal(suggestions[0].weak, false); assert.match(suggestions[0].path, /Uklad hamulcowy \/ ABS \/ Pompy ABS/);
-assert.ok(suggestions.every(item => !["1", "2", "7"].includes(item.id))); assert.equal(suggestions.find(item => item.id === "4").weak, true);
+assert.ok(suggestions.every(item => !["1", "2", "4", "7"].includes(item.id)), "An ABS pump must not suggest a fuel pump from the generic pump word alone");
 assert.equal(suggestOvokoCategories("STEROWNIK ZAMKA AUDI", categories)[0].id, "5");
 const radioCategories = [{ id: "90", name: "Radio", level: "3", parentId: "0" }, { id: "91", name: "Nadwozie", level: "3", parentId: "0" }];
 assert.equal(suggestOvokoCategories("NAWIGACJA MULTIMEDIA NAC WAVE2 PEUGEOT CITROEN OPEL 9821908880", radioCategories)[0].id, "90");
 assert.equal(suggestOvokoCategories("JEDNOSTKA TUNER RADIO RCC CITROEN PEUGEOT OPEL 9855270480", radioCategories)[0].id, "90");
+const realRadioCategories = [
+  { id: "101", name: "Mapy do nawigacji CD/DVD", level: "3", parentId: "0" },
+  { id: "102", name: "Jednostka sterujaca Adblue", level: "3", parentId: "0" },
+  { id: "103", name: "Panel / Radioodtwarzacz CD/DVD/GPS", level: "3", parentId: "0" },
+];
+for (const title of [
+  "NAWIGACJA MULTIMEDIA NAC WAVE2 PEUGEOT CITROEN OPEL 9821908880",
+  "RADIO NAWIGACJA NAC WAVE2 CITROEN PEUGEOT OPEL TWOJ VIN!!! 9834626780",
+  "JEDNOSTKA MULTIMEDIA NAC WAVE2 PEUGEOT CITROEN OPEL 9846282480",
+  "JEDNOSTKA TUNER RADIO RCC CITROEN PEUGEOT OPEL 9855270480",
+  "RADIO NAWIGACJA AUDI MMI 4G0035061 CD DVD GPS",
+]) {
+  const ranked = suggestOvokoCategories(title, realRadioCategories);
+  assert.equal(ranked[0]?.id, "103", title);
+  assert.ok(!ranked.some(row => ["101", "102"].includes(row.id)), "Never suggest map media or AdBlue for multimedia hardware");
+  assert.equal(ovokoAutomaticFields({ title, parameters: [] }, { categories: realRadioCategories }).categoryId, "103", "The automatic field uses the corrected ranking, not only the displayed suggestions");
+}
+assert.equal(suggestOvokoCategories("MAPY DO NAWIGACJI CD DVD EUROPA", realRadioCategories)[0]?.id, "101");
+assert.equal(suggestOvokoCategories("JEDNOSTKA STERUJACA ADBLUE", realRadioCategories)[0]?.id, "102");
+assert.deepEqual(suggestOvokoCategories("JEDNOSTKA MULTIMEDIA NAC WAVE2", realRadioCategories.slice(0, 2)), [], "Missing hardware category does not fall back to an unrelated leaf");
 assert.deepEqual(suggestOvokoCategories("FORmentor 5Q0959593E", categories), [], "Car model and part number alone are not category evidence");
 const original = JSON.stringify(categories); suggestOvokoCategories("pompa", categories); assert.equal(JSON.stringify(categories), original, "Never mutate supplier dictionaries");
 assert.equal(suggestionSearchMatches("Układ hamulcowy / Części", "uklad"), true); assert.equal(suggestionSearchMatches("Sterownik silnika", "ZAMEK"), false);

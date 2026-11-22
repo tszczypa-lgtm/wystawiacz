@@ -172,9 +172,13 @@ const words: Record<string, string> = {
   lampa: "lampa", lampy: "lampa", lamp: "lampa", reflektor: "reflektor", reflektory: "reflektor", reflektora: "reflektor",
   radia: "radio", radioodtwarzacz: "radio", radioodtwarzacze: "radio", tuner: "radio",
   nawigacji: "nawigacja", nawigacje: "nawigacja", multimedialny: "multimedia", multimedialna: "multimedia", multimedialne: "multimedia",
+  mapy: "mapa", map: "mapa", mapami: "mapa", sterujaca: "sterownik", sterujacy: "sterownik",
+  paliwa: "paliwo", paliwowa: "paliwo", paliwowy: "paliwo", klimatyzacji: "klimatyzacja", poduszek: "airbag",
 };
 const stop = new Set(["czesc", "czesci", "samochod", "samochodu", "samochodowe", "nowy", "nowa", "uzywany", "uzywana", "oryginal", "oryginalny", "przod", "tyl", "lewy", "prawy", "lewa", "prawa", "komplet", "szt"]);
 function terms(value: string) { return [...new Set((fold(value).match(/[a-z0-9]+/g) || []).filter(word => word.length >= 3 && !stop.has(word) && !/\d/.test(word)).map(word => words[word] || word))]; }
+const genericCategoryTerms = new Set(["modul", "sterownik", "jednostka", "panel", "pompa", "zestaw", "element", "czujnik"]);
+const categorySystems = new Set(["abs", "airbag", "klimatyzacja", "paliwo", "silnik", "drzwi", "radio", "zamek", "pdc", "skrzynia", "wspomaganie"]);
 export function suggestOvokoCategories(title: string, categories: OvokoReadRow[]): CategorySuggestion[] {
   const source = new Set(terms(title)), byId = new Map(categories.map(row => [row.id, row]));
   if (source.has("multimedia") || /\b(?:NAC\s+WAVE\d*|RCC)\b/i.test(title)) source.add("radio");
@@ -183,7 +187,12 @@ export function suggestOvokoCategories(title: string, categories: OvokoReadRow[]
     while (parent && parent !== "0" && !seen.has(parent) && seen.size < 3) { seen.add(parent); const item = byId.get(parent); if (!item) break; names.unshift(item.name); parent = item.parentId; }
     const leaf = terms(row.name), matches = leaf.filter(term => source.has(term));
     if (!matches.length) return [];
+    // Navigation hardware is not map media; a generic unit/module is not evidence of AdBlue.
+    if (leaf.some(term => ["mapa", "adblue"].includes(term) && !source.has(term))) return [];
+    if (matches.every(term => genericCategoryTerms.has(term)) && leaf.some(term => categorySystems.has(term) && !source.has(term))) return [];
     const parentMatches = terms(names.slice(0, -1).join(" ")).filter(term => source.has(term) && !matches.includes(term));
-    return [{ id: row.id, path: names.join(" / "), matches: [...matches, ...parentMatches], score: matches.length * 3 + parentMatches.length, weak: matches.length < 2 }];
+    const hardware = source.has("radio") && !source.has("mapa") && leaf.includes("radio") ? 6 : 0;
+    const score = matches.reduce((sum, term) => sum + (genericCategoryTerms.has(term) ? 1 : 3), 0) + parentMatches.length + hardware + matches.length / leaf.length;
+    return [{ id: row.id, path: names.join(" / "), matches: [...matches, ...parentMatches], score, weak: matches.length < 2 }];
   }).sort((a, b) => b.score - a.score || a.path.localeCompare(b.path, "pl")).slice(0, 8);
 }
