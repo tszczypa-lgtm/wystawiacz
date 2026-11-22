@@ -50,6 +50,9 @@ const suggestions = suggestOvokoCategories("AUDI POMPA ABS 5Q0959593E", categori
 assert.equal(suggestions[0].id, "3"); assert.deepEqual(suggestions[0].matches, ["pompa", "abs"]); assert.equal(suggestions[0].weak, false); assert.match(suggestions[0].path, /Uklad hamulcowy \/ ABS \/ Pompy ABS/);
 assert.ok(suggestions.every(item => !["1", "2", "7"].includes(item.id))); assert.equal(suggestions.find(item => item.id === "4").weak, true);
 assert.equal(suggestOvokoCategories("STEROWNIK ZAMKA AUDI", categories)[0].id, "5");
+const radioCategories = [{ id: "90", name: "Radio", level: "3", parentId: "0" }, { id: "91", name: "Nadwozie", level: "3", parentId: "0" }];
+assert.equal(suggestOvokoCategories("NAWIGACJA MULTIMEDIA NAC WAVE2 PEUGEOT CITROEN OPEL 9821908880", radioCategories)[0].id, "90");
+assert.equal(suggestOvokoCategories("JEDNOSTKA TUNER RADIO RCC CITROEN PEUGEOT OPEL 9855270480", radioCategories)[0].id, "90");
 assert.deepEqual(suggestOvokoCategories("FORmentor 5Q0959593E", categories), [], "Car model and part number alone are not category evidence");
 const original = JSON.stringify(categories); suggestOvokoCategories("pompa", categories); assert.equal(JSON.stringify(categories), original, "Never mutate supplier dictionaries");
 assert.equal(suggestionSearchMatches("Układ hamulcowy / Części", "uklad"), true); assert.equal(suggestionSearchMatches("Sterownik silnika", "ZAMEK"), false);

@@ -109,6 +109,43 @@ export async function searchTitleSuggestions(number: string, owner: string, _env
   return result;
 }
 const apiBase = "https://api.allegro.pl";
+export async function readOvokoFitment(offer: Record<string, any>, number: string, remote: (path: string) => Promise<Record<string, any>>) {
+  const rows: { text: string; origin: string }[] = [], names: string[] = [];
+  const seen = new Set<string>();
+  function append(value: unknown, origin: string) {
+    if (value == null) return;
+    if (typeof value !== "object" || Array.isArray(value)) throw new ApiError(502, "Nieprawidlowa lista Pasuje do.");
+    const items = (value as Record<string, unknown>).items;
+    if (!Array.isArray(items) || items.length > 2000) throw new ApiError(502, "Niepelna lista Pasuje do.");
+    for (const item of items) {
+      if (!item || typeof item !== "object") throw new ApiError(502, "Nieprawidlowy wpis Pasuje do.");
+      if (item.text === undefined && item.type === "ID") continue;
+      if (typeof item.text !== "string" || item.text.length > 2000) throw new ApiError(502, "Nieprawidlowy opis modelu Pasuje do.");
+      const text = item.text.trim();
+      if (text && !seen.has(text) && rows.length < 200) { seen.add(text); rows.push({ text, origin }); }
+    }
+  }
+  append(offer.compatibilityList, "offer");
+  if (!rows.length) append(await remote(`/sale/compatibility-list-suggestions?offer.id=${encodeURIComponent(offer.id)}&language=pl-PL`), "suggestion");
+  // Read only exact, complete manufacturer codes; never accept a shortened index or a title in MPN.
+  const compact = (value: string) => value.toUpperCase().replace(/[ .-]/g, "");
+  if (!rows.length) {
+    const search = await remote(`/sale/products?phrase=${encodeURIComponent(number)}&mode=MPN&language=pl-PL`);
+    if (!Array.isArray(search.products) || search.products.length > 30) throw new ApiError(502, "Nieprawidlowy wynik katalogu MPN.");
+    const products = search.products.filter((row: any) => typeof row?.id === "string" && /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(row.id)).slice(0, 2);
+    for (const entry of products) {
+      const product = await remote(`/sale/products/${entry.id}?language=pl-PL`);
+      if (product.id !== entry.id || !Array.isArray(product.parameters) || product.parameters.length > 500) throw new ApiError(502, "Niepelne dane produktu MPN.");
+      const exact = product.parameters.some((row: any) => typeof row?.name === "string" && /^(numer katalogowy cz[eę][sś]ci|kod producenta|manufacturer code|numer oe)$/i.test(row.name.trim()) && Array.isArray(row.values) && row.values.some((value: unknown) => typeof value === "string" && compact(value) === number));
+      if (!exact || !offer.category?.id || product.category?.id !== offer.category.id) continue;
+      if (typeof product.name === "string" && product.name.length <= 500) names.push(product.name);
+      append(product.compatibilityList, "catalog");
+      if (!rows.length) append(await remote(`/sale/compatibility-list-suggestions?product.id=${entry.id}&language=pl-PL`), "catalog-suggestion");
+      if (rows.length) break;
+    }
+  }
+  return { rows, names };
+}
 const oauthBase = "https://allegro.pl/auth/oauth";
 const accept = "application/vnd.allegro.public.v1+json";
 const scopes = "allegro:api:profile:read allegro:api:sale:offers:read allegro:api:sale:offers:write allegro:api:sale:settings:read allegro:api:sale:settings:write";
@@ -313,7 +350,22 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
     const url = new URL(request.url);
     const path = url.pathname.slice("/api/allegro".length);
     if (path === "/inventory" && request.method !== "GET") return json({ message: "Lista ofert jest tylko do odczytu." }, 405);
+    if (path.startsWith("/ovoko-fitment/") && request.method !== "GET") return json({ message: "Dopasowanie jest tylko do odczytu." }, 405);
     if (request.method === "GET") {
+      if (path.startsWith("/ovoko-fitment/")) {
+        const id = path.slice("/ovoko-fitment/".length), number = url.searchParams.get("number") || "";
+        if (!/^\d{1,30}$/.test(id) || !/^[A-Z0-9]{6,32}$/.test(number) || !/\d/.test(number) || [...url.searchParams.keys()].some(key => key !== "number") || url.searchParams.getAll("number").length !== 1) throw new ApiError(400, "Nieprawidlowy numer oferty lub pelny numer czesci.");
+        const owned = await remote(`/sale/offers?offer.id=${id}&limit=1`, { signal: AbortSignal.timeout(10000) });
+        if (!Array.isArray(owned.offers) || !owned.offers.some((row: any) => row.id === id)) throw new ApiError(404, "Oferta nie nalezy do polaczonego konta.");
+        const offer = await remote(`/sale/product-offers/${id}`, { signal: AbortSignal.timeout(10000) });
+        if (offer.id !== id) throw new ApiError(502, "Niepotwierdzona oferta dopasowania.");
+        const optional = async (route: string) => {
+          const response = await fetch(apiBase + route, { headers: { Authorization: `Bearer ${await accessToken()}`, Accept: accept, "Accept-Language": "pl-PL" }, signal: AbortSignal.timeout(10000) });
+          if (response.status === 404 || response.status === 422) { await response.body?.cancel(); return route.includes("/sale/products?") ? { products: [] } : { items: [] }; }
+          return readRemote(response);
+        };
+        return json({ offerId: id, number, ...await readOvokoFitment(offer, number, optional) });
+      }
       if (path === "/seller-identity") {
         const seller = await remote("/me", { signal: AbortSignal.timeout(15000) });
         if (typeof seller.id !== "string" || !/^\d{1,30}$/.test(seller.id)) throw new ApiError(502, "Niepotwierdzony sprzedawca Allegro.");

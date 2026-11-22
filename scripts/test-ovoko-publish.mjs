@@ -24,10 +24,11 @@ const snapshot = { title: "AUDI A4 POMPA 0281010038", price: "100.00", currency:
 const payload = () => ({ offerId: "101", brandId: "1", modelId: "11", donorId: "13", categoryId: "3", qualityId: "0", statusId: "0", manufacturerCode: "0281010038", additionalCodes: extraCodes, price: "100.00", currency: "PLN", notes: "Opis & uwagi + numer", confirmSingle: true, expectedSource: { ...snapshot } });
 const req = (body = payload(), headers = {}) => new Request("https://publish.test/api/ovoko/publish", { method: "POST", headers: { Authorization: "Bearer fixture", Origin: "https://publish.test", "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
 function reset() {
+  fitmentMode = "none";
   user++; admin = true; suspended = false; owns = true; stock = 1; bundle = false; mode = "ok"; donorModel = "11"; duplicate = false; failDb = ""; sourceReads = 0; lateStock = false; writes = 0; categoryName = "Pompy"; revokeAfterRead = false; imageMode = "normal"; extraCodes = ""; bulk = false; expectedPrice = "100.00"; credentialReads = 0; rotateAt = Infinity; records.clear(); calls.length = 0;
 }
 const originalFetch = globalThis.fetch;
-let vehicleParams = [], preparedVehicle, generationTest = false;
+let vehicleParams = [], preparedVehicle, generationTest = false, fitmentMode = "none";
 globalThis.fetch = async (input, options = {}) => {
   const url = new URL(input), method = options.method || "GET";
   calls.push({ url: url.href, method });
@@ -58,10 +59,20 @@ globalThis.fetch = async (input, options = {}) => {
     assert.equal(method, "GET", "Publishing to Ovoko never mutates Allegro");
     if (url.pathname === "/sale/offers") { assert.equal(url.searchParams.get("offer.id"), "101"); return Response.json({ offers: owns ? [{ id: "101" }] : [] }); }
     if (url.pathname === "/me") return Response.json({ id: "555" });
+    if (url.pathname === "/sale/compatibility-list-suggestions") {
+      assert.ok(url.searchParams.has("offer.id") || url.searchParams.has("product.id"));
+      if (fitmentMode === "error") return Response.json({ errors: [{ message: "fixture-error" }] }, { status: 500 });
+      return Response.json({ type: "MANUAL", items: fitmentMode === "suggestion" ? [{ type: "ID", text: "AUDI A4 2000/01-2010/12" }] : [] });
+    }
+    if (url.pathname === "/sale/products") {
+      assert.equal(url.searchParams.get("phrase"), "0281010038"); assert.equal(url.searchParams.get("mode"), "MPN");
+      return Response.json({ products: fitmentMode.startsWith("catalog") ? [{ id: "11111111-1111-1111-1111-111111111111" }] : [] });
+    }
+    if (url.pathname === "/sale/products/11111111-1111-1111-1111-111111111111") return Response.json({ id: "11111111-1111-1111-1111-111111111111", name: "Pompa ABS 0281010038", category: { id: fitmentMode === "catalog-wrong-category" ? "other" : "cat-1" }, parameters: [{ name: "Numer katalogowy czesci", values: [fitmentMode === "catalog-wrong-index" ? "0281010038A" : "0 281 010 038"] }], compatibilityList: fitmentMode === "catalog-malformed" ? { items: "broken" } : { items: [{ text: "AUDI A4 2000/01-2010/12" }] } });
     assert.equal(url.pathname, "/sale/product-offers/101"); sourceReads++;
     if (revokeAfterRead && sourceReads > 1) admin = false;
     const images = imageMode === "duplicates" ? [...snapshot.images, snapshot.images[0]] : imageMode === "unsafe" ? [...snapshot.images, "https://evil.test/private.jpg"] : imageMode === "changed" && sourceReads > 1 ? snapshot.images.slice(0, 1) : snapshot.images;
-    return Response.json({ id: "101", name: snapshot.title, parameters: [{ id: "11323", valuesIds: ["11323_2"] }, ...vehicleParams], productSet: [{ quantity: { value: bundle ? 2 : 1 }, product: {} }], images, stock: { available: lateStock && sourceReads > 1 ? 0 : stock }, publication: { status: "ACTIVE" }, sellingMode: { price: { amount: mode === "price-format" && sourceReads > 1 ? "100" : mode === "price-change" && sourceReads > 1 ? "101.00" : "100.00", currency: "PLN" } } });
+    return Response.json({ id: "101", name: snapshot.title, category: { id: "cat-1" }, ...(fitmentMode === "own" ? { compatibilityList: { items: [{ text: "AUDI A4 2000/01-2010/12" }] } } : {}), parameters: [{ id: "11323", valuesIds: ["11323_2"] }, ...vehicleParams], productSet: [{ quantity: { value: bundle ? 2 : 1 }, product: {} }], images, stock: { available: lateStock && sourceReads > 1 ? 0 : stock }, publication: { status: "ACTIVE" }, sellingMode: { price: { amount: mode === "price-format" && sourceReads > 1 ? "100" : mode === "price-change" && sourceReads > 1 ? "101.00" : "100.00", currency: "PLN" } } });
   }
   assert.equal(url.origin, "https://api.rrr.lt"); assert.equal(method, "POST"); assert.equal(options.redirect, "manual");
   const form = new URLSearchParams(options.body);
@@ -175,7 +186,19 @@ try {
   assert.equal(preparedVehicle.brand, "Audi", "Try other mentioned makes for a recognizable model before using a fallback"); assert.equal(preparedVehicle.usedFallback, false);
   reset(); bulk = true; snapshot.title = "AUDI VW POMPA 0281010038";
   const noModel = await bulkPlan({ mode: "none", value: "0" });
-  const missing = await bulkSend(noModel); assert.equal(missing.status, 400); assert.match(await missing.text(), /model pomocniczy/); assert.equal(writes, 0);
+  const missing = await bulkSend(noModel); assert.equal(missing.status, 400); assert.match(await missing.text(), /Automat nie znalazl modelu/); assert.equal(writes, 0);
+  for (const fitment of ["own", "suggestion", "catalog"]) {
+    reset(); bulk = true; fitmentMode = fitment;
+    const item = await bulkPlan({ mode: "none", value: "0" });
+    const result = await bulkSend(item); assert.equal(result.status, 200, await result.clone().text());
+    assert.equal(writes, 1); assert.equal(preparedVehicle.usedFallback, false); assert.equal(preparedVehicle.brand, "Audi");
+    assert.match(preparedVehicle.evidence, fitment === "catalog" ? /pelny MPN/ : /Pasuje do/);
+  }
+  for (const fitment of ["catalog-wrong-index", "catalog-wrong-category", "catalog-malformed", "error"]) {
+    reset(); bulk = true; fitmentMode = fitment;
+    const item = await bulkPlan({ mode: "none", value: "0" });
+    const result = await bulkSend(item); assert.equal(result.status, ["catalog-malformed", "error"].includes(fitment) ? 502 : 400); assert.equal(writes, 0);
+  }
   for (const [fallbackVehicle, model, brand] of [[{ brandId: "1", modelId: "11" }, "11", "Audi"], [{ brandId: "2", modelId: "22" }, "22", "Volkswagen"]]) {
     reset(); bulk = true; donorModel = model;
     const item = { ...await bulkPlan({ mode: "none", value: "0" }), fallbackVehicle };

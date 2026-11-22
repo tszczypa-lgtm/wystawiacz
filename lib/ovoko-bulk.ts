@@ -9,6 +9,7 @@ import { ovokoCarYear } from "./ovoko-car-selection";
 import { OvokoError, parseOvokoRead, type OvokoReadRow } from "./ovoko-read";
 import { ovokoWriteClient, ovokoWriteDigest } from "./ovoko-write-client";
 import { adjustedOvokoPrice, sameOvokoMoney, validateOvokoAdjustment } from "./ovoko-bulk-price";
+import { matchOvokoFitment, type FitmentRow } from "./ovoko-fitment";
 
 type Context = Awaited<ReturnType<typeof accountContext>>;
 export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, context: Context, input: Record<string, unknown>) {
@@ -64,13 +65,21 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
       dictionaries.brands = result.list.map((row: any) => ({ id: String(row.id), name: row.name }));
     } else dictionaries[operation] = parseOvokoRead(operation, result).rows;
   }
+  const draft = { ...initialOvokoDraft(source), ...ovokoAutomaticFields(source, dictionaries), price, donorId: "1" };
   let brandId = automaticOvokoBrand(source.title, source.parameters, dictionaries.brands);
-  if (!brandId) throw new OvokoError(400, "Nie rozpoznano marki. Przygotuj te oferte pojedynczo.");
-  let models = parseOvokoRead("models", await remote(`/get/car_models/${brandId}`), brandId).rows;
+  const modelCache = new Map<string, OvokoReadRow[]>();
+  const loadModels = async (brand: string) => {
+    if (modelCache.has(brand)) return modelCache.get(brand)!;
+    if (modelCache.size >= 6) return [];
+    const rows = parseOvokoRead("models", await remote(`/get/car_models/${brand}`), brand).rows;
+    modelCache.set(brand, rows); return rows;
+  };
+  let models = brandId ? await loadModels(brandId) : [];
   const vehicleText = vehicleSuggestionText(source.title, source.parameters);
   let modelId = automaticOvokoModel(vehicleText, models), usedFallback = false;
   const explicit = source.parameters.filter(row => /^(marka pojazdu|marka samochodu|marka auta|producent pojazdu|producent samochodu)$/i.test(row.name.trim())).flatMap(row => row.values);
   const mentioned = explicit.length ? suggestOvokoBrands(explicit.join(" "), dictionaries.brands) : suggestOvokoBrands(source.title, dictionaries.brands);
+  if (explicit.length && !mentioned.length) throw new OvokoError(400, "Jawna marka pojazdu nie pasuje do slownika Ovoko. Nie zastapiono jej przypuszczeniem.");
   const allowedBrands = mentioned.length ? mentioned : dictionaries.brands.filter(row => row.id === brandId);
   let generationConflict = !modelId && models.some(row => ovokoModelHasConflict(vehicleText, row));
   const alternatives = allowedBrands.filter(row => row.id !== brandId);
@@ -78,16 +87,26 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
   while (!modelId && alternatives.length) {
     const nextId = automaticOvokoBrand(source.title, source.parameters, alternatives) || alternatives[0].id;
     alternatives.splice(alternatives.findIndex(row => row.id === nextId), 1);
-    const nextModels = parseOvokoRead("models", await remote(`/get/car_models/${nextId}`), nextId).rows;
+    const nextModels = await loadModels(nextId);
     const nextModel = automaticOvokoModel(vehicleText, nextModels);
     if (nextModel) { brandId = nextId; models = nextModels; modelId = nextModel; }
     else if (nextModels.some(row => ovokoModelHasConflict(vehicleText, row))) generationConflict = true;
+  }
+  let fitmentOrigin = "";
+  if ((!modelId || !draft.categoryId) && draft.manufacturerCode) {
+    const fitment = await allegro(`/ovoko-fitment/${source.id}?number=${encodeURIComponent(draft.manufacturerCode)}`);
+    if (fitment.offerId !== source.id || fitment.number !== draft.manufacturerCode || !Array.isArray(fitment.rows) || fitment.rows.length > 200 || fitment.rows.some((row: any) => typeof row?.text !== "string" || row.text.length > 2000 || !["offer", "suggestion", "catalog", "catalog-suggestion"].includes(row.origin)) || !Array.isArray(fitment.names) || fitment.names.some((name: unknown) => typeof name !== "string" || name.length > 500)) throw new OvokoError(502, "Niepotwierdzone dane automatycznego dopasowania.");
+    if (!modelId) {
+      const matched = await matchOvokoFitment(fitment.rows as FitmentRow[], dictionaries.brands, allowedBrands.map(row => row.id), vehicleText, loadModels);
+      if (matched) { brandId = matched.brandId; modelId = matched.modelId; models = await loadModels(brandId); fitmentOrigin = matched.origin; }
+    }
+    if (!draft.categoryId && fitment.names.length) draft.categoryId = ovokoAutomaticFields({ ...source, title: `${source.title} ${fitment.names.join(" ")}` }, dictionaries).categoryId || "";
   }
   if (!modelId && fallback) {
     if (!allowedBrands.some(row => row.id === fallback.brandId)) throw new OvokoError(400, "Model pomocniczy nie pasuje do marek tej oferty. Wybierz model pojedynczo.");
     // Do not use a fallback to bypass an explicitly conflicting model generation.
     if (generationConflict) throw new OvokoError(400, "Model z tytulu ma sprzeczna generacje. Sprawdz oferte pojedynczo.");
-    if (fallback.brandId !== brandId) models = parseOvokoRead("models", await remote(`/get/car_models/${fallback.brandId}`), fallback.brandId).rows;
+    if (fallback.brandId !== brandId) models = await loadModels(fallback.brandId);
     const fallbackModel = models.find(row => row.id === fallback.modelId);
     if (!fallbackModel) throw new OvokoError(400, "Model pomocniczy nie nalezy do wybranej marki Ovoko.");
     if (ovokoModelHasConflict(vehicleText, fallbackModel)) throw new OvokoError(400, "Model pomocniczy ma sprzeczna generacje z tytulem. Nie utworzono auta.");
@@ -95,9 +114,8 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
   }
   const model = models.find(row => row.id === modelId);
   const year = ovokoCarYear(source, model).year;
-  const draft = { ...initialOvokoDraft(source), ...ovokoAutomaticFields(source, dictionaries), price, donorId: "1" };
   const blockers = ovokoPublicationBlockers(source, draft, brandId, modelId);
-  if (!model || !year) blockers.push(`Wybrano marke ${dictionaries.brands.find(row => row.id === brandId)?.name || brandId}, ale brak modelu lub roku. Ustaw model pomocniczy dla partii albo przygotuj oferte pojedynczo.`);
+  if (!model || !year) blockers.push(`Automat nie znalazl modelu Ovoko w danych oferty ani w Pasuje do/katalogu dla pelnego numeru ${draft.manufacturerCode || "(brak numeru)"}. Nie wybrano przypadkowego auta.`);
   const category = dictionaries.categories.find(row => row.id === draft.categoryId);
   const categoryNames: string[] = []; let current = category;
   for (let i = 0; current && i < 4; i++) { categoryNames.push(current.name); current = dictionaries.categories.find(row => row.id === current!.parentId); }
@@ -105,5 +123,5 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
   if (blockers.length) throw new OvokoError(400, blockers.join(" "));
   const car = await createOvokoCar(request, env, context, { brandId, modelId, year, confirmCreate: true }, fingerprint);
   // Separate preparation (including car reuse/create) from part publication to bound Worker subrequests.
-  return { ok: true, vehicle: { brand: dictionaries.brands.find(row => row.id === brandId)?.name || brandId, model: model!.name, usedFallback }, prepared: { brandId, modelId, donorId: car.carId, categoryId: draft.categoryId, qualityId: draft.qualityId, statusId: draft.statusId, manufacturerCode: draft.manufacturerCode, additionalCodes: draft.additionalCodes || "" }, price, currency: source.currency };
+  return { ok: true, vehicle: { brand: dictionaries.brands.find(row => row.id === brandId)?.name || brandId, model: model!.name, usedFallback, evidence: fitmentOrigin ? fitmentOrigin.startsWith("catalog") ? "Katalog Allegro - pelny MPN" : "Pasuje do Allegro" : "Dane oferty" }, prepared: { brandId, modelId, donorId: car.carId, categoryId: draft.categoryId, qualityId: draft.qualityId, statusId: draft.statusId, manufacturerCode: draft.manufacturerCode, additionalCodes: draft.additionalCodes || "" }, price, currency: source.currency };
 }

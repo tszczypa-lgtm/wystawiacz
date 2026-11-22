@@ -38,7 +38,7 @@ try {
       assert.deepEqual(input.adjustment, { mode: "percent", value: "-10" });
       assert.equal(input.notes, "Opis z Allegro");
       assert.equal(input.expectedSource.price, sourceAmount);
-      if (input.operation === "prepare") return route.fulfill({ json: input.offerId.endsWith("2") ? { ok: true, alreadyCreated: true, partId: "77" } : { ok: true, prepared: { donorId: "13" }, ...(input.fallbackVehicle ? { vehicle: { brand: "Citroen", model: "C5 Aircross", usedFallback: true } } : {}) } });
+      if (input.operation === "prepare") return route.fulfill({ json: input.offerId.endsWith("2") ? { ok: true, alreadyCreated: true, partId: "77" } : { ok: true, prepared: { donorId: "13" }, vehicle: { brand: "Citroen", model: "C5 Aircross", usedFallback: !!input.fallbackVehicle, evidence: input.fallbackVehicle ? "Wybor reczny" : "Katalog Allegro - pelny MPN" } } });
       assert.equal(input.operation, "item");
       if (bulkMode === "uncertain") return route.fulfill({ status: 409, json: { message: "Niepewny wynik wysylki. Nie ponawiaj." } });
       if (bulkMode === "hold") await new Promise(resolve => { releaseWrite = resolve; });
@@ -172,6 +172,9 @@ try {
   await heldWindow.getByRole("button", { name: "Zatrzymaj po biezacej", exact: true }).click();
   releaseWrite();
   await heldWindow.getByText(/Zatrzymano. Pozostale pozycje/).waitFor();
+  assert.ok(await heldWindow.getByText(/Zrodlo: Katalog Allegro - pelny MPN/).isVisible(), "Automatic model evidence is displayed without choosing a fallback");
+  assert.ok(bulkCalls.filter(call => call.operation === "prepare").every(call => !call.fallbackVehicle));
+  await heldWindow.screenshot({ path: fileURLToPath(new URL("../outputs/inventory-preview/automatic-fitment.png", import.meta.url)), fullPage: true });
   assert.equal(bulkCalls.filter(call => call.operation === "item").length, 1);
   assert.equal(bulkCalls.filter(call => call.operation === "prepare").length, 1, "Stop finishes the current write without starting the next offer");
   await heldWindow.close();

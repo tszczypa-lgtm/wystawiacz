@@ -53,13 +53,13 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: Offer[]; onFini
           // Do not abort or retry an in-flight write: its durable publication lock owns the outcome.
           const item = { offerId: offer.id, binding: session.binding, adjustment: rule, notes: source.description, expectedSource: { title: source.title, price: source.price, currency: source.currency, stock: source.stock, status: source.status, condition: source.condition, images: source.images } };
           type Outcome = { ok: boolean; partId: string; alreadyCreated: boolean; price?: string; currency?: string; prepared?: Record<string, string> };
-          const preparation = await ovokoBulkRequest<Outcome & { vehicle?: { brand: string; model: string; usedFallback: boolean } }>({ ...item, operation: "prepare", ...(fallback ? { fallbackVehicle: fallback } : {}) });
+          const preparation = await ovokoBulkRequest<Outcome & { vehicle?: { brand: string; model: string; usedFallback: boolean; evidence?: string } }>({ ...item, operation: "prepare", ...(fallback ? { fallbackVehicle: fallback } : {}) });
           if (preparation.vehicle) update(offer.id, { message: `Auto: ${preparation.vehicle.brand} ${preparation.vehicle.model}${preparation.vehicle.usedFallback ? " (model pomocniczy)" : ""}. Przygotowano do wysylki.` });
           if (!preparation.alreadyCreated && stop.current) { update(offer.id, { state: "waiting", message: "Auto przygotowane. Czesc nie zostala wyslana." }); break; }
           const result = preparation.alreadyCreated ? preparation : await ovokoBulkRequest<Outcome>({ ...item, operation: "item", prepared: preparation.prepared });
           if (!result.ok || !/^[1-9]\d{0,11}$/.test(String(result.partId))) throw new Error("Niepewny wynik wysylki. Sprawdz Ovoko; nie ponawiaj.");
           if (result.alreadyCreated) skipped++; else created++;
-          const vehicle = preparation.vehicle ? ` Auto: ${preparation.vehicle.brand} ${preparation.vehicle.model}${preparation.vehicle.usedFallback ? " (model pomocniczy)" : ""}.` : "";
+          const vehicle = preparation.vehicle ? ` Auto: ${preparation.vehicle.brand} ${preparation.vehicle.model}${preparation.vehicle.usedFallback ? " (model pomocniczy)" : ""}.${preparation.vehicle.evidence ? ` Zrodlo: ${preparation.vehicle.evidence}.` : ""}` : "";
           update(offer.id, { state: result.alreadyCreated ? "skipped" : "done", message: `${result.alreadyCreated ? "Juz przeniesiona, pominieto" : "Przeniesiono"}. Ovoko ID: ${result.partId}.${vehicle}`, ...(result.price ? { price: result.price, currency: result.currency } : {}) });
         } catch (error) {
           failed++;
@@ -80,6 +80,7 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: Offer[]; onFini
   return <section className="space-y-3 rounded-2xl border border-orange-400/30 bg-orange-500/5 p-4" aria-label="Masowe przenoszenie do Ovoko">
     <h2 className="text-lg font-bold">{running ? `Trwa przenoszenie partii (${jobs.length})` : `Przenies zaznaczone do Ovoko (${offers.length})`}</h2>
     <p className="text-sm text-white/65">Kopiujemy zaznaczone oferty z tej strony ze zdjeciami, automatycznym dopasowaniem i ochrona przed duplikatem. Allegro pozostaje bez zmian. Nie ma jeszcze synchronizacji sprzedazy; obowiazuje wysylka ustawiona w Ovoko.</p>
+    <p className="text-sm text-white/65">Brak modelu w tytule? Automat odczyta Pasuje do i sugestie Allegro, a nastepnie katalog po pelnym numerze czesci. Nie podpina produktu do oferty. Wynik pokaze wybrane auto i zrodlo dopasowania.</p>
     <OvokoFallbackVehicle disabled={running} onChange={setFallbackVehicle} />
     <div className="flex flex-wrap items-end gap-3">
       <label className="flex flex-col gap-1 text-sm">Cena w Ovoko<select aria-label="Cena w Ovoko" className={field} value={mode} disabled={running} onChange={event => setMode(event.target.value as OvokoPriceAdjustment["mode"])}><option value="none">Bez zmiany</option><option value="amount">Zmien o kwote</option><option value="percent">Zmien procentowo</option></select></label>

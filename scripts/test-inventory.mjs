@@ -75,6 +75,8 @@ try {
   const ovokoSourceRequest = (id, index = 0) => new Request(`https://example.test/api/allegro/ovoko-source/${id}`, { headers: { Authorization: `Bearer user-${index}` } });
   assert.deepEqual(await (await handleAllegroApi(ovokoSourceRequest("1234567890"), env)).json(), { offer: { id: "1234567890", name: "Owned source preview" }, sellerId: "555" });
   assert.equal((await handleAllegroApi(ovokoSourceRequest("1234567890", 1), env)).status, 404, "The publication-specific source route also rejects a foreign seller");
+  assert.equal((await handleAllegroApi(new Request("https://example.test/api/allegro/ovoko-fitment/1234567890?number=5Q0959593EA", { headers: { Authorization: "Bearer user-1" } }), env)).status, 404, "Automatic fitment also requires an owned source offer");
+  assert.equal((await handleAllegroApi(new Request("https://example.test/api/allegro/ovoko-fitment/1234567890?number=../delete", { headers: { Authorization: "Bearer user-0" } }), env)).status, 400);
   assert.equal(inventoryQuery(new URLSearchParams("shippingRate=none")).remote.get("delivery.shippingRates.id.empty"), "true");
   console.log("Inventory API: seller isolation, read-only methods, bounded pagination beyond 100k, strict filters, shipping IDs, no-store and failure handling passed. No live requests.");
 } finally { globalThis.fetch = originalFetch; }

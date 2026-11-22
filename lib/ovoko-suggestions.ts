@@ -170,11 +170,14 @@ const words: Record<string, string> = {
   kierownicza: "kierowniczy", kierowniczej: "kierowniczy", kierowniczy: "kierowniczy", kierownicze: "kierowniczy",
   silnika: "silnik", silnik: "silnik", silnikow: "silnik", silniki: "silnik",
   lampa: "lampa", lampy: "lampa", lamp: "lampa", reflektor: "reflektor", reflektory: "reflektor", reflektora: "reflektor",
+  radia: "radio", radioodtwarzacz: "radio", radioodtwarzacze: "radio", tuner: "radio",
+  nawigacji: "nawigacja", nawigacje: "nawigacja", multimedialny: "multimedia", multimedialna: "multimedia", multimedialne: "multimedia",
 };
 const stop = new Set(["czesc", "czesci", "samochod", "samochodu", "samochodowe", "nowy", "nowa", "uzywany", "uzywana", "oryginal", "oryginalny", "przod", "tyl", "lewy", "prawy", "lewa", "prawa", "komplet", "szt"]);
 function terms(value: string) { return [...new Set((fold(value).match(/[a-z0-9]+/g) || []).filter(word => word.length >= 3 && !stop.has(word) && !/\d/.test(word)).map(word => words[word] || word))]; }
 export function suggestOvokoCategories(title: string, categories: OvokoReadRow[]): CategorySuggestion[] {
   const source = new Set(terms(title)), byId = new Map(categories.map(row => [row.id, row]));
+  if (source.has("multimedia") || /\b(?:NAC\s+WAVE\d*|RCC)\b/i.test(title)) source.add("radio");
   return categories.filter(row => row.level === "3").flatMap(row => {
     const names = [row.name], seen = new Set([row.id]); let parent = row.parentId;
     while (parent && parent !== "0" && !seen.has(parent) && seen.size < 3) { seen.add(parent); const item = byId.get(parent); if (!item) break; names.unshift(item.name); parent = item.parentId; }
