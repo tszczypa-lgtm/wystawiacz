@@ -57,6 +57,7 @@ const realRadioCategories = [
   { id: "101", name: "Mapy do nawigacji CD/DVD", level: "3", parentId: "0" },
   { id: "102", name: "Jednostka sterujaca Adblue", level: "3", parentId: "0" },
   { id: "103", name: "Panel / Radioodtwarzacz CD/DVD/GPS", level: "3", parentId: "0" },
+  { id: "104", name: "Radio", level: "3", parentId: "0" },
 ];
 for (const title of [
   "NAWIGACJA MULTIMEDIA NAC WAVE2 PEUGEOT CITROEN OPEL 9821908880",

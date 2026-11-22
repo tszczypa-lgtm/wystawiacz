@@ -10,6 +10,7 @@ import { OvokoError, parseOvokoRead, type OvokoReadRow } from "./ovoko-read";
 import { ovokoWriteClient, ovokoWriteDigest } from "./ovoko-write-client";
 import { adjustedOvokoPrice, sameOvokoMoney, validateOvokoAdjustment } from "./ovoko-bulk-price";
 import { matchOvokoFitment, type FitmentRow } from "./ovoko-fitment";
+import { createdPublication, ovokoPublicationPresent } from "./ovoko-publication-presence";
 
 type Context = Awaited<ReturnType<typeof accountContext>>;
 export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, context: Context, input: Record<string, unknown>) {
@@ -44,12 +45,14 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
   if (!expected || !sameOvokoMoney(expected.price, source.price) || ["title", "currency", "stock", "status", "condition"].some(key => expected[key] !== source[key as keyof typeof source]) || JSON.stringify(expected.images) !== JSON.stringify(source.images)) throw new OvokoError(409, "Oferta Allegro zmienila sie. Sprawdz dane przed ponownym przeniesieniem.");
   // Look up the durable source-to-target key before creating even a vehicle record.
   let existing;
-  try { existing = await context.db(`ovoko_single_publications?ovoko_account=eq.${account}&allegro_seller_id=eq.${owned.sellerId}&allegro_offer_id=eq.${source.id}&select=state,part_id&limit=1`); }
+  try { existing = await context.db(`ovoko_single_publications?ovoko_account=eq.${account}&allegro_seller_id=eq.${owned.sellerId}&allegro_offer_id=eq.${source.id}&owner_id=eq.${context.user.id}&select=state,part_id,request_hash,updated_at,owner_id`); }
   catch { throw new OvokoError(503, "Nie potwierdzono rejestru przeniesien. Partie zatrzymano."); }
   if (!Array.isArray(existing) || existing.length > 1) throw new OvokoError(503, "Nieprawidlowy rejestr przeniesien.");
   if (existing.length) {
-    if (existing[0].state === "created" && /^[1-9]\d{0,11}$/.test(String(existing[0].part_id))) return { ok: true, alreadyCreated: true, partId: String(existing[0].part_id) };
-    throw new OvokoError(409, "Wysylka tej oferty jest rozpoczeta lub niepewna. Sprawdz Ovoko; nie ponawiamy.");
+    if (existing[0]?.state !== "created") throw new OvokoError(409, "Wysylka tej oferty jest rozpoczeta lub niepewna. Sprawdz Ovoko; nie ponawiamy.");
+    const row = createdPublication(existing[0], context.user.id);
+    if (await ovokoPublicationPresent(ovokoWriteClient(credentials), row.part_id, `tymo:${owned.sellerId}:${source.id}`)) return { ok: true, alreadyCreated: true, partId: row.part_id };
+    // Preparation never releases a journal entry. publishOvokoPart rechecks and atomically reserves it.
   }
   let price: string;
   try { price = adjustedOvokoPrice(source.price, source.currency, input.adjustment); } catch (error) { throw new OvokoError(400, (error as Error).message); }

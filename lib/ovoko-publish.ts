@@ -5,6 +5,7 @@ import { ovokoSourcePreview, additionalOvokoCodes } from "./ovoko-preparation";
 import { OvokoError, parseOvokoRead, ovokoPageData } from "./ovoko-read";
 import { ovokoWriteClient, ovokoWriteDigest as digest } from "./ovoko-write-client";
 import { sameOvokoMoney } from "./ovoko-bulk-price";
+import { createdPublication, ovokoPublicationPresent, publicationCas, type CreatedPublication } from "./ovoko-publication-presence";
 
 type Context = Awaited<ReturnType<typeof accountContext>>;
 export type OvokoPublishEnv = AccountEnv & OvokoKeyEnv & Parameters<typeof handleAllegroApi>[1] & { OVOKO_PUBLISH_ENABLED?: string };
@@ -46,11 +47,14 @@ export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, c
     try { return await context.db(`ovoko_single_publications${query}`, options); }
     catch { throw new OvokoError(503, "Nie potwierdzono rejestru publikacji. Sprawdz migracje 012; nie ponawiaj wysylki bez sprawdzenia Ovoko."); }
   };
-  const existing = await db(`?${selector}&owner_id=eq.${context.user.id}&select=state,part_id`);
-  if (!Array.isArray(existing)) throw new OvokoError(503, "Nieprawidlowy rejestr publikacji.");
+  const existing = await db(`?${selector}&owner_id=eq.${context.user.id}&select=state,part_id,request_hash,updated_at,owner_id`);
+  if (!Array.isArray(existing) || existing.length > 1) throw new OvokoError(503, "Nieprawidlowy rejestr publikacji.");
+  const externalId = `tymo:${seller}:${offerId}`;
+  let retransfer: CreatedPublication | undefined;
   if (existing.length) {
-    if (existing[0].state === "created" && /^\d{1,12}$/.test(existing[0].part_id)) return { ok: true, partId: existing[0].part_id, alreadyCreated: true, visibilityConfirmed: false };
-    throw new OvokoError(409, "Ta oferta ma juz rozpoczeta lub niepewna probe wysylki. Sprawdz Ovoko; blokujemy ponowienie, aby nie utworzyc duplikatu.");
+    if (existing[0]?.state !== "created") throw new OvokoError(409, "Ta oferta ma juz rozpoczeta lub niepewna probe wysylki. Sprawdz Ovoko; blokujemy ponowienie, aby nie utworzyc duplikatu.");
+    retransfer = createdPublication(existing[0], context.user.id);
+    if (await ovokoPublicationPresent(remote, retransfer.part_id, externalId)) return { ok: true, partId: retransfer.part_id, alreadyCreated: true, visibilityConfirmed: false };
   }
   try {
     const categories = parseOvokoRead("categories", await remote("/get/categories")).rows;
@@ -67,12 +71,12 @@ export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, c
     if (!models.some(row => row.id === modelId)) throw new OvokoError(400, "Model nie nalezy do wybranej marki Ovoko.");
     const cars = await remote(`/v2/get/cars?car_ids=${donorId}&page=1&limit=1`);
     if (!Array.isArray(cars.data) || cars.data.length !== 1 || String(cars.data[0]?.id) !== donorId || String(cars.data[0]?.car_model) !== modelId) throw new OvokoError(400, "Nie potwierdzono rekordu auta na koncie Ovoko lub jego model sie nie zgadza. ID modelu nie jest car_id rekordu auta.");
-    const externalId = `tymo:${seller}:${offerId}`;
     const duplicates = ovokoPageData(await remote(`/v2/get/parts?external_ids=${encodeURIComponent(externalId)}&page=1&limit=1`), { page: 1, limit: 1 }, "part-external");
     if (duplicates.data.length || duplicates.pagination.total !== 0) throw new OvokoError(409, "Ovoko ma juz czesc z tym powiazaniem albo nie potwierdzilo pustego wyniku. Niczego nie nadpisujemy.");
     const form = new URLSearchParams({ category_id: categoryId, car_id: donorId, quality: qualityId, status: statusId, ...(code ? { manufacturer_code: code } : {}), price, original_currency: currency, notes: input.notes, external_id: externalId, photo: source.images[0] });
     source.images.forEach((url, index) => form.append(`photos[${index}]`, url));
     optionalCodes.forEach((value, index) => form.append(`optional_codes[${index}]`, value));
+    if (retransfer && await ovokoPublicationPresent(remote, retransfer.part_id, externalId)) throw new OvokoError(409, "Czesc ponownie pojawila sie w Ovoko. Nie ponowiono wysylki.");
     const latestResponse = await handleAllegroApi(new Request(sourceRequest.url, { headers: sourceRequest.headers }), env);
     if (!latestResponse.ok) throw new OvokoError(409, "Nie potwierdzono oferty Allegro bezposrednio przed wysylka.");
     const latest = await latestResponse.json() as typeof owned;
@@ -82,9 +86,12 @@ export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, c
     if (permission.user.id !== context.user.id || !permission.isAdmin || permission.account.suspended) throw new OvokoError(403, "Uprawnienia administratora zmienily sie podczas sprawdzania. Nie wyslano czesci.");
     const latestCredentials = await loadOvokoConnection(permission, await ovokoConnectionKey(env));
     if (latestCredentials.username !== credentials.username || latestCredentials.user_token !== credentials.user_token || latestCredentials.password !== credentials.password) throw new OvokoError(409, "Polaczenie Ovoko zmienilo sie podczas sprawdzania. Nie wyslano czesci.");
-    const requestHash = await digest(form.toString());
-    const reserved = await db("?on_conflict=ovoko_account,allegro_seller_id,allegro_offer_id", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=representation" }, body: JSON.stringify({ ovoko_account: account, allegro_seller_id: seller, allegro_offer_id: offerId, owner_id: context.user.id, request_hash: requestHash, state: "sending" }) });
-    if (!Array.isArray(reserved) || reserved.length !== 1 || reserved[0].owner_id !== context.user.id || reserved[0].request_hash !== requestHash) throw new OvokoError(409, "Wysylka jest juz zablokowana lub nie potwierdzono rezerwacji. Sprawdz Ovoko przed kolejna proba.");
+    // A retransfer gets a fresh generation even if payload, part ID and timestamp repeat (ABA).
+    const requestHash = await digest(retransfer ? `${crypto.randomUUID()}:${form.toString()}` : form.toString());
+    const reserved = retransfer
+      ? await db(`?${selector}&owner_id=eq.${context.user.id}${publicationCas(retransfer)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ state: "sending", part_id: null, request_hash: requestHash, updated_at: new Date().toISOString() }) })
+      : await db("?on_conflict=ovoko_account,allegro_seller_id,allegro_offer_id", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=representation" }, body: JSON.stringify({ ovoko_account: account, allegro_seller_id: seller, allegro_offer_id: offerId, owner_id: context.user.id, request_hash: requestHash, state: "sending" }) });
+    if (!Array.isArray(reserved) || reserved.length !== 1 || reserved[0]?.owner_id !== context.user.id || reserved[0].request_hash !== requestHash || (retransfer && (reserved[0].state !== "sending" || reserved[0].part_id !== null || reserved[0].ovoko_account !== account || reserved[0].allegro_seller_id !== seller || reserved[0].allegro_offer_id !== offerId))) throw new OvokoError(409, "Wysylka jest juz zablokowana lub nie potwierdzono rezerwacji. Sprawdz Ovoko przed kolejna proba.");
     try {
       // Exactly one mutation, only after the durable unique lock. Never retry a provider write.
       const result = await remote("/crm/importPart", form);

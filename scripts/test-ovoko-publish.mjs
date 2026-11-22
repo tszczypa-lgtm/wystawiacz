@@ -18,12 +18,14 @@ const keyBytes = new Uint8Array(32).fill(7), key = await crypto.subtle.importKey
 const env = { SUPABASE_SERVICE_ROLE_KEY: "fixture", ALLEGRO_ENCRYPTION_KEY: Buffer.from(keyBytes).toString("base64"), OVOKO_PUBLISH_ENABLED: "true" };
 const credentials = { username: "fixture-account", password: "private-password", user_token: "private-token" };
 let user = 1, admin, suspended, owns, stock, bundle, mode, donorModel, duplicate, failDb, sourceReads, lateStock, writes, categoryName, revokeAfterRead, imageMode, extraCodes, bulk, expectedPrice, credentialReads, rotateAt;
+let providerPresent, inventoryReads;
 const owner = () => `00000000-0000-0000-0000-${String(user).padStart(12, "0")}`;
 const records = new Map(), calls = [];
 const snapshot = { title: "AUDI A4 POMPA 0281010038", price: "100.00", currency: "PLN", stock: 1, status: "ACTIVE", condition: "used", images: ["https://a.allegroimg.com/photo.jpg", "https://a.allegroimg.com/second.jpg", "https://a.allegroimg.com/label.jpg"] };
 const payload = () => ({ offerId: "101", brandId: "1", modelId: "11", donorId: "13", categoryId: "3", qualityId: "0", statusId: "0", manufacturerCode: "0281010038", additionalCodes: extraCodes, price: "100.00", currency: "PLN", notes: "Opis & uwagi + numer", confirmSingle: true, expectedSource: { ...snapshot } });
 const req = (body = payload(), headers = {}) => new Request("https://publish.test/api/ovoko/publish", { method: "POST", headers: { Authorization: "Bearer fixture", Origin: "https://publish.test", "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
 function reset() {
+  providerPresent = false; inventoryReads = 0;
   fitmentMode = "none";
   expectedCode = "0281010038";
   user++; admin = true; suspended = false; owns = true; stock = 1; bundle = false; mode = "ok"; donorModel = "11"; duplicate = false; failDb = ""; sourceReads = 0; lateStock = false; writes = 0; categoryName = "Pompy"; revokeAfterRead = false; imageMode = "normal"; extraCodes = ""; bulk = false; expectedPrice = "100.00"; credentialReads = 0; rotateAt = Infinity; records.clear(); calls.length = 0;
@@ -53,8 +55,18 @@ globalThis.fetch = async (input, options = {}) => {
     const id = ["ovoko_account", "allegro_seller_id", "allegro_offer_id"].map(key => url.searchParams.get(key)?.slice(3)).join(":"), row = records.get(id);
     if (method === "GET") return Response.json(row?.owner_id === owner() ? [row] : []);
     assert.equal(method, "PATCH");
-    if (!row || row.owner_id !== owner() || (url.searchParams.has("state") && url.searchParams.get("state") !== `eq.${row.state}`)) return Response.json([]);
-    Object.assign(row, JSON.parse(options.body)); return Response.json([row]);
+    const patch = JSON.parse(options.body);
+    if (patch.state === "sending") {
+      assert.equal(url.searchParams.get("state"), "eq.created");
+      for (const field of ["part_id", "request_hash", "updated_at"]) assert.ok(url.searchParams.has(field), `CAS includes ${field}`);
+      if (mode === "cas-race") row.state = "uncertain";
+      if (mode === "cas-generation-race") row.updated_at = "2099-01-01T00:00:00Z";
+      if (mode === "cas-hash-race") row.request_hash = "b".repeat(64);
+    }
+    if (!row || row.owner_id !== owner() || [...url.searchParams].some(([field, filter]) => filter.startsWith("eq.") && String(row[field]) !== filter.slice(3))) return Response.json([]);
+    Object.assign(row, patch);
+    if (patch.state === "sending" && mode === "cas-no-representation") return new Response(null, { status: 204 });
+    return Response.json([row]);
   }
   if (url.origin === "https://api.allegro.pl") {
     assert.equal(method, "GET", "Publishing to Ovoko never mutates Allegro");
@@ -88,7 +100,23 @@ globalThis.fetch = async (input, options = {}) => {
     if (bulk && url.searchParams.has("model_ids")) { assert.equal(url.searchParams.get("model_ids"), donorModel); return Response.json({ status_code: "R200", data: [{ id: "13", car_model: donorModel, car_years: "2000" }], pagination: { page: 1, limit: 20, total_count: 1 } }); }
     assert.equal(url.searchParams.get("car_ids"), "13"); return Response.json({ status_code: "R200", data: [{ id: "13", car_model: donorModel }], pagination: { page: 1, limit: 1, total_count: 1 } });
   }
-  if (url.pathname === "/v2/get/parts") { assert.equal(url.searchParams.get("external_ids"), "tymo:555:101"); return Response.json({ status_code: "R200", data: duplicate ? [{ id: "99" }] : [], pagination: { page: "1", limit: "1", total_count: duplicate ? "1" : "0" } }); }
+  if (url.pathname === "/v2/get/parts") {
+    assert.equal(url.searchParams.has("part_ids"), false, "No undocumented filter can be trusted to prove absence");
+    const external = url.searchParams.has("external_ids");
+    if (external) assert.equal(url.searchParams.get("external_ids"), "tymo:555:101");
+    else { inventoryReads++; assert.equal(url.searchParams.get("sort[id]"), "asc"); }
+    if (mode === "presence-error") return new Response("private-provider-error", { status: 503 });
+    if (mode === "presence-warning") return Response.json({ status_code: "R202", msg: "private-provider-error" });
+    if (mode === "presence-malformed") return Response.json({ status_code: "R200", data: [] });
+    if (!external && mode === "presence-large-inventory") {
+      const page = Number(url.searchParams.get("page"));
+      return Response.json({ status_code: "R200", data: Array.from({ length: Math.min(100, 1501 - (page - 1) * 100) }, (_, i) => ({ id: String(10000 + (page - 1) * 100 + i), external_id: null })), pagination: { page, limit: 100, total_count: 1501 } });
+    }
+    const present = providerPresent || (external ? mode === "presence-external-only" : mode === "presence-id-only" || (mode === "presence-reappeared" && inventoryReads >= 2));
+    const data = present ? [{ id: external && mode === "presence-external-only" ? "99" : "77", external_id: mode === "presence-id-only" ? "changed" : "tymo:555:101" }] : duplicate ? [{ id: "99", external_id: "tymo:555:101" }] : [];
+    if (mode === "presence-wrong-external") data.push({ id: "99", external_id: "private-wrong" });
+    return Response.json({ status_code: "R200", data, pagination: { page: "1", limit: external ? "1" : "100", total_count: data.length } });
+  }
   assert.equal(url.pathname, "/crm/importPart", "No arbitrary mutation, update, delete, status change, donor or warehouse operations");
   assert.equal(records.size, 1); assert.equal([...records.values()][0].state, "sending", "Durable reservation precedes every mutation");
   writes++;
@@ -102,6 +130,7 @@ globalThis.fetch = async (input, options = {}) => {
   if (mode === "redirect") return new Response("private-provider-error", { status: 302, headers: { Location: "https://evil.test" } });
   if (mode === "bad") return Response.json({ status_code: "R400", msg: "private-provider-error" });
   if (mode === "missing-id") return Response.json({ status_code: "R200" });
+  providerPresent = true;
   return Response.json({ status_code: "R200", part_id: 77 });
 };
 try {
@@ -130,6 +159,36 @@ try {
   const replay = await handleOvokoApi(req(), env); assert.equal(replay.status, 200); assert.equal((await replay.json()).alreadyCreated, true); assert.equal(writes, 1);
   user++;
   assert.equal((await handleOvokoApi(req(), env)).status, 409, "Another Wystawiacz owner cannot bypass the target-account publication lock"); assert.equal(writes, 1);
+  for (const presence of ["ok", "presence-external-only", "presence-id-only"]) {
+    reset(); assert.equal((await handleOvokoApi(req(), env)).status, 200);
+    providerPresent = presence === "ok"; mode = presence;
+    const result = await handleOvokoApi(req(), env);
+    assert.equal(result.status, 200, await result.clone().text());
+    assert.equal((await result.json()).alreadyCreated, true); assert.equal(writes, 1);
+    assert.equal([...records.values()][0].state, "created");
+  }
+  reset(); assert.equal((await handleOvokoApi(req(), env)).status, 200); providerPresent = false;
+  const retransferred = await handleOvokoApi(req(), env);
+  assert.equal(retransferred.status, 200, await retransferred.clone().text()); assert.equal((await retransferred.json()).alreadyCreated, false); assert.equal(writes, 2);
+  assert.ok(inventoryReads >= 2, "Both initial and final absence checks inspect saved part ID before CAS");
+  for (const failure of ["presence-error", "presence-warning", "presence-malformed", "presence-wrong-external", "presence-reappeared", "cas-race", "cas-generation-race", "cas-hash-race", "cas-no-representation"]) {
+    reset(); assert.equal((await handleOvokoApi(req(), env)).status, 200); providerPresent = false; mode = failure;
+    const response = await handleOvokoApi(req(), env);
+    assert.ok([409, 502].includes(response.status), await response.clone().text());
+    assert.doesNotMatch(await response.text(), /private-/); assert.equal(writes, 1, "Failed checks/CAS never import again");
+    if (failure === "cas-no-representation" || failure === "cas-race") {
+      assert.equal((await handleOvokoApi(req(), env)).status, 409); assert.equal(writes, 1, "Sending/uncertain CAS outcome stays locked");
+    } else assert.equal([...records.values()][0].state, "created");
+  }
+  reset(); assert.equal((await handleOvokoApi(req(), env)).status, 200); providerPresent = false; credentialReads = 0; rotateAt = 2;
+  assert.equal((await handleOvokoApi(req(), env)).status, 409); assert.equal(writes, 1); assert.equal([...records.values()][0].state, "created", "Account rotation cannot release a created record");
+  reset(); assert.equal((await handleOvokoApi(req(), env)).status, 200); providerPresent = false;
+  const oldHash = [...records.values()][0].request_hash;
+  const concurrentRetransfers = await Promise.all([handleOvokoApi(req(), env), handleOvokoApi(req(), env)]);
+  assert.equal(writes, 2, "Concurrent retransfers permit exactly one additional provider write");
+  assert.ok(concurrentRetransfers.some(response => response.status === 200));
+  assert.ok(concurrentRetransfers.every(response => [200, 409].includes(response.status)));
+  assert.notEqual([...records.values()][0].request_hash, oldHash, "A fresh generation cannot match the old CAS even with the same payload and provider ID");
   reset(); imageMode = "duplicates"; assert.equal((await handleOvokoApi(req(), env)).status, 200); assert.equal(writes, 1, "Duplicate URLs do not block a full unique gallery");
   reset(); const formatted = payload(); formatted.expectedSource.price = "100"; assert.equal((await handleOvokoApi(req(formatted), env)).status, 200); assert.equal(writes, 1, "Equivalent decimal representations must not block publication");
   reset(); mode = "price-format"; assert.equal((await handleOvokoApi(req(), env)).status, 200); assert.equal(writes, 1, "The last source recheck also compares monetary value, not decimal spelling");
@@ -160,6 +219,16 @@ try {
     if (checkBounds) assert.ok(calls.length - ready < 50, "Publication uses a bounded separate Worker request");
     return result;
   }
+  reset(); bulk = true;
+  const retransferPlan = await bulkPlan({ mode: "none", value: "0" });
+  assert.equal((await bulkSend(retransferPlan)).status, 200); providerPresent = false;
+  const beforePrepare = [...records.values()][0].request_hash;
+  const prepareAgain = await handleOvokoApi(bulkReq({ ...retransferPlan, operation: "prepare" }), env);
+  assert.equal(prepareAgain.status, 200, await prepareAgain.clone().text());
+  assert.equal([...records.values()][0].state, "created"); assert.equal([...records.values()][0].request_hash, beforePrepare, "Preparation checks presence but never releases the existing record");
+  mode = "presence-large-inventory";
+  const bulkRetransfer = await bulkSend(retransferPlan);
+  assert.equal(bulkRetransfer.status, 200, await bulkRetransfer.clone().text()); assert.equal((await bulkRetransfer.json()).alreadyCreated, false); assert.equal(writes, 2);
   for (const [adjustment, price] of [[{ mode: "none", value: "0" }, "100.00"], [{ mode: "percent", value: "-10" }, "90.00"], [{ mode: "amount", value: "+25.50" }, "125.50"], [{ mode: "fixed", value: "200" }, "200.00"]]) {
     reset(); bulk = true; expectedPrice = price; mode = "price-format";
     const item = await bulkPlan(adjustment); item.expectedSource.price = "100";

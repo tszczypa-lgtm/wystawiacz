@@ -191,7 +191,7 @@ export function suggestOvokoCategories(title: string, categories: OvokoReadRow[]
     if (leaf.some(term => ["mapa", "adblue"].includes(term) && !source.has(term))) return [];
     if (matches.every(term => genericCategoryTerms.has(term)) && leaf.some(term => categorySystems.has(term) && !source.has(term))) return [];
     const parentMatches = terms(names.slice(0, -1).join(" ")).filter(term => source.has(term) && !matches.includes(term));
-    const hardware = source.has("radio") && !source.has("mapa") && leaf.includes("radio") ? 6 : 0;
+    const hardware = source.has("radio") && !source.has("mapa") && leaf.includes("radio") ? 6 + (leaf.includes("panel") && (leaf.includes("dvd") || leaf.includes("gps")) ? 6 : 0) : 0;
     const score = matches.reduce((sum, term) => sum + (genericCategoryTerms.has(term) ? 1 : 3), 0) + parentMatches.length + hardware + matches.length / leaf.length;
     return [{ id: row.id, path: names.join(" / "), matches: [...matches, ...parentMatches], score, weak: matches.length < 2 }];
   }).sort((a, b) => b.score - a.score || a.path.localeCompare(b.path, "pl")).slice(0, 8);
