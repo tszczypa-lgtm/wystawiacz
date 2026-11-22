@@ -109,7 +109,7 @@ export async function searchTitleSuggestions(number: string, owner: string, _env
   return result;
 }
 const apiBase = "https://api.allegro.pl";
-export async function readOvokoFitment(offer: Record<string, any>, number: string, remote: (path: string) => Promise<Record<string, any>>) {
+export async function readOvokoFitment(offer: Record<string, any>, number: string, remote: (path: string) => Promise<Record<string, any>>, expand = false) {
   const rows: { text: string; origin: string }[] = [], names: string[] = [];
   const seen = new Set<string>();
   function append(value: unknown, origin: string) {
@@ -129,19 +129,35 @@ export async function readOvokoFitment(offer: Record<string, any>, number: strin
   if (!rows.length) append(await remote(`/sale/compatibility-list-suggestions?offer.id=${encodeURIComponent(offer.id)}&language=pl-PL`), "suggestion");
   // Read only exact, complete manufacturer codes; never accept a shortened index or a title in MPN.
   const compact = (value: string) => value.toUpperCase().replace(/[ .-]/g, "");
-  if (!rows.length && number) {
-    const search = await remote(`/sale/products?phrase=${encodeURIComponent(number)}&mode=MPN&language=pl-PL`);
-    if (!Array.isArray(search.products) || search.products.length > 30) throw new ApiError(502, "Nieprawidlowy wynik katalogu MPN.");
-    const products = search.products.filter((row: any) => typeof row?.id === "string" && /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(row.id)).slice(0, 2);
-    for (const entry of products) {
-      const product = await remote(`/sale/products/${entry.id}?language=pl-PL`);
-      if (product.id !== entry.id || !Array.isArray(product.parameters) || product.parameters.length > 500) throw new ApiError(502, "Niepelne dane produktu MPN.");
-      const exact = product.parameters.some((row: any) => typeof row?.name === "string" && /^(numer katalogowy cz[eę][sś]ci|kod producenta|manufacturer code|numer oe)$/i.test(row.name.trim()) && Array.isArray(row.values) && row.values.some((value: unknown) => typeof value === "string" && compact(value) === number));
-      if (!exact || !offer.category?.id || product.category?.id !== offer.category.id) continue;
-      if (typeof product.name === "string" && product.name.length <= 500) names.push(product.name);
-      append(product.compatibilityList, "catalog");
-      if (!rows.length) append(await remote(`/sale/compatibility-list-suggestions?product.id=${entry.id}&language=pl-PL`), "catalog-suggestion");
-      if (rows.length) break;
+  if (number && (expand || !rows.length)) {
+    const visited = new Set<string>();
+    let accepted = 0;
+    for (const mode of ["&mode=MPN", ""]) {
+      if (visited.size >= 6 || (mode === "" && accepted)) break;
+      const search = await remote(`/sale/products?phrase=${encodeURIComponent(number)}${mode}&language=pl-PL`);
+      if (!Array.isArray(search.products) || search.products.length > 30) throw new ApiError(502, "Nieprawidlowy wynik katalogu MPN.");
+      const products = search.products.filter((row: any) => typeof row?.id === "string" && /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(row.id) && !visited.has(row.id)).slice(0, 6 - visited.size);
+      for (const entry of products) {
+        if (visited.has(entry.id)) continue;
+        visited.add(entry.id);
+        const product = await remote(`/sale/products/${entry.id}?language=pl-PL`);
+        if (product.id !== entry.id || !Array.isArray(product.parameters) || product.parameters.length > 500) throw new ApiError(502, "Niepelne dane produktu MPN.");
+        const exact = product.parameters.some((row: any) => typeof row?.name === "string" && /^(numer katalogowy cz[eę][sś]ci|kod producenta|manufacturer code|numer oe)$/i.test(row.name.trim()) && Array.isArray(row.values) && row.values.some((value: unknown) => typeof value === "string" && compact(value) === number));
+        const sameCategory = offer.category?.id && (product.category?.id === offer.category.id || (Array.isArray(product.category?.similar) && product.category.similar.some((row: any) => row?.id === offer.category.id)));
+        if (!exact || !sameCategory) continue;
+        accepted++;
+        if (typeof product.name === "string" && product.name.length <= 500) names.push(product.name);
+        // A catalogue product can identify the car in parameters even without a compatibility list.
+        const vehicleValues = (pattern: RegExp): string[] => product.parameters.filter((row: any) => typeof row?.name === "string" && pattern.test(row.name.trim()) && Array.isArray(row.values)).flatMap((row: any) => row.values.filter((value: unknown) => typeof value === "string" && value.trim() && value.length <= 100)).slice(0, 5);
+        const makes = vehicleValues(/^(marka pojazdu|marka samochodu|marka auta|producent pojazdu)$/i);
+        const models = vehicleValues(/^(model pojazdu|model samochodu|model auta)$/i);
+        for (const make of makes) for (const model of models) if (names.length < 40) names.push(`${make} ${model}`);
+        const before = rows.length;
+        append(product.compatibilityList, "catalog");
+        if (rows.length === before) append(await remote(`/sale/compatibility-list-suggestions?product.id=${entry.id}&language=pl-PL`), "catalog-suggestion");
+        if (!expand && rows.length) break;
+      }
+      if (!expand && rows.length) break;
     }
   }
   return { rows, names };
@@ -354,7 +370,7 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
     if (request.method === "GET") {
       if (path.startsWith("/ovoko-fitment/")) {
         const id = path.slice("/ovoko-fitment/".length), number = url.searchParams.get("number") || "";
-        if (!/^\d{1,30}$/.test(id) || (url.searchParams.has("number") && (!/^[A-Z0-9]{6,32}$/.test(number) || !/\d/.test(number))) || [...url.searchParams.keys()].some(key => key !== "number") || url.searchParams.getAll("number").length > 1) throw new ApiError(400, "Nieprawidlowy numer oferty lub pelny numer czesci.");
+        if (!/^\d{1,30}$/.test(id) || (url.searchParams.has("number") && (!/^[A-Z0-9]{6,32}$/.test(number) || !/\d/.test(number))) || [...url.searchParams.keys()].some(key => !["number", "expand"].includes(key)) || url.searchParams.getAll("number").length > 1 || url.searchParams.getAll("expand").length > 1 || (url.searchParams.has("expand") && url.searchParams.get("expand") !== "1")) throw new ApiError(400, "Nieprawidlowy numer oferty lub pelny numer czesci.");
         const owned = await remote(`/sale/offers?offer.id=${id}&limit=1`, { signal: AbortSignal.timeout(10000) });
         if (!Array.isArray(owned.offers) || !owned.offers.some((row: any) => row.id === id)) throw new ApiError(404, "Oferta nie nalezy do polaczonego konta.");
         const offer = await remote(`/sale/product-offers/${id}`, { signal: AbortSignal.timeout(10000) });
@@ -364,7 +380,7 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
           if (response.status === 404 || response.status === 422) { await response.body?.cancel(); return route.includes("/sale/products?") ? { products: [] } : { items: [] }; }
           return readRemote(response);
         };
-        return json({ offerId: id, number, ...await readOvokoFitment(offer, number, optional) });
+        return json({ offerId: id, number, ...await readOvokoFitment(offer, number, optional, url.searchParams.get("expand") === "1") });
       }
       if (path === "/seller-identity") {
         const seller = await remote("/me", { signal: AbortSignal.timeout(15000) });

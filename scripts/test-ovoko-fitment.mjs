@@ -12,7 +12,7 @@ async function remote(path) {
   calls.push(path);
   assert.ok(path.startsWith("/sale/compatibility-list-suggestions?") || path.startsWith("/sale/products?phrase=") || path === `/sale/products/${id}?language=pl-PL`);
   if (path.startsWith("/sale/compatibility-list-suggestions?offer.id=")) return { items: mode === "suggestion" ? [{ type: "ID", text: "CITROEN C5 AIRCROSS 2017 - 2024" }] : [] };
-  if (path.startsWith("/sale/products?")) { const query = new URL(path, "https://api.allegro.pl").searchParams; assert.equal(query.get("phrase"), number); assert.equal(query.get("mode"), "MPN"); return { products: mode === "empty" ? [] : [{ id }] }; }
+  if (path.startsWith("/sale/products?")) { const query = new URL(path, "https://api.allegro.pl").searchParams; assert.equal(query.get("phrase"), number); assert.ok(["MPN", null].includes(query.get("mode"))); return { products: mode === "empty" ? [] : [{ id }] }; }
   if (path.startsWith("/sale/compatibility-list-suggestions?product.id=")) return { items: [{ text: "CITROEN C5 AIRCROSS 2017 - 2024" }] };
   return { id, name: "Radio multimedialne", category: { id: mode === "wrong-category" ? "unrelated" : "radio" }, parameters: [{ name: "Numer katalogowy części", values: [mode === "short" ? "5Q0959593E" : mode === "long" ? "5Q0959593EAX" : mode === "title" ? "RADIO 5Q0959593EA" : "5Q0 959 593 EA"] }], compatibilityList: mode === "product-suggestion" ? undefined : mode === "malformed" ? { items: "bad" } : { items: [{ text: "CITROEN C5 AIRCROSS 2017 - 2024" }] } };
 }
@@ -27,6 +27,30 @@ for (const kind of ["ok", "product-suggestion"]) {
 }
 for (const kind of ["short", "long", "title", "wrong-category", "empty"]) { mode = kind; const matched = await readOvokoFitment(source, number, remote); assert.deepEqual(matched.rows, []); assert.deepEqual(matched.names, []); }
 mode = "malformed"; await assert.rejects(() => readOvokoFitment(source, number, remote));
+const productIds = Array.from({ length: 9 }, (_, i) => `11111111-1111-1111-1111-${String(i + 1).padStart(12, "0")}`);
+async function expandedFixture(kind, ownRows = []) {
+  const paths = [];
+  const result = await readOvokoFitment({ ...source, compatibilityList: { items: ownRows } }, number, async path => {
+    paths.push(path);
+    if (path.startsWith("/sale/compatibility-list-suggestions?")) return { items: [] };
+    if (path.startsWith("/sale/products?")) {
+      const query = new URL(path, "https://api.allegro.pl").searchParams;
+      return { products: kind === "phrase" && query.has("mode") ? [] : productIds.map(id => ({ id })) };
+    }
+    const index = productIds.findIndex(id => path.includes(id)); assert.notEqual(index, -1);
+    return { id: productIds[index], name: "Radio CITROEN C5 AIRCROSS", category: { id: kind === "similar" ? "gps" : "radio", ...(kind === "similar" ? { similar: [{ id: "radio" }] } : {}) }, parameters: [{ name: "Numer katalogowy części", values: [index < 2 && kind === "later" ? `${number}X` : number] }, { name: "Marka pojazdu", values: ["Peugeot"] }, { name: "Model pojazdu", values: ["308 II"] }] };
+  }, true);
+  return { ...result, paths };
+}
+for (const kind of ["title", "phrase", "similar", "later"]) {
+  const result = await expandedFixture(kind);
+  assert.ok(result.names.includes("Radio CITROEN C5 AIRCROSS"));
+  assert.ok(result.names.includes("Peugeot 308 II"), "Vehicle parameters remain attached to the exact-code product");
+  assert.equal(result.paths.filter(path => /^\/sale\/products\//.test(path)).length, 6, "Bounded scan includes results beyond the first two");
+  if (kind === "phrase") assert.ok(result.paths.some(path => path.startsWith("/sale/products?") && !path.includes("mode=")), "Retry catalogue phrase search only with complete code verification");
+}
+const expandedOwn = await expandedFixture("title", [{ text: "Nieznany model" }]);
+assert.equal(expandedOwn.rows[0].origin, "offer"); assert.ok(expandedOwn.names.includes("Radio CITROEN C5 AIRCROSS"), "Unusable own rows must not suppress catalogue enrichment");
 await assert.rejects(() => readOvokoFitment(source, number, async () => { throw new Error("provider unavailable"); }), /provider unavailable/, "Read errors cannot become successful no-match responses");
 const bundle = await build({ entryPoints: [fileURLToPath(new URL("../lib/ovoko-fitment.ts", import.meta.url))], bundle: true, write: false, format: "esm", platform: "node" });
 const { matchOvokoFitment } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);

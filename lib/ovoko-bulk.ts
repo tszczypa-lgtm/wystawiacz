@@ -94,10 +94,11 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
   }
   let fitmentOrigin = "";
   if (!modelId || !draft.categoryId) {
-    const fitment = await allegro(`/ovoko-fitment/${source.id}${draft.manufacturerCode ? `?number=${encodeURIComponent(draft.manufacturerCode)}` : ""}`);
+    const fitment = await allegro(`/ovoko-fitment/${source.id}?expand=1${draft.manufacturerCode ? `&number=${encodeURIComponent(draft.manufacturerCode)}` : ""}`);
     if (fitment.offerId !== source.id || fitment.number !== draft.manufacturerCode || !Array.isArray(fitment.rows) || fitment.rows.length > 200 || fitment.rows.some((row: any) => typeof row?.text !== "string" || row.text.length > 2000 || !["offer", "suggestion", "catalog", "catalog-suggestion"].includes(row.origin)) || !Array.isArray(fitment.names) || fitment.names.some((name: unknown) => typeof name !== "string" || name.length > 500)) throw new OvokoError(502, "Niepotwierdzone dane automatycznego dopasowania.");
     if (!modelId) {
-      const matched = await matchOvokoFitment(fitment.rows as FitmentRow[], dictionaries.brands, allowedBrands.map(row => row.id), vehicleText, loadModels);
+      const candidates = [...fitment.rows as FitmentRow[], ...fitment.names.map((text: string) => ({ text, origin: "catalog" }))];
+      const matched = await matchOvokoFitment(candidates, dictionaries.brands, allowedBrands.map(row => row.id), vehicleText, loadModels);
       if (matched) { brandId = matched.brandId; modelId = matched.modelId; models = await loadModels(brandId); fitmentOrigin = matched.origin; }
     }
     if (!draft.categoryId && fitment.names.length) draft.categoryId = ovokoAutomaticFields({ ...source, title: `${source.title} ${fitment.names.join(" ")}` }, dictionaries).categoryId || "";

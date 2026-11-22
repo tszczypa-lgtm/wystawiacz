@@ -66,10 +66,10 @@ globalThis.fetch = async (input, options = {}) => {
       return Response.json({ type: "MANUAL", items: fitmentMode === "suggestion" ? [{ type: "ID", text: "AUDI A4 2000/01-2010/12" }] : [] });
     }
     if (url.pathname === "/sale/products") {
-      assert.equal(url.searchParams.get("phrase"), "0281010038"); assert.equal(url.searchParams.get("mode"), "MPN");
+      assert.equal(url.searchParams.get("phrase"), "0281010038"); assert.ok(["MPN", null].includes(url.searchParams.get("mode")));
       return Response.json({ products: fitmentMode.startsWith("catalog") ? [{ id: "11111111-1111-1111-1111-111111111111" }] : [] });
     }
-    if (url.pathname === "/sale/products/11111111-1111-1111-1111-111111111111") return Response.json({ id: "11111111-1111-1111-1111-111111111111", name: "Pompa ABS 0281010038", category: { id: fitmentMode === "catalog-wrong-category" ? "other" : "cat-1" }, parameters: [{ name: "Numer katalogowy czesci", values: [fitmentMode === "catalog-wrong-index" ? "0281010038A" : "0 281 010 038"] }], compatibilityList: fitmentMode === "catalog-malformed" ? { items: "broken" } : { items: [{ text: "AUDI A4 2000/01-2010/12" }] } });
+    if (url.pathname === "/sale/products/11111111-1111-1111-1111-111111111111") return Response.json({ id: "11111111-1111-1111-1111-111111111111", name: fitmentMode === "catalog-title" ? "Pompa ABS AUDI A4 0281010038" : "Pompa ABS 0281010038", category: { id: fitmentMode === "catalog-wrong-category" ? "other" : "cat-1" }, parameters: [{ name: "Numer katalogowy czesci", values: [fitmentMode === "catalog-wrong-index" ? "0281010038A" : "0 281 010 038"] }, ...(fitmentMode === "catalog-parameters" ? [{ name: "Marka pojazdu", values: ["Audi"] }, { name: "Model pojazdu", values: ["A4"] }] : [])], compatibilityList: fitmentMode === "catalog-malformed" ? { items: "broken" } : { items: ["catalog-title", "catalog-parameters"].includes(fitmentMode) ? [] : [{ text: "AUDI A4 2000/01-2010/12" }] } });
     assert.equal(url.pathname, "/sale/product-offers/101"); sourceReads++;
     if (revokeAfterRead && sourceReads > 1) admin = false;
     const images = imageMode === "duplicates" ? [...snapshot.images, snapshot.images[0]] : imageMode === "unsafe" ? [...snapshot.images, "https://evil.test/private.jpg"] : imageMode === "changed" && sourceReads > 1 ? snapshot.images.slice(0, 1) : snapshot.images;
@@ -188,12 +188,12 @@ try {
   reset(); bulk = true; snapshot.title = "AUDI VW POMPA 0281010038";
   const noModel = await bulkPlan({ mode: "none", value: "0" });
   const missing = await bulkSend(noModel); assert.equal(missing.status, 400); assert.match(await missing.text(), /Automat nie znalazl modelu/); assert.equal(writes, 0);
-  for (const fitment of ["own", "suggestion", "catalog"]) {
+  for (const fitment of ["own", "suggestion", "catalog", "catalog-title", "catalog-parameters"]) {
     reset(); bulk = true; fitmentMode = fitment;
     const item = await bulkPlan({ mode: "none", value: "0" });
     const result = await bulkSend(item); assert.equal(result.status, 200, await result.clone().text());
     assert.equal(writes, 1); assert.equal(preparedVehicle.usedFallback, false); assert.equal(preparedVehicle.brand, "Audi");
-    assert.match(preparedVehicle.evidence, fitment === "catalog" ? /pelny MPN/ : /Pasuje do/);
+    assert.match(preparedVehicle.evidence, fitment.startsWith("catalog") ? /pelny MPN/ : /Pasuje do/);
   }
   for (const fitment of ["catalog-wrong-index", "catalog-wrong-category", "catalog-malformed", "error"]) {
     reset(); bulk = true; fitmentMode = fitment;
