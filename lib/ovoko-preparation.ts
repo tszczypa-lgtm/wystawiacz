@@ -83,7 +83,7 @@ export function ovokoPublicationBlockers(source: OvokoSourcePreview, draft: Ovok
   if (!/^[1-9]\d{0,11}$/.test(draft.categoryId)) issues.push("Wybierz kategorie Ovoko poziomu 3.");
   if (!/^\d{1,12}$/.test(draft.qualityId)) issues.push("Wybierz stan czesci Ovoko.");
   if (!/^\d{1,12}$/.test(draft.statusId)) issues.push("Wybierz dostepnosc czesci Ovoko (Na stanie).");
-  if (!/^[A-Z0-9]{6,32}$/.test(draft.manufacturerCode)) issues.push("Uzupelnij pelny numer czesci (6-32 litery lub cyfry).");
+  if (draft.manufacturerCode && !/^[A-Z0-9]{6,32}$/.test(draft.manufacturerCode)) issues.push("Podany numer czesci musi byc pelny (6-32 litery lub cyfry); gdy go nie znasz, zostaw pole puste.");
   if (additionalOvokoCodes(draft.additionalCodes, draft.manufacturerCode) === null) issues.push("Sprawdz numery dodatkowe: maksymalnie 20, po jednym w wierszu, 6-32 litery lub cyfry kazdy.");
   if (!/^\d{1,10}(\.\d{1,2})?$/.test(draft.price) || Number(draft.price) <= 0 || !["PLN", "EUR"].includes(draft.currency)) issues.push("Uzupelnij dodatnia cene i walute PLN lub EUR.");
   return issues;
@@ -97,7 +97,7 @@ export function ovokoPreparationIssues(source: OvokoSourcePreview, draft: OvokoP
   if (!draft.qualityId) issues.push("Wybierz jakosc czesci ze slownika Ovoko.");
   if (!draft.statusId) issues.push("Wybierz status rekordu ze slownika Ovoko; sam status nie potwierdza widocznosci w sprzedazy.");
   if (!/^\d+(\.\d{1,2})?$/.test(draft.price) || Number(draft.price) <= 0 || !["PLN", "EUR"].includes(draft.currency)) issues.push("Uzupelnij dodatnia cene i walute PLN lub EUR. Nie wykonujemy przewalutowania.");
-  if (!draft.manufacturerCode.trim()) issues.push("Numer katalogowy pozostaje do sprawdzenia lub uzupelnienia, bez zgadywania z tytulu.");
+  if (!draft.manufacturerCode.trim()) issues.push("Numer katalogowy jest opcjonalny w Ovoko. Puste pole zostanie pominiete; nie wpisujemy fikcyjnego numeru.");
   if (!draft.shippingPlan.trim()) issues.push("Brak planu wysylki. Cennik Allegro nie jest automatycznie cennikiem Ovoko.");
   return issues;
 }

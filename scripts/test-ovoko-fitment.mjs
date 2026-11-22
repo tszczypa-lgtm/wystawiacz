@@ -19,6 +19,8 @@ async function remote(path) {
 const own = await readOvokoFitment({ ...source, compatibilityList: { items: [{ text: "PEUGEOT 3008 II 2016 - 2024" }] } }, number, remote);
 assert.equal(own.rows[0].origin, "offer"); assert.equal(calls.length, 0);
 mode = "suggestion"; calls = []; const suggested = await readOvokoFitment(source, number, remote); assert.equal(suggested.rows[0].origin, "suggestion"); assert.equal(calls.length, 1);
+calls = []; const noNumberSuggestion = await readOvokoFitment(source, "", remote); assert.equal(noNumberSuggestion.rows[0].origin, "suggestion"); assert.equal(calls.length, 1);
+mode = "empty"; calls = []; assert.deepEqual((await readOvokoFitment(source, "", remote)).rows, []); assert.equal(calls.length, 1, "No number means no catalogue search, never a placeholder MPN");
 for (const kind of ["ok", "product-suggestion"]) {
   mode = kind; calls = []; const matched = await readOvokoFitment(source, number, remote);
   assert.equal(matched.rows[0].origin, kind === "ok" ? "catalog" : "catalog-suggestion"); assert.equal(matched.names[0], "Radio multimedialne"); assert.ok(calls.length <= 4);

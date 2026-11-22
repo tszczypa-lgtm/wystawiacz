@@ -20,7 +20,8 @@ export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, c
   const offerId = text(input, "offerId", /^\d{1,30}$/), donorId = text(input, "donorId", /^[1-9]\d{0,11}$/);
   const brandId = text(input, "brandId", /^[1-9]\d{0,11}$/), modelId = text(input, "modelId", /^[1-9]\d{0,11}$/);
   const categoryId = text(input, "categoryId", /^[1-9]\d{0,11}$/), qualityId = text(input, "qualityId", /^\d{1,12}$/), statusId = text(input, "statusId", /^\d{1,12}$/);
-  const code = text(input, "manufacturerCode", /^[A-Z0-9]{6,32}$/), price = text(input, "price", /^\d{1,10}(\.\d{1,2})?$/, 30), currency = text(input, "currency", /^(PLN|EUR)$/);
+  const code = input.manufacturerCode === undefined || input.manufacturerCode === "" ? "" : text(input, "manufacturerCode", /^[A-Z0-9]{6,32}$/);
+  const price = text(input, "price", /^\d{1,10}(\.\d{1,2})?$/, 30), currency = text(input, "currency", /^(PLN|EUR)$/);
   if (input.additionalCodes !== undefined && typeof input.additionalCodes !== "string") throw new OvokoError(400, "Nieprawidlowe numery dodatkowe.");
   const optionalCodes = additionalOvokoCodes((input.additionalCodes as string | undefined) || "", code);
   if (!optionalCodes) throw new OvokoError(400, "Sprawdz numery dodatkowe: maksymalnie 20 pelnych oznaczen.");
@@ -69,7 +70,7 @@ export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, c
     const externalId = `tymo:${seller}:${offerId}`;
     const duplicates = ovokoPageData(await remote(`/v2/get/parts?external_ids=${encodeURIComponent(externalId)}&page=1&limit=1`), { page: 1, limit: 1 }, "part-external");
     if (duplicates.data.length || duplicates.pagination.total !== 0) throw new OvokoError(409, "Ovoko ma juz czesc z tym powiazaniem albo nie potwierdzilo pustego wyniku. Niczego nie nadpisujemy.");
-    const form = new URLSearchParams({ category_id: categoryId, car_id: donorId, quality: qualityId, status: statusId, manufacturer_code: code, price, original_currency: currency, notes: input.notes, external_id: externalId, photo: source.images[0] });
+    const form = new URLSearchParams({ category_id: categoryId, car_id: donorId, quality: qualityId, status: statusId, ...(code ? { manufacturer_code: code } : {}), price, original_currency: currency, notes: input.notes, external_id: externalId, photo: source.images[0] });
     source.images.forEach((url, index) => form.append(`photos[${index}]`, url));
     optionalCodes.forEach((value, index) => form.append(`optional_codes[${index}]`, value));
     const latestResponse = await handleAllegroApi(new Request(sourceRequest.url, { headers: sourceRequest.headers }), env);
@@ -94,7 +95,7 @@ export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, c
       return { ok: true, partId, alreadyCreated: false, visibilityConfirmed: false };
     } catch {
       try { await db(`?${selector}&owner_id=eq.${context.user.id}&state=eq.sending`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ state: "uncertain", updated_at: new Date().toISOString() }) }); } catch { /* The sending lock still prevents another write. */ }
-      throw new OvokoError(409, "Wynik wysylki jest niepewny. Czesc mogla powstac w Ovoko. Nie ponawiaj: sprawdz konto Ovoko po numerze czesci. Blokada duplikatu pozostaje aktywna.");
+      throw new OvokoError(409, `Wynik wysylki jest niepewny. Czesc mogla powstac w Ovoko. Nie ponawiaj: sprawdz konto Ovoko po ID aukcji Allegro ${offerId} lub ID zewnetrznym ${externalId}. Blokada duplikatu pozostaje aktywna.`);
     }
   } catch (error) {
     if (error instanceof OvokoError) throw error;

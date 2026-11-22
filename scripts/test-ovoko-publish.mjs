@@ -25,10 +25,11 @@ const payload = () => ({ offerId: "101", brandId: "1", modelId: "11", donorId: "
 const req = (body = payload(), headers = {}) => new Request("https://publish.test/api/ovoko/publish", { method: "POST", headers: { Authorization: "Bearer fixture", Origin: "https://publish.test", "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
 function reset() {
   fitmentMode = "none";
+  expectedCode = "0281010038";
   user++; admin = true; suspended = false; owns = true; stock = 1; bundle = false; mode = "ok"; donorModel = "11"; duplicate = false; failDb = ""; sourceReads = 0; lateStock = false; writes = 0; categoryName = "Pompy"; revokeAfterRead = false; imageMode = "normal"; extraCodes = ""; bulk = false; expectedPrice = "100.00"; credentialReads = 0; rotateAt = Infinity; records.clear(); calls.length = 0;
 }
 const originalFetch = globalThis.fetch;
-let vehicleParams = [], preparedVehicle, generationTest = false, fitmentMode = "none";
+let vehicleParams = [], preparedVehicle, generationTest = false, fitmentMode = "none", expectedCode = "0281010038";
 globalThis.fetch = async (input, options = {}) => {
   const url = new URL(input), method = options.method || "GET";
   calls.push({ url: url.href, method });
@@ -91,7 +92,7 @@ globalThis.fetch = async (input, options = {}) => {
   assert.equal(url.pathname, "/crm/importPart", "No arbitrary mutation, update, delete, status change, donor or warehouse operations");
   assert.equal(records.size, 1); assert.equal([...records.values()][0].state, "sending", "Durable reservation precedes every mutation");
   writes++;
-  assert.equal(form.get("manufacturer_code"), "0281010038"); assert.equal(form.get("car_id"), "13"); assert.equal(form.get("quality"), "0"); assert.equal(form.get("status"), "0");
+  assert.equal(form.get("manufacturer_code"), expectedCode || null); assert.equal(form.get("car_id"), "13"); assert.equal(form.get("quality"), "0"); assert.equal(form.get("status"), "0");
   assert.equal(form.get("photo"), form.get("photos[0]")); assert.equal(form.get("original_currency"), "PLN"); assert.equal(form.get("price"), expectedPrice);
   assert.deepEqual([...form.entries()].filter(([name]) => /^photos\[\d+\]$/.test(name)).map(([, url]) => url), snapshot.images, "Transfer the complete gallery in source order, not just the thumbnail");
   assert.equal(form.get("notes"), "Opis & uwagi + numer"); assert.equal(form.get("place"), null); assert.equal(form.get("storage_id"), null);
@@ -218,5 +219,29 @@ try {
   reset(); bulk = true; snapshot.title = originalTitle;
   const ignoredFallback = { ...await bulkPlan({ mode: "none", value: "0" }), fallbackVehicle: { brandId: "2", modelId: "22" } };
   assert.equal((await bulkSend(ignoredFallback)).status, 200); assert.equal(preparedVehicle.usedFallback, false); assert.equal(preparedVehicle.brand, "Audi");
+  for (const manufacturerCode of [undefined, ""]) {
+    reset(); expectedCode = "";
+    const item = { ...payload(), manufacturerCode };
+    const result = await handleOvokoApi(req(item), env); assert.equal(result.status, 200, await result.clone().text()); assert.equal(writes, 1);
+    const replay = await handleOvokoApi(req(item), env); assert.equal(replay.status, 200); assert.equal((await replay.json()).alreadyCreated, true); assert.equal(writes, 1, "No-code parts keep the same source-offer duplicate lock");
+  }
+  for (const manufacturerCode of [null, "brak", "N/A", " ", "123", "<script>"]) {
+    reset(); const result = await handleOvokoApi(req({ ...payload(), manufacturerCode }), env); assert.equal(result.status, 400); assert.equal(writes, 0, "Optional means absent, not accepting malformed or invented values");
+  }
+  for (const title of ["DRZWI LEWE AUDI A4", "ZDERZAK PRZEDNI AUDI A4"]) {
+    reset(); bulk = true; expectedCode = ""; snapshot.title = title; categoryName = title.startsWith("DRZWI") ? "Drzwi" : "Zderzak przedni";
+    const item = await bulkPlan({ mode: "none", value: "0" }), result = await bulkSend(item);
+    assert.equal(result.status, 200, await result.clone().text()); assert.equal(writes, 1);
+    assert.ok(!calls.some(call => call.url.includes("/sale/products?")), "No MPN lookup for an unknown number");
+    assert.equal((await bulkSend(item)).status, 200); assert.equal(writes, 1);
+  }
+  reset(); bulk = true; expectedCode = ""; snapshot.title = "DRZWI AUDI"; categoryName = "Drzwi"; fitmentMode = "own";
+  const noCodeFitment = await bulkPlan({ mode: "none", value: "0" });
+  assert.equal((await bulkSend(noCodeFitment)).status, 200); assert.equal(writes, 1, "An owned compatibility list can select the model even without an OE number");
+  assert.ok(!calls.some(call => call.url.includes("/sale/products?")));
+  reset(); bulk = true; expectedCode = ""; snapshot.title = "DRZWI AUDI"; categoryName = "Drzwi";
+  const missingCar = await bulkPlan({ mode: "none", value: "0" }); const blocked = await bulkSend(missingCar);
+  assert.equal(blocked.status, 400); assert.match(await blocked.text(), /brakuje dopasowanego modelu/); assert.equal(writes, 0);
+  snapshot.title = originalTitle;
   console.log("Ovoko single + bulk publication: guards, source/target binding, prices, multi-make model lookup, constrained fallback and generation/brand conflicts, car reuse, full photos, durable duplicate locks and uncertain no-retry passed. All services mocked; nothing published live.");
 } finally { globalThis.fetch = originalFetch; }

@@ -129,7 +129,7 @@ export async function readOvokoFitment(offer: Record<string, any>, number: strin
   if (!rows.length) append(await remote(`/sale/compatibility-list-suggestions?offer.id=${encodeURIComponent(offer.id)}&language=pl-PL`), "suggestion");
   // Read only exact, complete manufacturer codes; never accept a shortened index or a title in MPN.
   const compact = (value: string) => value.toUpperCase().replace(/[ .-]/g, "");
-  if (!rows.length) {
+  if (!rows.length && number) {
     const search = await remote(`/sale/products?phrase=${encodeURIComponent(number)}&mode=MPN&language=pl-PL`);
     if (!Array.isArray(search.products) || search.products.length > 30) throw new ApiError(502, "Nieprawidlowy wynik katalogu MPN.");
     const products = search.products.filter((row: any) => typeof row?.id === "string" && /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(row.id)).slice(0, 2);
@@ -354,7 +354,7 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
     if (request.method === "GET") {
       if (path.startsWith("/ovoko-fitment/")) {
         const id = path.slice("/ovoko-fitment/".length), number = url.searchParams.get("number") || "";
-        if (!/^\d{1,30}$/.test(id) || !/^[A-Z0-9]{6,32}$/.test(number) || !/\d/.test(number) || [...url.searchParams.keys()].some(key => key !== "number") || url.searchParams.getAll("number").length !== 1) throw new ApiError(400, "Nieprawidlowy numer oferty lub pelny numer czesci.");
+        if (!/^\d{1,30}$/.test(id) || (url.searchParams.has("number") && (!/^[A-Z0-9]{6,32}$/.test(number) || !/\d/.test(number))) || [...url.searchParams.keys()].some(key => key !== "number") || url.searchParams.getAll("number").length > 1) throw new ApiError(400, "Nieprawidlowy numer oferty lub pelny numer czesci.");
         const owned = await remote(`/sale/offers?offer.id=${id}&limit=1`, { signal: AbortSignal.timeout(10000) });
         if (!Array.isArray(owned.offers) || !owned.offers.some((row: any) => row.id === id)) throw new ApiError(404, "Oferta nie nalezy do polaczonego konta.");
         const offer = await remote(`/sale/product-offers/${id}`, { signal: AbortSignal.timeout(10000) });

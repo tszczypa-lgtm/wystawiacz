@@ -42,6 +42,7 @@ try {
       assert.equal(request.method(), "POST"); const body = request.postDataJSON();
       assert.equal(body.offerId, id); assert.equal(body.donorId, ({ "11": "13", "164": "301", "71": "371" })[body.modelId]); assert.equal(body.confirmSingle, true); assert.equal(body.donorConfirmed, undefined); assert.equal(body.shippingConfirmed, undefined); assert.equal(body.qualityId, "0"); assert.equal(body.statusId, "0");
       assert.equal(body.photos, undefined); assert.equal(body.username, undefined);
+      if (!numberParameter) assert.equal(body.manufacturerCode, "", "Unknown manufacturer number stays empty");
       return route.fulfill(publicationFailure ? { status: 409, json: { message: "Wynik wysylki jest niepewny. Sprawdz Ovoko." } } : { json: { ok: true, partId: "77", visibilityConfirmed: false } });
     }
     if (url.pathname === "/api/ovoko/create-car") {
@@ -80,10 +81,10 @@ try {
   await page.getByLabel("Marka auta Ovoko").locator('option[value="1"]').waitFor({ state: "attached" });
   assert.equal(calls.filter(call => call.method === "POST").length, 4, "Opening preparation automatically loads four fixed dictionaries");
   assert.equal(await page.getByRole("button", { name: /Pobierz|Odczytaj/ }).count(), 0);
-  assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "ABC123", "One complete number is inserted without an extra confirmation");
+  assert.equal(await page.getByLabel("Numer katalogowy - opcjonalny").inputValue(), "ABC123", "One complete number is inserted without an extra confirmation");
   await page.getByText("Podpowiedzi numeru (1)", { exact: true }).click();
   await page.getByRole("button", { name: "Uzyj numeru ABC123", exact: true }).click();
-  assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "ABC123");
+  assert.equal(await page.getByLabel("Numer katalogowy - opcjonalny").inputValue(), "ABC123");
   assert.equal(await page.getByLabel("Kategoria Ovoko", { exact: true }).inputValue(), "3");
   assert.equal(await page.getByLabel("Jakosc czesci Ovoko", { exact: true }).inputValue(), "0", "Used condition maps without a click, including ID zero");
   assert.equal(await page.getByLabel("Status rekordu Ovoko", { exact: true }).inputValue(), "0", "Active positive-stock offers map automatically to In stock");
@@ -111,17 +112,17 @@ try {
   await mount(); await page.getByText("Podpowiedzi numeru (2)", { exact: true }).click();
   await page.getByLabel("Marka auta Ovoko").locator('option[value="1"]').waitFor({ state: "attached" });
   await page.getByLabel("Model auta Ovoko").locator('option[value="10"]').waitFor({ state: "attached" });
-  assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "5Q0959593E");
+  assert.equal(await page.getByLabel("Numer katalogowy - opcjonalny").inputValue(), "5Q0959593E");
   assert.equal(await page.getByLabel("Dodatkowe numery czesci").inputValue(), "5Q0959593F");
   assert.equal(await page.getByRole("button", { name: "Uzyj numeru 5Q0959593", exact: true }).count(), 0, "Never offer a truncated indexed title number");
   assert.equal(await page.getByLabel("Propozycje numerow").locator("li").count(), 2, "A title pasted in MPN is not an extra number candidate");
   const beforeSuggestions = calls.length;
   await page.getByRole("button", { name: "Uzyj numeru 5Q0959593E", exact: true }).click();
-  assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "5Q0959593E");
-  await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").fill("5Q0959593");
+  assert.equal(await page.getByLabel("Numer katalogowy - opcjonalny").inputValue(), "5Q0959593E");
+  await page.getByLabel("Numer katalogowy - opcjonalny").fill("5Q0959593");
   await page.getByText("Propozycja numeru wymaga sprawdzenia.", { exact: true }).waitFor();
   await page.getByRole("button", { name: "Uzyj numeru 5Q0959593F", exact: true }).click();
-  assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "5Q0959593F"); assert.equal(calls.length, beforeSuggestions, "Number inference and confirmation stay local");
+  assert.equal(await page.getByLabel("Numer katalogowy - opcjonalny").inputValue(), "5Q0959593F"); assert.equal(calls.length, beforeSuggestions, "Number inference and confirmation stay local");
   await page.getByText("Podpowiedzi kategorii (1)", { exact: true }).click();
   await page.getByRole("button", { name: "Uzyj kategorii 3", exact: true }).waitFor();
   assert.equal(await page.getByLabel("Kategoria Ovoko", { exact: true }).inputValue(), "3", "Unique category suggestion fills the draft only");
@@ -141,7 +142,7 @@ try {
   offerTitle = "AUDI A4 B9 POMPA ABS 5Q0959593E"; numberParameter = offerTitle;
   await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="11"]').waitFor({ state: "attached" });
   assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "11");
-  assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "5Q0959593E");
+  assert.equal(await page.getByLabel("Numer katalogowy - opcjonalny").inputValue(), "5Q0959593E");
   assert.doesNotMatch(await page.getByLabel("Braki przygotowania").textContent(), /Numer czesci wymaga recznego zatwierdzenia|Wybierz jakosc|Wybierz status/, "Certain automatic fields do not require individual confirmations");
   assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "", "Model IDs never become donor IDs");
   mkdirSync(new URL("../outputs/ovoko-preparation-preview/", import.meta.url), { recursive: true });
@@ -201,7 +202,7 @@ try {
   await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="71"]').waitFor({ state: "attached" });
   assert.equal(await page.getByLabel("Marka auta Ovoko").inputValue(), "7");
   assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "71");
-  assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "259903137R");
+  assert.equal(await page.getByLabel("Numer katalogowy - opcjonalny").inputValue(), "259903137R");
   publicationFailure = false;
   assert.equal(await page.getByLabel("Kategoria Ovoko", { exact: true }).inputValue(), "81", "First tied category is automatic, without a manual selection");
   await page.getByRole("alert").filter({ hasText: "cars.pagination" }).waitFor();
@@ -217,7 +218,7 @@ try {
   await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="30"]').waitFor({ state: "attached" });
   assert.equal(await page.getByLabel("Marka auta Ovoko").inputValue(), "3", "Reported Land Rover title selects the full make without a click");
   assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "30");
-  assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "JPLA14D617BA");
+  assert.equal(await page.getByLabel("Numer katalogowy - opcjonalny").inputValue(), "JPLA14D617BA");
   await page.getByLabel("Kategoria Ovoko", { exact: true }).selectOption("");
   const beforeBlocked = calls.filter(call => ["/api/ovoko/create-car", "/api/ovoko/publish"].includes(call.path)).length;
   await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).click();
@@ -231,7 +232,7 @@ try {
   assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "42", "Several recognized models still produce a reproducible best draft choice");
   assert.equal(await page.getByLabel("Model auta Ovoko").locator('optgroup[label="Pasujace slowa z tytulu"] option').count(), 4);
   await page.getByRole("status").filter({ hasText: "Rozpoznano pasujace warianty: 4" }).waitFor();
-  assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "EM2T14F014AA");
+  assert.equal(await page.getByLabel("Numer katalogowy - opcjonalny").inputValue(), "EM2T14F014AA");
   await page.getByLabel("Model auta Ovoko").selectOption("42");
   assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "42", "A found model remains available for explicit selection");
   await page.getByText(/Brak zapisanego auta dla tego modelu/).waitFor();
@@ -253,7 +254,7 @@ try {
   offerTitle = "MERCEDES-BENZ ML W164 STEROWNIK SAM TYŁ A1645457716 A1649020300 A1649004200"; numberParameter = offerTitle; savedCars = [];
   await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="164"]').waitFor({ state: "attached" });
   assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "164");
-  assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "A1645457716");
+  assert.equal(await page.getByLabel("Numer katalogowy - opcjonalny").inputValue(), "A1645457716");
   assert.equal(await page.getByLabel("Dodatkowe numery czesci").inputValue(), "A1649020300\nA1649004200");
   await page.getByText(/Brak zapisanego auta dla tego modelu/).waitFor();
   const beforeManualCar = calls.filter(call => call.path === "/api/ovoko/create-car").length;
@@ -282,6 +283,15 @@ try {
   assert.equal(calls.filter(call => call.path === "/api/ovoko/create-car").length, beforeAutomatic + 1, "One click flow uses inferred year, no manual year confirmation, no duplicate on double click");
   assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "301");
   await page.screenshot({ path: fileURLToPath(new URL("../outputs/ovoko-preparation-preview/mercedes-automatic-car-mobile.png", import.meta.url)), fullPage: true });
+  offerTitle = "MERCEDES-BENZ ML W164 STEROWNIK SAM TYL"; numberParameter = "";
+  const beforeNoNumber = calls.filter(call => call.path === "/api/ovoko/publish").length;
+  await mount(); await page.getByLabel("Moje samochody Ovoko").locator('option[value="301"]').waitFor({ state: "attached" });
+  assert.equal(await page.getByLabel("Numer katalogowy - opcjonalny").inputValue(), "");
+  await page.getByText("Bez numeru czesci - dozwolone w Ovoko. Numer nie zostanie wyslany.", { exact: true }).waitFor({ state: "attached" });
+  await page.getByLabel("Kategoria Ovoko", { exact: true }).selectOption("3");
+  await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).click();
+  await page.getByRole("status").filter({ hasText: "utworzenie czesci ID 77" }).waitFor();
+  assert.equal(calls.filter(call => call.path === "/api/ovoko/publish").length, beforeNoNumber + 1, "A part with known vehicle and category publishes without a manufacturer number");
   carCreationFailure = true;
   await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="163"]').waitFor({ state: "attached" });
   await page.getByLabel("Model auta Ovoko").selectOption("163");

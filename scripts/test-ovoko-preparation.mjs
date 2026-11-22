@@ -32,6 +32,8 @@ const safePreview = ovokoSourcePreview({ ...offer, images: ["https://a.allegroim
 const ready = { ...filled, manufacturerCode: "5Q0959593E" };
 assert.deepEqual(safePreview.images, ["https://a.allegroimg.com/picture", "https://a.allegroimg.com/second.jpg"]);
 assert.deepEqual(ovokoPublicationBlockers(safePreview, ready, "1", "2"), [], "Duplicate photos do not block a complete unique gallery");
+assert.deepEqual(ovokoPublicationBlockers(safePreview, { ...ready, manufacturerCode: "" }, "1", "2"), [], "Ovoko accepts an unknown part number as absent");
+assert.ok(ovokoPublicationBlockers(safePreview, { ...ready, manufacturerCode: "brak" }, "1", "2").some(issue => issue.includes("Podany numer")), "An optional number must still be valid if supplied");
 assert.ok(ovokoPublicationBlockers(preview, ready, "1", "2").some(issue => issue.includes("nieobslugiwanym")));
 assert.ok(ovokoPublicationBlockers(safePreview, { ...ready, donorId: "" }, "1", "2").some(issue => issue.includes("Moje samochody")));
 assert.ok(ovokoPublicationBlockers({ ...safePreview, stock: 5 }, ready, "1", "2").some(issue => issue.includes("Allegro: 5")));

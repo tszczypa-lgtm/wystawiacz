@@ -93,8 +93,8 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
     else if (nextModels.some(row => ovokoModelHasConflict(vehicleText, row))) generationConflict = true;
   }
   let fitmentOrigin = "";
-  if ((!modelId || !draft.categoryId) && draft.manufacturerCode) {
-    const fitment = await allegro(`/ovoko-fitment/${source.id}?number=${encodeURIComponent(draft.manufacturerCode)}`);
+  if (!modelId || !draft.categoryId) {
+    const fitment = await allegro(`/ovoko-fitment/${source.id}${draft.manufacturerCode ? `?number=${encodeURIComponent(draft.manufacturerCode)}` : ""}`);
     if (fitment.offerId !== source.id || fitment.number !== draft.manufacturerCode || !Array.isArray(fitment.rows) || fitment.rows.length > 200 || fitment.rows.some((row: any) => typeof row?.text !== "string" || row.text.length > 2000 || !["offer", "suggestion", "catalog", "catalog-suggestion"].includes(row.origin)) || !Array.isArray(fitment.names) || fitment.names.some((name: unknown) => typeof name !== "string" || name.length > 500)) throw new OvokoError(502, "Niepotwierdzone dane automatycznego dopasowania.");
     if (!modelId) {
       const matched = await matchOvokoFitment(fitment.rows as FitmentRow[], dictionaries.brands, allowedBrands.map(row => row.id), vehicleText, loadModels);
@@ -115,7 +115,7 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
   const model = models.find(row => row.id === modelId);
   const year = ovokoCarYear(source, model).year;
   const blockers = ovokoPublicationBlockers(source, draft, brandId, modelId);
-  if (!model || !year) blockers.push(`Automat nie znalazl modelu Ovoko w danych oferty ani w Pasuje do/katalogu dla pelnego numeru ${draft.manufacturerCode || "(brak numeru)"}. Nie wybrano przypadkowego auta.`);
+  if (!model || !year) blockers.push(draft.manufacturerCode ? `Automat nie znalazl modelu Ovoko w danych oferty ani w Pasuje do/katalogu dla pelnego numeru ${draft.manufacturerCode}. Nie wybrano przypadkowego auta.` : "Ta czesc moze byc wystawiona bez numeru, ale brakuje dopasowanego modelu auta w danych oferty i Pasuje do. Nie utworzono przypadkowego auta.");
   const category = dictionaries.categories.find(row => row.id === draft.categoryId);
   const categoryNames: string[] = []; let current = category;
   for (let i = 0; current && i < 4; i++) { categoryNames.push(current.name); current = dictionaries.categories.find(row => row.id === current!.parentId); }
