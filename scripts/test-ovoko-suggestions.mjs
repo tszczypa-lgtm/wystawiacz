@@ -67,6 +67,15 @@ assert.equal(automaticOvokoBrand("AUDI A4 AC", [], expandedBrands), "1", "An inc
 assert.equal(automaticOvokoBrand("AUDI VW", [], expandedBrands), "");
 assert.equal(automaticOvokoBrand("AUDI VW", [{ name: "Marka pojazdu", values: ["Audi"] }], expandedBrands), "1");
 assert.equal(automaticOvokoBrand("AUDI", [{ name: "Producent", values: ["Bosch"] }], expandedBrands), "1", "Generic parts manufacturers are not vehicle brands");
+const kangooTitle = "MODUL STEROWNIK PARKOWANIA PDC KANGOO III 259903137R";
+const renaultBrands = [...expandedBrands, { id: "7", name: "Renault" }];
+assert.equal(automaticOvokoBrand(kangooTitle, [], renaultBrands), "7", "Distinctive Kangoo model infers Renault without make in title");
+assert.equal(automaticOvokoBrand("MODUL 259903137R", [{ name: "Producent", values: ["Renault"] }], renaultBrands), "7");
+assert.equal(automaticOvokoBrand("MODUL", [{ name: "Producent czesci", values: ["Bosch"] }], renaultBrands), "");
+assert.equal(automaticOvokoBrand(kangooTitle, [{ name: "Producent", values: ["Audi"] }], renaultBrands), "", "Conflicting model/producer is not silently guessed");
+assert.equal(automaticOvokoBrand("KANGOOL 259903137R", [], renaultBrands), "", "Model matching uses token boundaries");
+assert.equal(automaticOvokoBrand("MODUL", [{ name: "Model pojazdu", values: ["Kangoo III"] }], renaultBrands), "7");
+assert.equal(automaticOvokoModel(kangooTitle, [{ id: "70", name: "Kangoo II" }, { id: "71", name: "Kangoo III" }]), "71");
 assert.equal(ovokoAutomaticFields({ title: landRoverTitle, parameters: [], condition: "", status: "ACTIVE", stock: 1, bundle: false }, {}).manufacturerCode, "JPLA14D617BA");
 assert.equal(vehicleSuggestionText("Pompa", [{ name: "Producent", values: ["Bosch"] }, { name: "Marka pojazdu", values: ["Audi"] }]), "Pompa Audi");
 const models = [{ id: "10", name: "A4, S4 (B8)", years: "2008 - 2015" }, { id: "11", name: "A4, S4 (B9)", years: "2015 - " }];

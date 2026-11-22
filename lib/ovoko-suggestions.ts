@@ -103,7 +103,15 @@ export function automaticOvokoBrand(title: string, parameters: { name: string; v
   const matches = suggestOvokoBrands(title, brands);
   const specific = matches.filter(row => fold(row.name).trim() !== "ac");
   const candidates = specific.length ? specific : matches;
-  return candidates.length === 1 ? candidates[0].id : "";
+  if (candidates.length) return candidates.length === 1 ? candidates[0].id : "";
+  const producerLabels = new Set(["producent", "marka", "producent czesci", "marka czesci"]);
+  const producers = suggestOvokoBrands(parameters.filter(row => producerLabels.has(fold(row.name).trim())).flatMap(row => row.values).join(" "), brands);
+  // Only distinctive model names; shared names such as Master or Partner are intentionally excluded.
+  const modelMakes: Record<string, string[]> = { renault: ["kangoo", "clio", "megane", "scenic", "twingo", "captur", "kadjar", "talisman", "austral", "arkana"] };
+  const words = new Set(fold(vehicleSuggestionText(title, parameters)).match(/[a-z0-9]+/g) || []);
+  const inferred = brands.filter(row => (modelMakes[fold(row.name).trim()] || []).some(model => words.has(model)));
+  const combined = [...new Set([...producers, ...inferred].map(row => row.id))];
+  return combined.length === 1 ? combined[0] : "";
 }
 function vehicleTokens(value: string): string[] {
   return fold(value).replace(/\b(?:(?:ml|m)[-\s]*(?:class|klasse|klasa)|(?:class|klasse|klasa)[-\s]*m|ml)\b/g, "mclass").replace(/\b([sc])[\s\-\u2010-\u2014]+max\b/g, "$1max").replace(/\b(mk|mark|gen)\s+([1-9]\d?|[ivx]+)\b/g, "$1$2").replace(/\b([a-z0-9]+)[-\u2010-\u2014]([a-z0-9]+)\b/g, "$1$2").match(/[a-z0-9]+/g) || [];

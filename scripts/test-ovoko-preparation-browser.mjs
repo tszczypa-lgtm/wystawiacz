@@ -54,7 +54,7 @@ try {
     }
     assert.ok(["/api/ovoko/read", "/api/ovoko/test"].includes(url.pathname), "Only dictionary reads, no publication or local save endpoints"); assert.equal(request.method(), "POST");
     const payload = request.postDataJSON(); assert.equal(payload.useSaved, true);
-    if (url.pathname === "/api/ovoko/test") { assert.deepEqual(payload, { useSaved: true }); return route.fulfill({ json: { ok: true, readOnly: true, brands: [{ id: "1", name: "Audi" }, { id: "2", name: "Volkswagen" }, { id: "3", name: "Land Rover" }, { id: "4", name: "Rover" }, { id: "5", name: "Ford" }, { id: "6", name: "Mercedes-Benz" }] } }); }
+    if (url.pathname === "/api/ovoko/test") { assert.deepEqual(payload, { useSaved: true }); return route.fulfill({ json: { ok: true, readOnly: true, brands: [{ id: "1", name: "Audi" }, { id: "2", name: "Volkswagen" }, { id: "3", name: "Land Rover" }, { id: "4", name: "Rover" }, { id: "5", name: "Ford" }, { id: "6", name: "Mercedes-Benz" }, { id: "7", name: "Renault" }] } }); }
     assert.deepEqual(Object.keys(payload).sort(), payload.operation === "models" ? ["brandId", "operation", "useSaved"] : payload.operation === "cars" ? ["modelId", "operation", "useSaved"] : ["operation", "useSaved"]);
     assert.ok(["categories", "qualities", "statuses", "models", "cars"].includes(payload.operation));
     if (payload.operation === "cars") {
@@ -62,6 +62,7 @@ try {
       return route.fulfill({ json: { ok: true, readOnly: true, operation: "cars", rows, pagination: { page: 1, limit: 20, total: rows.length } } });
     }
     if (payload.operation === "models") {
+      if (payload.brandId === "7") return route.fulfill({ json: { ok: true, readOnly: true, operation: "models", rows: [{ id: "70", name: "Kangoo II", years: "2008 - 2021" }, { id: "71", name: "Kangoo III", years: "2021 - " }] } });
       if (holdAudi && payload.brandId === "1") { audiStarted?.(); await new Promise(resolve => { releaseAudi = resolve; }); }
       return route.fulfill({ json: { ok: true, readOnly: true, operation: "models", rows: payload.brandId === "1" ? [{ id: "10", name: "A4 (B8)", years: "2008 - 2015" }, { id: "11", name: "A4 (B9)", years: "2015 - " }] : payload.brandId === "3" ? [{ id: "30", name: "Range Rover Sport (L494)", years: "2013 - 2022" }, { id: "31", name: "Range Rover Sport (L320)", years: "2005 - 2013" }] : payload.brandId === "5" ? [{ id: "41", name: "Edge (U387)" }, { id: "42", name: "S-Max II" }, { id: "43", name: "S Max I" }, { id: "44", name: "Kuga I" }] : payload.brandId === "6" ? [{ id: "164", name: "M-Class (W164)", years: "2005 - 2011" }, { id: "163", name: "M-Class (W163)", years: "1997 - 2005" }] : [{ id: "20", name: "Golf VII", years: "2012 - 2020" }] } });
     }
@@ -196,6 +197,11 @@ try {
   await page.getByLabel("Sprawdzilem zasady i koszt wysylki w Ovoko. Cennik Allegro nie zostanie przeniesiony.").check();
   await send.click(); await page.getByRole("alert").filter({ hasText: "Wynik wysylki jest niepewny" }).waitFor();
   assert.equal(await send.isDisabled(), true, "Uncertain responses cannot be retried automatically");
+  offerTitle = "MODUL STEROWNIK PARKOWANIA PDC KANGOO III 259903137R"; numberParameter = offerTitle;
+  await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="71"]').waitFor({ state: "attached" });
+  assert.equal(await page.getByLabel("Marka auta Ovoko").inputValue(), "7");
+  assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "71");
+  assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "259903137R");
   offerTitle = "MODUŁ STEROWNIK DRZWI LAND ROVER RANGE ROVER SPORT L494 JPLA-14D617-BA"; numberParameter = offerTitle;
   await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="30"]').waitFor({ state: "attached" });
   assert.equal(await page.getByLabel("Marka auta Ovoko").inputValue(), "3", "Reported Land Rover title selects the full make without a click");

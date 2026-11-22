@@ -19,6 +19,8 @@ Przed importCar ponownie odczytujemy auta danego modelu na koncie, takze dodane 
 
 Tytul moze wymieniac kilka kompatybilnych modeli (Ford Edge / S-Max MK2 / Kuga). Wypelniamy najlepsza robocza propozycje, zamiast zostawiac pole puste. Remisy rozstrzyga kolejnosc wzmianki w tytule i staly porzadek, nie losowanie. Nadal odrzucamy jawnie niezgodny kod nadwozia/generacje; dokladny kod W164 ma pierwszenstwo. Obslugujemy ML/M-Class/Klasa M, S-MAX/SMAX/S MAX i MK2/MKII/II. To wybor roboczy do sprawdzenia, nie dowod pochodzenia konkretnego egzemplarza.
 
+Marka: poza jawna marka pojazdu i tytulem sprawdzamy parametr Producent/Marka/Producent czesci, ale tylko gdy jego wartosc pasuje do marki ze slownika Ovoko (Bosch nie staje sie marka auta). Rozpoznajemy tez charakterystyczne modele Renault, np. Kangoo III bez slowa Renault. Nie dopasowujemy fragmentow slow ani ogolnych nazw jak Master; sprzeczne marki pozostaja do sprawdzenia. Kangoo III 259903137R ma regresje jednostkowa i przegladarkowa: Renault oraz generacja III wypelniaja sie bez klikania.
+
 Pierwszy znaleziony numer (z wyjatkiem mozliwego VIN o dlugosci 17) wypelnia manufacturer_code, pozostale pole Dodatkowe numery czesci. API wysyla kazdy numer oddzielnie jako optional_codes[n]. Deduplikujemy, usuwamy powtorzenie numeru glownego, zachowujemy pelne indeksy i poczatkowe zera. Maksymalnie 20 dodatkowych oznaczen; przekroczenie limitu blokuje wysylke zamiast cicho obcinac liste.
 
 ## Zakres i zabezpieczenia
