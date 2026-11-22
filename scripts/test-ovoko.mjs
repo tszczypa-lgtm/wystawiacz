@@ -95,7 +95,7 @@ try {
   for (const fixture of readCases) {
     user++; expectedPath = fixture.path; fixtureResult = fixture.result;
     const before = calls.length;
-    const response = await handleOvokoApi(req("/read", { body: { ...credentials, operation: fixture.operation, ...(fixture.brandId ? { brandId: fixture.brandId } : {}), url: "https://evil.test", page: 999, limit: 100 } }), env);
+    const response = await handleOvokoApi(req("/read", { body: { ...credentials, operation: fixture.operation, ...(fixture.brandId ? { brandId: fixture.brandId } : {}), ...(fixture.modelId ? { modelId: fixture.modelId } : {}), url: "https://evil.test", page: 999, limit: 100 } }), env);
     assert.equal(response.status, 200, fixture.operation);
     const body = await response.json();
     assert.deepEqual(body.rows, fixture.rows); assert.equal(body.operation, fixture.operation);
@@ -120,7 +120,18 @@ try {
   for (let i = 0; i < 3; i++) assert.equal((await handleOvokoApi(req("/read", { body: { ...credentials, operation: "parts" } }), env)).status, 200);
   assert.equal((await handleOvokoApi(req("/read", { body: { ...credentials, operation: "parts" } }), env)).status, 429, "Inventory still allows only three reads per minute");
   admin = false; assert.equal((await handleOvokoApi(req("/read"), env)).status, 403); admin = true;
+  for (const modelId of ["", "0", "../crm/importCar", 9]) {
+    user++; const before = calls.length;
+    assert.equal((await handleOvokoApi(req("/read", { body: { ...credentials, operation: "cars", modelId } }), env)).status, 400);
+    assert.equal(calls.length, before, "Invalid vehicle filters never reach Ovoko");
+  }
+  user++; const carsFixture = readCases.find(item => item.operation === "cars");
+  expectedPath = carsFixture.path; fixtureResult = carsFixture.result;
+  for (let i = 0; i < 6; i++) assert.equal((await handleOvokoApi(req("/read", { body: { ...credentials, operation: "cars", modelId: "9" } }), env)).status, 200);
+  assert.equal((await handleOvokoApi(req("/read", { body: { ...credentials, operation: "cars", modelId: "9" } }), env)).status, 429, "Vehicle picker has its own bounded read budget");
   const { parseOvokoRead } = load(path.join(root, "lib/ovoko-read.ts"));
+  assert.deepEqual(parseOvokoRead("cars", { data: [], pagination: { page: 1, limit: 20, total_count: 0 } }, "9"), { rows: [], pagination: { page: 1, limit: 20, total: 0 } });
+  assert.throws(() => parseOvokoRead("cars", { data: [{ id: "36", car_model: "10", car_years: "2013" }], pagination: { page: 1, limit: 20, total_count: 1 } }, "9"), /Nieprawidlowy/, "Cars from another model are never offered as a selection");
   assert.deepEqual(parseOvokoRead("parts", { data: [], pagination: { page: 1, limit: 20, total_count: 0 } }), { rows: [], pagination: { page: 1, limit: 20, total: 0 } });
   for (const [operation, result] of [
     ["statuses", { list: [] }], ["statuses", { list: { unknown: { en: "Bad" } } }],

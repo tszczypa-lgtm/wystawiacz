@@ -30,7 +30,7 @@ async function boundedJson(response: Response) {
 }
 export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, context: Context, input: Record<string, unknown>) {
   if (env.OVOKO_PUBLISH_ENABLED !== "true") throw new OvokoError(503, "Publikacja pojedyncza jest wylaczona. Wykonaj migracje 012 i ustaw OVOKO_PUBLISH_ENABLED=true w Cloudflare.");
-  if (input.confirmSingle !== true || input.shippingConfirmed !== true || input.donorConfirmed !== true) throw new OvokoError(400, "Potwierdz pojedyncza wysylke, prawdziwego dawce i ustawienia wysylki Ovoko.");
+  if (input.confirmSingle !== true || input.shippingConfirmed !== true || input.donorConfirmed !== true) throw new OvokoError(400, "Potwierdz pojedyncza wysylke, przypisanie rekordu auta i ustawienia wysylki Ovoko.");
   if (Object.keys(input).some(key => !["offerId", "brandId", "modelId", "donorId", "categoryId", "qualityId", "statusId", "manufacturerCode", "price", "currency", "notes", "confirmSingle", "shippingConfirmed", "donorConfirmed", "expectedSource"].includes(key))) throw new OvokoError(400, "Nieobslugiwane pole publikacji.");
   const offerId = text(input, "offerId", /^\d{1,30}$/), donorId = text(input, "donorId", /^[1-9]\d{0,11}$/);
   const brandId = text(input, "brandId", /^[1-9]\d{0,11}$/), modelId = text(input, "modelId", /^[1-9]\d{0,11}$/);
@@ -82,7 +82,7 @@ export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, c
     const models = parseOvokoRead("models", await remote(`/get/car_models/${brandId}`), brandId).rows;
     if (!models.some(row => row.id === modelId)) throw new OvokoError(400, "Model nie nalezy do wybranej marki Ovoko.");
     const cars = await remote(`/v2/get/cars?car_ids=${donorId}&page=1&limit=1`);
-    if (!Array.isArray(cars.data) || cars.data.length !== 1 || String(cars.data[0]?.id) !== donorId || String(cars.data[0]?.car_model) !== modelId) throw new OvokoError(400, "Nie potwierdzono prawdziwego dawcy na koncie Ovoko lub jego model sie nie zgadza. ID modelu nie jest ID dawcy.");
+    if (!Array.isArray(cars.data) || cars.data.length !== 1 || String(cars.data[0]?.id) !== donorId || String(cars.data[0]?.car_model) !== modelId) throw new OvokoError(400, "Nie potwierdzono rekordu auta na koncie Ovoko lub jego model sie nie zgadza. ID modelu nie jest car_id rekordu auta.");
     const externalId = `tymo:${seller}:${offerId}`;
     const duplicates = await remote(`/v2/get/parts?external_ids=${encodeURIComponent(externalId)}&page=1&limit=1`);
     if (!Array.isArray(duplicates.data) || duplicates.data.length || duplicates.pagination?.total_count !== 0) throw new OvokoError(409, "Ovoko ma juz czesc z tym powiazaniem albo nie potwierdzilo pustego wyniku. Niczego nie nadpisujemy.");

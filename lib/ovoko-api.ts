@@ -69,9 +69,10 @@ export async function handleOvokoApi(request: Request, env: OvokoEnv): Promise<R
     const form = new URLSearchParams(credentials);
     // Dictionary reads have a separate bounded budget for automatic form initialization.
     // Inventory, connection probes and credentials verification retain their original limit.
-    const dictionary = plan && plan.operation !== "parts";
-    const attemptKey = `${context.user.id}:${dictionary ? "dictionary" : "probe"}`;
-    const limit = dictionary ? 12 : 3;
+    const dictionary = plan && plan.operation !== "parts" && plan.operation !== "cars";
+    const cars = plan?.operation === "cars";
+    const attemptKey = `${context.user.id}:${dictionary ? "dictionary" : cars ? "cars" : "probe"}`;
+    const limit = dictionary ? 12 : cars ? 6 : 3;
     const now = Date.now(), recent = (attempts.get(attemptKey) || []).filter(time => now - time < 60000);
     if (recent.length >= limit) return reply({ message: `Maksymalnie ${limit} odczytow na minute. Odczekaj chwile.` }, 429);
     if (attempts.size >= 1000 && !attempts.has(attemptKey)) attempts.delete(attempts.keys().next().value!);
@@ -91,7 +92,7 @@ export async function handleOvokoApi(request: Request, env: OvokoEnv): Promise<R
       return reply({ message: `${errors[code] || "Ovoko nie potwierdzilo poprawnego odczytu."} Kod: ${code}. Nie zmieniono ofert.`, code }, code === "R008" ? 429 : 502);
     }
     const checkedAt = new Date().toISOString();
-    if (plan) return reply({ ok: true, code: "R200", readOnly: true, credentialsStored: useSaved, checkedAt, operation: plan.operation, ...parseOvokoRead(plan.operation, result, values.brandId) });
+    if (plan) return reply({ ok: true, code: "R200", readOnly: true, credentialsStored: useSaved, checkedAt, operation: plan.operation, ...parseOvokoRead(plan.operation, result, plan.operation === "cars" ? values.modelId : values.brandId) });
     if (!Array.isArray(result.list) || !result.list.length || result.list.length > 5000 || result.list.some(item => !item || typeof item !== "object" || !/^\d{1,12}$/.test(String(item.id)) || typeof item.name !== "string" || !item.name.trim() || item.name.length > 200)) throw new OvokoError(502, "Niepelna lista marek z Ovoko. Nie potwierdzono poprawnego odczytu.");
     if (connecting) await saveOvokoConnection(context, key!, credentials, checkedAt);
     return reply({ ok: true, code: "R200", readOnly: true, credentialsStored: connecting || useSaved, connected: connecting || useSaved, checkedAt, brands: result.list.map(item => ({ id: String(item.id), name: item.name })) });

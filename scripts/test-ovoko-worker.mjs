@@ -66,7 +66,7 @@ try {
   for (const fixture of readCases) {
     user++; readCase = fixture; const before = probes;
     const response = await mf.dispatchFetch("https://ovoko.test/api/ovoko/read", {
-      method: "POST", headers: { Authorization: "Bearer fixture", Origin: "https://ovoko.test", "Content-Type": "application/json" }, body: JSON.stringify({ ...credentials, operation: fixture.operation, ...(fixture.brandId ? { brandId: fixture.brandId } : {}) }),
+      method: "POST", headers: { Authorization: "Bearer fixture", Origin: "https://ovoko.test", "Content-Type": "application/json" }, body: JSON.stringify({ ...credentials, operation: fixture.operation, ...(fixture.brandId ? { brandId: fixture.brandId } : {}), ...(fixture.modelId ? { modelId: fixture.modelId } : {}) }),
     });
     assert.equal(response.status, 200, fixture.operation);
     const result = await response.json(); assert.deepEqual(result.rows, fixture.rows);

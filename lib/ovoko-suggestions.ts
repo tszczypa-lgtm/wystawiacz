@@ -104,18 +104,42 @@ export function automaticOvokoBrand(title: string, parameters: { name: string; v
   const candidates = specific.length ? specific : matches;
   return candidates.length === 1 ? candidates[0].id : "";
 }
-export function suggestOvokoModels(title: string, models: OvokoReadRow[]) {
-  const tokens = new Set(fold(title).match(/[a-z0-9]+/g) || []);
+function vehicleTokens(value: string) {
+  return fold(value).replace(/\b([sc])[\s\-\u2010-\u2014]+max\b/g, "$1max").replace(/\b(mk|mark|gen)\s+([1-9]\d?|[ivx]+)\b/g, "$1$2").replace(/\b([a-z0-9]+)[-\u2010-\u2014]([a-z0-9]+)\b/g, "$1$2").match(/[a-z0-9]+/g) || [];
+}
+const romanGenerations: Record<string, string> = { i: "1", ii: "2", iii: "3", iv: "4", v: "5", vi: "6", vii: "7", viii: "8", ix: "9", x: "10" };
+function vehicleGenerations(value: string) {
+  return vehicleTokens(value).flatMap(token => {
+    const marked = token.match(/^(?:mk|mark|gen)([1-9]\d?|[ivx]+)$/);
+    if (marked) return [`generation${romanGenerations[marked[1]] || marked[1]}`];
+    return Object.hasOwn(romanGenerations, token) ? [`generation${romanGenerations[token]}`] : [];
+  });
+}
+function rankOvokoModels(title: string, models: OvokoReadRow[]) {
+  const tokens = new Set(vehicleTokens(title)), sourceGenerations = new Set(vehicleGenerations(title));
   return models.map(row => {
-    const names = fold(row.name).split("(")[0].match(/[a-z0-9]+/g) || [];
-    const matches = names.filter(token => token.length >= 2 && tokens.has(token));
-    const generation = (fold(row.name).split("(")[1] || "").match(/[a-z0-9]+/g) || [];
+    const names = vehicleTokens(row.name.split("(")[0]);
+    const matches = [...new Set(names.filter(token => token.length >= 2 && !Object.hasOwn(romanGenerations, token) && !/^(?:mk|mark|gen)/.test(token) && tokens.has(token)))];
+    const generation = vehicleTokens(row.name.split("(")[1] || "");
     const generations = generation.filter(token => /^[bdefgw]\d{1,3}$/.test(token));
     const conflict = generations.some(token => [...tokens].some(source => source[0] === token[0] && /^[bdefgw]\d{1,3}$/.test(source))) && !generations.some(token => tokens.has(token));
-    if (conflict) return { ...row, score: 0 };
-    const score = matches.length ? matches.length + generation.filter(token => tokens.has(token)).length * 2 : 0;
-    return { ...row, score };
-  }).filter(row => row.score > 0).sort((a, b) => b.score - a.score || a.name.localeCompare(b.name)).slice(0, 20);
+    const numbered = vehicleGenerations(row.name), numberedConflict = numbered.length > 0 && sourceGenerations.size > 0 && !numbered.some(token => sourceGenerations.has(token));
+    const score = matches.length && !conflict ? matches.length + generation.filter(token => tokens.has(token)).length * 2 + numbered.filter(token => sourceGenerations.has(token)).length * 2 : 0;
+    return { ...row, matches, score, generationConflict: numberedConflict };
+  }).filter(row => row.score > 0).sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+}
+export function suggestOvokoModels(title: string, models: OvokoReadRow[]) {
+  return rankOvokoModels(title, models).slice(0, 100);
+}
+export function automaticOvokoModel(title: string, models: OvokoReadRow[]): string {
+  const ranked = rankOvokoModels(title, models);
+  if (!ranked.length) return "";
+  // Several compatible model families in a title do not identify one origin vehicle.
+  // A more specific family (Range Rover Sport) may contain a shorter one (Range Rover).
+  const families = [...new Map(ranked.map(row => [[...row.matches].sort().join("|"), row.matches] as const)).values()];
+  const maximal = families.filter(family => !families.some(other => other.length > family.length && family.every(token => other.includes(token))));
+  if (new Set(maximal.map(family => [...family].sort().join("|"))).size !== 1) return "";
+  return !ranked[0].generationConflict && (!ranked[1] || ranked[0].score > ranked[1].score) ? ranked[0].id : "";
 }
 export function suggestionSearchMatches(value: string, query: string) { return fold(value).includes(fold(query.trim())); }
 const words: Record<string, string> = {

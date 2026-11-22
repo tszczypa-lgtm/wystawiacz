@@ -20,6 +20,7 @@ try {
   let condition = "Używany", stock = 1, publication = "ACTIVE";
   let holdStatuses = false, releaseStatuses = null, statusesStarted = null;
   let validImages = false, publicationFailure = false;
+  let savedCars = [];
   const id = "1234567891";
   page.on("pageerror", error => errors.push(error.message)); page.on("request", request => allRequests.push(request.url()));
   await page.route("**/*", async route => {
@@ -44,12 +45,16 @@ try {
     }
     assert.ok(["/api/ovoko/read", "/api/ovoko/test"].includes(url.pathname), "Only dictionary reads, no publication or local save endpoints"); assert.equal(request.method(), "POST");
     const payload = request.postDataJSON(); assert.equal(payload.useSaved, true);
-    if (url.pathname === "/api/ovoko/test") { assert.deepEqual(payload, { useSaved: true }); return route.fulfill({ json: { ok: true, readOnly: true, brands: [{ id: "1", name: "Audi" }, { id: "2", name: "Volkswagen" }, { id: "3", name: "Land Rover" }, { id: "4", name: "Rover" }] } }); }
-    assert.deepEqual(Object.keys(payload).sort(), payload.operation === "models" ? ["brandId", "operation", "useSaved"] : ["operation", "useSaved"]);
-    assert.ok(["categories", "qualities", "statuses", "models"].includes(payload.operation));
+    if (url.pathname === "/api/ovoko/test") { assert.deepEqual(payload, { useSaved: true }); return route.fulfill({ json: { ok: true, readOnly: true, brands: [{ id: "1", name: "Audi" }, { id: "2", name: "Volkswagen" }, { id: "3", name: "Land Rover" }, { id: "4", name: "Rover" }, { id: "5", name: "Ford" }] } }); }
+    assert.deepEqual(Object.keys(payload).sort(), payload.operation === "models" ? ["brandId", "operation", "useSaved"] : payload.operation === "cars" ? ["modelId", "operation", "useSaved"] : ["operation", "useSaved"]);
+    assert.ok(["categories", "qualities", "statuses", "models", "cars"].includes(payload.operation));
+    if (payload.operation === "cars") {
+      const rows = savedCars.filter(row => row.modelId === payload.modelId);
+      return route.fulfill({ json: { ok: true, readOnly: true, operation: "cars", rows, pagination: { page: 1, limit: 20, total: rows.length } } });
+    }
     if (payload.operation === "models") {
       if (holdAudi && payload.brandId === "1") { audiStarted?.(); await new Promise(resolve => { releaseAudi = resolve; }); }
-      return route.fulfill({ json: { ok: true, readOnly: true, operation: "models", rows: payload.brandId === "1" ? [{ id: "10", name: "A4 (B8)", years: "2008 - 2015" }, { id: "11", name: "A4 (B9)", years: "2015 - " }] : payload.brandId === "3" ? [{ id: "30", name: "Range Rover Sport (L494)", years: "2013 - 2022" }, { id: "31", name: "Range Rover Sport (L320)", years: "2005 - 2013" }] : [{ id: "20", name: "Golf VII", years: "2012 - 2020" }] } });
+      return route.fulfill({ json: { ok: true, readOnly: true, operation: "models", rows: payload.brandId === "1" ? [{ id: "10", name: "A4 (B8)", years: "2008 - 2015" }, { id: "11", name: "A4 (B9)", years: "2015 - " }] : payload.brandId === "3" ? [{ id: "30", name: "Range Rover Sport (L494)", years: "2013 - 2022" }, { id: "31", name: "Range Rover Sport (L320)", years: "2005 - 2013" }] : payload.brandId === "5" ? [{ id: "41", name: "Edge (U387)" }, { id: "42", name: "S-Max II" }, { id: "43", name: "S Max I" }, { id: "44", name: "Kuga I" }] : [{ id: "20", name: "Golf VII", years: "2012 - 2020" }] } });
     }
     if (dictionaryFailure) return route.fulfill({ status: 502, json: { message: "Blad slownika" } });
     if (holdStatuses && payload.operation === "statuses") { statusesStarted?.(); await new Promise(resolve => { releaseStatuses = resolve; }); }
@@ -78,7 +83,7 @@ try {
   }
   assert.equal(await page.getByLabel("Kategoria Ovoko", { exact: true }).locator('option[value="1"]').count(), 0, "Only level-three categories are offered");
   await page.getByText("Cennik Allegro: Maly kurier", { exact: true }).waitFor();
-  await page.getByLabel("ID samochodu-dawcy Ovoko - roboczo, niezweryfikowane").fill("36");
+  await page.getByLabel("ID rekordu auta w Ovoko (car_id)").fill("36");
   await page.getByLabel("Plan wysylki do sprawdzenia").fill("Sprawdze gabaryt i cene wysylki");
   assert.equal(await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).isVisible(), true, "The publication entry point is always visible at the top");
   await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).click();
@@ -113,7 +118,7 @@ try {
   assert.equal(await page.getByLabel("Kategoria Ovoko", { exact: true }).inputValue(), "3", "Search never erases an existing manual choice"); assert.equal(calls.length, beforeFilter);
   assert.equal(await page.getByLabel("Jakosc czesci Ovoko", { exact: true }).inputValue(), "0");
   assert.equal(await page.getByLabel("Status rekordu Ovoko", { exact: true }).inputValue(), "0");
-  assert.equal(await page.getByLabel("ID samochodu-dawcy Ovoko - roboczo, niezweryfikowane").inputValue(), "");
+  assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "");
   assert.equal(await page.getByLabel("Marka auta Ovoko").inputValue(), "1");
   assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "", "No model is guessed from a part number alone");
   await page.getByLabel("Marka auta Ovoko").selectOption("2");
@@ -124,7 +129,7 @@ try {
   assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "11");
   assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "5Q0959593E");
   assert.doesNotMatch(await page.getByLabel("Braki przygotowania").textContent(), /Numer czesci wymaga recznego zatwierdzenia|Wybierz jakosc|Wybierz status/, "Certain automatic fields do not require individual confirmations");
-  assert.equal(await page.getByLabel("ID samochodu-dawcy Ovoko - roboczo, niezweryfikowane").inputValue(), "", "Model IDs never become donor IDs");
+  assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "", "Model IDs never become donor IDs");
   mkdirSync(new URL("../outputs/ovoko-preparation-preview/", import.meta.url), { recursive: true });
   await page.screenshot({ path: fileURLToPath(new URL("../outputs/ovoko-preparation-preview/desktop.png", import.meta.url)), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 }); assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
@@ -158,12 +163,12 @@ try {
   condition = "Używany"; publication = "ACTIVE"; stock = 1;
   validImages = true;
   await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="11"]').waitFor({ state: "attached" });
-  await page.getByLabel("ID samochodu-dawcy Ovoko - roboczo, niezweryfikowane").fill("13");
+  await page.getByLabel("ID rekordu auta w Ovoko (car_id)").fill("13");
   await page.getByRole("button", { name: "Sprawdz pojedyncza wysylke", exact: true }).click();
   await page.getByText("Przenoszone zdjecia: 3 (cala galeria z Allegro)", { exact: true }).waitFor();
   const send = page.getByRole("button", { name: "Wyslij 1 czesc do Ovoko", exact: true });
   assert.equal(await send.isDisabled(), true);
-  await page.getByLabel("Potwierdzam rzeczywistego dawce tej czesci, nie tylko pasujacy model.").check();
+  await page.getByLabel("Potwierdzam poprawne przypisanie czesci do wskazanego auta w Ovoko.").check();
   assert.equal(await send.isDisabled(), true);
   await page.getByLabel("Sprawdzilem zasady i koszt wysylki w Ovoko. Cennik Allegro nie zostanie przeniesiony.").check();
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), "Confirmation fits the mobile viewport");
@@ -175,9 +180,9 @@ try {
   assert.equal(await page.getByLabel("Cena robocza").isDisabled(), true);
   publicationFailure = true;
   await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="11"]').waitFor({ state: "attached" });
-  await page.getByLabel("ID samochodu-dawcy Ovoko - roboczo, niezweryfikowane").fill("13");
+  await page.getByLabel("ID rekordu auta w Ovoko (car_id)").fill("13");
   await page.getByRole("button", { name: "Sprawdz pojedyncza wysylke", exact: true }).click();
-  await page.getByLabel("Potwierdzam rzeczywistego dawce tej czesci, nie tylko pasujacy model.").check();
+  await page.getByLabel("Potwierdzam poprawne przypisanie czesci do wskazanego auta w Ovoko.").check();
   await page.getByLabel("Sprawdzilem zasady i koszt wysylki w Ovoko. Cennik Allegro nie zostanie przeniesiony.").check();
   await send.click(); await page.getByRole("alert").filter({ hasText: "Wynik wysylki jest niepewny" }).waitFor();
   assert.equal(await send.isDisabled(), true, "Uncertain responses cannot be retried automatically");
@@ -187,10 +192,33 @@ try {
   assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "30");
   assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "JPLA14D617BA");
   await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).click();
-  assert.match(await page.getByLabel("Blokady wystawienia").textContent(), /ID rzeczywistego auta-dawcy/);
+  assert.match(await page.getByLabel("Blokady wystawienia").textContent(), /Moje samochody/);
   assert.equal(await send.isDisabled(), true, "The visible button never bypasses a missing real donor");
+  offerTitle = "FORD EDGE S-MAX MK2 KUGA CZYTNIK KART SD USB EM2T14F014AA EM2T-14F014-AA"; numberParameter = offerTitle;
+  await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="42"]').waitFor({ state: "attached" });
+  assert.equal(await page.getByLabel("Marka auta Ovoko").inputValue(), "5");
+  assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "", "Compatibility with Edge, S-Max and Kuga does not fabricate a single vehicle origin");
+  assert.equal(await page.getByLabel("Model auta Ovoko").locator('optgroup[label="Pasujace slowa z tytulu"] option').count(), 4);
+  await page.getByRole("status").filter({ hasText: "Rozpoznano pasujace warianty: 4" }).waitFor();
+  assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "EM2T14F014AA");
+  await page.getByLabel("Model auta Ovoko").selectOption("42");
+  assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "42", "A found model remains available for explicit selection");
+  await page.getByText(/Nie znaleziono zapisanego auta dla tego modelu/).waitFor();
+  savedCars = [{ id: "201", name: "Auto ID 201", modelId: "42", years: "2018", engineCode: "TEST" }];
+  await page.getByRole("button", { name: "Odswiez moje samochody", exact: true }).click();
+  await page.getByLabel("Moje samochody Ovoko").locator('option[value="201"]').waitFor({ state: "attached" });
+  assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "201", "One saved matching vehicle fills its technical ID without typing");
+  savedCars.push({ id: "202", name: "Auto ID 202", modelId: "42", years: "2019" });
+  await page.getByRole("button", { name: "Odswiez moje samochody", exact: true }).click();
+  await page.getByLabel("Moje samochody Ovoko").locator('option[value="202"]').waitFor({ state: "attached" });
+  await page.getByLabel("Moje samochody Ovoko").selectOption("202");
+  assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "202");
+  await page.screenshot({ path: fileURLToPath(new URL("../outputs/ovoko-preparation-preview/ford-cars-mobile.png", import.meta.url)), fullPage: true });
+  await page.getByLabel("Model auta Ovoko").selectOption("41");
+  await page.getByText(/Nie znaleziono zapisanego auta dla tego modelu/).waitFor();
+  assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "", "Changing model clears the previous vehicle record");
   currency = "CZK"; await mount(); await page.getByLabel("Cena robocza").waitFor(); assert.equal(await page.getByLabel("Cena robocza").inputValue(), "");
-  assert.equal(await page.getByLabel("ID samochodu-dawcy Ovoko - roboczo, niezweryfikowane").inputValue(), "", "Draft never persists across reloads");
+  assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "", "Draft never persists across reloads");
   failure = true; await mount(); await page.getByRole("alert").filter({ hasText: "Oferta nie nalezy" }).waitFor(); assert.equal(await page.getByLabel("Nazwa robocza", { exact: true }).count(), 0);
   admin = false; const beforeDenied = calls.filter(call => call.path.includes("own-offers")).length;
   await mount(); await page.getByRole("alert").filter({ hasText: "administratora" }).waitFor(); assert.equal(calls.filter(call => call.path.includes("own-offers")).length, beforeDenied);

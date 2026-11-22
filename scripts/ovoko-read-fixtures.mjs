@@ -1,8 +1,10 @@
 // Synthetic provider envelopes matching the official API examples. No live account data.
 export const readCases = [
+  // Cars are appended below to preserve the existing parts fixture indices.
   { operation: "models", brandId: "120", path: "/get/car_models/120", result: { list: [{ id: "9", brand: "120", name: "Test model", year_start: "2000", year_end: "" }] }, rows: [{ id: "9", brand: "120", name: "Test model", years: "2000 - " }] },
   { operation: "categories", path: "/get/categories", result: { list: [{ id: "1", parent_id: "0", level: "1", pl: "System", en: "System" }, { id: "3", parent_id: "2", level: "3", pl: "Czesc", en: "Part" }] }, rows: [{ id: "1", parentId: "0", level: "1", name: "System" }, { id: "3", parentId: "2", level: "3", name: "Czesc" }] },
   { operation: "statuses", path: "/get/part_status", result: { list: { "0": { pl: "Na stanie", en: "In stock" }, "2": { pl: "Sprzedano" } } }, rows: [{ id: "0", name: "Na stanie" }, { id: "2", name: "Sprzedano" }] },
   { operation: "qualities", path: "/get/part_quality", result: { list: { "0": { en: "Used" } } }, rows: [{ id: "0", name: "Used" }] },
   { operation: "parts", path: "/v2/get/parts?page=1&limit=20", result: { data: [{ id: "20", name: "Test part", car_id: "36", category_id: "1155", manufacturer_code: "ABC", external_id: null, price: "555.55", status: "0", quality: "0", internal_notes: "private-internal", reserved_user: "private-user", shop_url: "https://evil.test/private-url" }], pagination: { page: 1, total_count: 1, limit: 20 } }, rows: [{ id: "20", name: "Test part", carId: "36", categoryId: "1155", manufacturerCode: "ABC", externalId: "", price: "555.55", status: "0", quality: "0" }] },
+  { operation: "cars", modelId: "9", path: "/v2/get/cars?model_ids=9&page=1&limit=20", result: { data: [{ id: "36", car_model: "9", car_years: "2013", car_engine_code: "TEST", car_body_number: "private-vin", seller_name_surname: "private-person" }], pagination: { page: 1, limit: 20, total_count: 1 } }, rows: [{ id: "36", name: "Auto ID 36", modelId: "9", years: "2013", engineCode: "TEST" }] },
 ];

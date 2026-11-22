@@ -5,8 +5,12 @@
 1. Wykonaj `supabase/012_ovoko_single_publications.sql` w SQL Editor Supabase. Tworzy tylko nowy rejestr prob z RLS i uprawnieniami service_role; nie zmienia ofert, aut ani magazynow.
 2. Wdroz kod i ustaw `OVOKO_PUBLISH_ENABLED=true` w Cloudflare. Brak flagi lub inna wartosc blokuje zapis. `OVOKO_TEST_ENABLED=false` blokuje rowniez caly modul Ovoko.
 3. Otworz Przygotuj do Ovoko przy jednej wlasnej ofercie Allegro. Proba jest tylko dla aktywnego administratora, jednej sztuki, bez zestawu i z kompletem dozwolonych zdjec.
-4. Sprawdz numer, cene, kategorie, stan, marke i model. Podaj ID rzeczywistego auta-dawcy z wlasnego konta Ovoko, nie ID modelu. Serwer odczytuje dawce i sprawdza jego model. Nie tworzymy aut, nie zgadujemy VIN ani roku produkcji.
-5. Kliknij widoczny u gory Wystaw 1 czesc w Ovoko lub Sprawdz pojedyncza wysylke na dole. Oba przyciski otwieraja podsumowanie bez zapisu. Lista Co blokuje wystawienie podaje konkretne braki. Potwierdz rzeczywistego dawce i zweryfikowane ustawienia wysylki Ovoko. Dopiero Wyslij 1 czesc do Ovoko wykonuje jeden zapis.
+4. Sprawdz numer, cene, kategorie, stan, marke i model. Lista Moje samochody Ovoko automatycznie odczytuje do 20 zapisanych aut wybranego modelu. Wybierasz rekord, a techniczny car_id wypelnia sie sam (rowniez automatycznie przy jednym pasujacym rekordzie). To nie ID modelu. Serwer ponownie odczytuje rekord i porownuje model przed zapisem. Nie tworzymy aut i nie zgadujemy VIN ani roku produkcji.
+5. Kliknij widoczny u gory Wystaw 1 czesc w Ovoko lub Sprawdz pojedyncza wysylke na dole. Oba przyciski otwieraja podsumowanie bez zapisu. Lista Co blokuje wystawienie podaje konkretne braki. Potwierdz poprawne przypisanie rekordu auta i zweryfikowane ustawienia wysylki Ovoko. Dopiero Wyslij 1 czesc do Ovoko wykonuje jeden zapis.
+
+Panel Ovoko oferuje Moje samochody oraz Nowy samochod / Sugerowane. Zrzuty potwierdzaja wymaganie modelu i roku przy nowym rekordzie, nie obowiazek recznego zakladania fizycznego dawcy z VIN. Nasz obecny zapis korzysta z istniejacego car_id. Jesli brakuje rekordu, dodaj go w Ovoko i uzyj Odswiez moje samochody. Tworzenie nowego rekordu i kopiowanie sugestii Ovoko przez API nie sa jeszcze zaimplementowane.
+
+Tytul moze wymieniac kilka kompatybilnych modeli (Ford Edge / S-Max MK2 / Kuga). Dopasowania trafiaja do grupy na gorze listy; nie wybieramy arbitralnie jednego auta. Rozpoznajemy S-MAX/SMAX/S MAX oraz MK2/MKII/II. Pojedyncza rodzina i wyraznie najlepsza generacja nadal moga byc wybrane automatycznie.
 
 ## Zakres i zabezpieczenia
 

@@ -74,7 +74,7 @@ export function ovokoPublicationBlockers(source: OvokoSourcePreview, draft: Ovok
   if (source.rejectedImages) issues.push(`Zdjecia z nieobslugiwanym adresem lub ponad limit: ${source.rejectedImages}. Powtorzenia nie blokuja wysylki.`);
   if (!/^[1-9]\d{0,11}$/.test(brandId)) issues.push("Wybierz marke auta Ovoko.");
   if (!/^[1-9]\d{0,11}$/.test(modelId)) issues.push("Wybierz model auta Ovoko.");
-  if (!/^[1-9]\d{0,11}$/.test(draft.donorId)) issues.push("Wpisz ID rzeczywistego auta-dawcy z Ovoko, nie ID modelu.");
+  if (!/^[1-9]\d{0,11}$/.test(draft.donorId)) issues.push("Wybierz zapisany rekord auta Ovoko z listy Moje samochody. car_id nie jest ID modelu.");
   if (!/^[1-9]\d{0,11}$/.test(draft.categoryId)) issues.push("Wybierz kategorie Ovoko poziomu 3.");
   if (!/^\d{1,12}$/.test(draft.qualityId)) issues.push("Wybierz stan czesci Ovoko.");
   if (!/^\d{1,12}$/.test(draft.statusId)) issues.push("Wybierz dostepnosc czesci Ovoko (Na stanie).");
@@ -83,7 +83,7 @@ export function ovokoPublicationBlockers(source: OvokoSourcePreview, draft: Ovok
   return issues;
 }
 export function ovokoPreparationIssues(source: OvokoSourcePreview, draft: OvokoPreparationDraft): string[] {
-  const issues = ["Samochod-dawca wymaga odczytu i potwierdzenia na Twoim koncie Ovoko; wpisany numer nie jest zweryfikowany.", "Pozostaje sprawdzenie wymaganych atrybutow zaleznych od kategorii oraz zasad wysylki Ovoko."];
+  const issues = ["Rekord auta Ovoko (car_id) zostanie ponownie odczytany i porownany z modelem przed wysylka. Samo dopasowanie modeli w tytule nie ustala tego rekordu.", "Pozostaje sprawdzenie wymaganych atrybutow zaleznych od kategorii oraz zasad wysylki Ovoko."];
   if (source.bundle || source.stock !== 1) issues.push("Oferta jest zestawem lub liczba sztuk nie wynosi 1. Nie utozsamiamy jej automatycznie z jedna fizyczna czescia.");
   if (!source.images.length) issues.push("Brak bezpiecznych adresow zdjec do podgladu.");
   if (source.images.some(url => !/\.(jpg|jpeg|png)$/i.test(new URL(url).pathname))) issues.push("Adresy zdjec wymagaja sprawdzenia formatu wymaganego przez Ovoko; nie zmieniamy ich automatycznie.");
