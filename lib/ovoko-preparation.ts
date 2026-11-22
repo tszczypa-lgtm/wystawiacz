@@ -60,10 +60,15 @@ export function ovokoSourcePreview(input: unknown, expectedId: string, toText: (
     shippingRateId: text(object(object(source.delivery).shippingRates).id, 100), externalId: text(object(source.external).id, 1000), parameters, suggestedCode: candidates.length === 1 ? candidates[0] : "",
     bundle: products.length !== 1 || Number(object(object(products[0]).quantity).value ?? 1) !== 1, condition };
 }
-export type OvokoPreparationDraft = { title: string; notes: string; manufacturerCode: string; price: string; currency: string; categoryId: string; donorId: string; qualityId: string; statusId: string; shippingPlan: string };
+export type OvokoPreparationDraft = { title: string; notes: string; manufacturerCode: string; additionalCodes: string; price: string; currency: string; categoryId: string; donorId: string; qualityId: string; statusId: string; shippingPlan: string };
+export function additionalOvokoCodes(value: string, primary: string): string[] | null {
+  if (value.length > 4000) return null;
+  const codes = [...new Set(value.split(/[\r\n,;]+/).map(code => code.trim().toUpperCase().replace(/[ .-]/g, "")).filter(Boolean))].filter(code => code !== primary);
+  return codes.length <= 20 && codes.every(code => /^[A-Z0-9]{6,32}$/.test(code)) ? codes : null;
+}
 export function initialOvokoDraft(source: OvokoSourcePreview): OvokoPreparationDraft {
   const supported = ["PLN", "EUR"].includes(source.currency);
-  return { title: source.title, notes: source.description, manufacturerCode: "", price: supported ? source.price : "", currency: supported ? source.currency : "", categoryId: "", donorId: "", qualityId: "", statusId: "", shippingPlan: "" };
+  return { title: source.title, notes: source.description, manufacturerCode: "", additionalCodes: "", price: supported ? source.price : "", currency: supported ? source.currency : "", categoryId: "", donorId: "", qualityId: "", statusId: "", shippingPlan: "" };
 }
 export function ovokoPublicationBlockers(source: OvokoSourcePreview, draft: OvokoPreparationDraft, brandId: string, modelId: string): string[] {
   const issues: string[] = [];
@@ -79,6 +84,7 @@ export function ovokoPublicationBlockers(source: OvokoSourcePreview, draft: Ovok
   if (!/^\d{1,12}$/.test(draft.qualityId)) issues.push("Wybierz stan czesci Ovoko.");
   if (!/^\d{1,12}$/.test(draft.statusId)) issues.push("Wybierz dostepnosc czesci Ovoko (Na stanie).");
   if (!/^[A-Z0-9]{6,32}$/.test(draft.manufacturerCode)) issues.push("Uzupelnij pelny numer czesci (6-32 litery lub cyfry).");
+  if (additionalOvokoCodes(draft.additionalCodes, draft.manufacturerCode) === null) issues.push("Sprawdz numery dodatkowe: maksymalnie 20, po jednym w wierszu, 6-32 litery lub cyfry kazdy.");
   if (!/^\d{1,10}(\.\d{1,2})?$/.test(draft.price) || Number(draft.price) <= 0 || !["PLN", "EUR"].includes(draft.currency)) issues.push("Uzupelnij dodatnia cene i walute PLN lub EUR.");
   return issues;
 }

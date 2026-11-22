@@ -3,9 +3,9 @@ import type { OvokoSourcePreview, OvokoPreparationDraft } from "./ovoko-preparat
 
 export function ovokoAutomaticFields(source: OvokoSourcePreview, dictionaries: Record<string, OvokoReadRow[]>): Partial<OvokoPreparationDraft> {
   const fields: Partial<OvokoPreparationDraft> = {};
-  const numbers = suggestPartNumbers(source.title, source.parameters);
-  // A single numeric code is useful too; retain its warning, not an extra confirmation step.
-  if (numbers.length === 1 && numbers[0].number.length !== 17) fields.manufacturerCode = numbers[0].number;
+  const numbers = suggestPartNumbers(source.title, source.parameters).filter(candidate => candidate.number.length !== 17);
+  if (numbers.length) fields.manufacturerCode = numbers[0].number;
+  if (numbers.length > 1) fields.additionalCodes = numbers.slice(1).map(candidate => candidate.number).join("\n");
   const categories = suggestOvokoCategories(source.title, dictionaries.categories || []);
   if (categories.length && (!categories[1] || categories[0].score > categories[1].score)) fields.categoryId = categories[0].id;
   const qualityNames: Record<string, string[]> = { used: ["uzywany", "used"], new: ["nowy", "new"], damaged: ["uszkodzony", "with defects"], restored: ["regenerowany", "restored"] };
@@ -73,7 +73,8 @@ export function suggestPartNumbers(title: string, parameters: { name: string; va
   }
   const candidates = [...found.values()];
   // A base number in a parameter must not replace a longer indexed number found in the title.
-  return candidates.filter(candidate => candidate.evidence.some(item => item.source === "Tytul Allegro") || !candidates.some(other => other !== candidate && other.number.startsWith(candidate.number) && /^[A-Z0-9]+$/.test(other.number.slice(candidate.number.length)) && other.evidence.some(item => item.source === "Tytul Allegro")));
+  const titlePosition = (candidate: NumberSuggestion) => Math.min(...candidate.evidence.filter(item => item.source === "Tytul Allegro").map(item => title.indexOf(item.raw)).filter(index => index >= 0), Infinity);
+  return candidates.filter(candidate => candidate.evidence.some(item => item.source === "Tytul Allegro") || !candidates.some(other => other !== candidate && other.number.startsWith(candidate.number) && /^[A-Z0-9]+$/.test(other.number.slice(candidate.number.length)) && other.evidence.some(item => item.source === "Tytul Allegro"))).sort((a, b) => titlePosition(a) - titlePosition(b));
 }
 
 export type CategorySuggestion = { id: string; path: string; matches: string[]; score: number; weak: boolean };
@@ -104,8 +105,8 @@ export function automaticOvokoBrand(title: string, parameters: { name: string; v
   const candidates = specific.length ? specific : matches;
   return candidates.length === 1 ? candidates[0].id : "";
 }
-function vehicleTokens(value: string) {
-  return fold(value).replace(/\b([sc])[\s\-\u2010-\u2014]+max\b/g, "$1max").replace(/\b(mk|mark|gen)\s+([1-9]\d?|[ivx]+)\b/g, "$1$2").replace(/\b([a-z0-9]+)[-\u2010-\u2014]([a-z0-9]+)\b/g, "$1$2").match(/[a-z0-9]+/g) || [];
+function vehicleTokens(value: string): string[] {
+  return fold(value).replace(/\b(?:(?:ml|m)[-\s]*(?:class|klasse|klasa)|(?:class|klasse|klasa)[-\s]*m|ml)\b/g, "mclass").replace(/\b([sc])[\s\-\u2010-\u2014]+max\b/g, "$1max").replace(/\b(mk|mark|gen)\s+([1-9]\d?|[ivx]+)\b/g, "$1$2").replace(/\b([a-z0-9]+)[-\u2010-\u2014]([a-z0-9]+)\b/g, "$1$2").match(/[a-z0-9]+/g) || [];
 }
 const romanGenerations: Record<string, string> = { i: "1", ii: "2", iii: "3", iv: "4", v: "5", vi: "6", vii: "7", viii: "8", ix: "9", x: "10" };
 function vehicleGenerations(value: string) {
@@ -116,17 +117,19 @@ function vehicleGenerations(value: string) {
   });
 }
 function rankOvokoModels(title: string, models: OvokoReadRow[]) {
-  const tokens = new Set(vehicleTokens(title)), sourceGenerations = new Set(vehicleGenerations(title));
+  const sourceTokens = vehicleTokens(title), tokens = new Set(sourceTokens), sourceGenerations = new Set(vehicleGenerations(title));
   return models.map(row => {
     const names = vehicleTokens(row.name.split("(")[0]);
     const matches = [...new Set(names.filter(token => token.length >= 2 && !Object.hasOwn(romanGenerations, token) && !/^(?:mk|mark|gen)/.test(token) && tokens.has(token)))];
-    const generation = vehicleTokens(row.name.split("(")[1] || "");
-    const generations = generation.filter(token => /^[bdefgw]\d{1,3}$/.test(token));
-    const conflict = generations.some(token => [...tokens].some(source => source[0] === token[0] && /^[bdefgw]\d{1,3}$/.test(source))) && !generations.some(token => tokens.has(token));
+    const generation = vehicleTokens(row.name);
+    const generations = generation.filter(token => /^[bdefgwlx]\d{1,4}$/.test(token));
+    const conflict = generations.some(token => [...tokens].some(source => source[0] === token[0] && /^[bdefgwlx]\d{1,4}$/.test(source))) && !generations.some(token => tokens.has(token));
     const numbered = vehicleGenerations(row.name), numberedConflict = numbered.length > 0 && sourceGenerations.size > 0 && !numbered.some(token => sourceGenerations.has(token));
-    const score = matches.length && !conflict ? matches.length + generation.filter(token => tokens.has(token)).length * 2 + numbered.filter(token => sourceGenerations.has(token)).length * 2 : 0;
-    return { ...row, matches, score, generationConflict: numberedConflict };
-  }).filter(row => row.score > 0).sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+    const chassis = generations.filter(token => tokens.has(token));
+    const score = (matches.length || chassis.length) && !conflict ? matches.length + chassis.length * 10 + numbered.filter(token => sourceGenerations.has(token)).length * 2 : 0;
+    const order = Math.min(...[...matches, ...chassis].map(token => sourceTokens.indexOf(token)), sourceTokens.length);
+    return { ...row, matches, score, order, generationConflict: numberedConflict };
+  }).filter(row => row.score > 0).sort((a, b) => b.score - a.score || a.order - b.order || a.name.localeCompare(b.name) || a.id.localeCompare(b.id, "en", { numeric: true }));
 }
 export function suggestOvokoModels(title: string, models: OvokoReadRow[]) {
   return rankOvokoModels(title, models).slice(0, 100);
@@ -134,12 +137,8 @@ export function suggestOvokoModels(title: string, models: OvokoReadRow[]) {
 export function automaticOvokoModel(title: string, models: OvokoReadRow[]): string {
   const ranked = rankOvokoModels(title, models);
   if (!ranked.length) return "";
-  // Several compatible model families in a title do not identify one origin vehicle.
-  // A more specific family (Range Rover Sport) may contain a shorter one (Range Rover).
-  const families = [...new Map(ranked.map(row => [[...row.matches].sort().join("|"), row.matches] as const)).values()];
-  const maximal = families.filter(family => !families.some(other => other.length > family.length && family.every(token => other.includes(token))));
-  if (new Set(maximal.map(family => [...family].sort().join("|"))).size !== 1) return "";
-  return !ranked[0].generationConflict && (!ranked[1] || ranked[0].score > ranked[1].score) ? ranked[0].id : "";
+  // A reproducible best draft choice, not a claim about the actual origin vehicle.
+  return ranked.find(row => !row.generationConflict)?.id || "";
 }
 export function suggestionSearchMatches(value: string, query: string) { return fold(value).includes(fold(query.trim())); }
 const words: Record<string, string> = {

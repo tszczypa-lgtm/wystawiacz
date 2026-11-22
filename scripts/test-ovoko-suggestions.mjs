@@ -62,7 +62,7 @@ assert.equal(suggestOvokoModels("AUDI A40 5Q0959593E", models).length, 0, "No su
 const fordTitle = "FORD EDGE S-MAX MK2 KUGA CZYTNIK KART SD USB EM2T14F014AA EM2T-14F014-AA";
 const fordModels = [{ id: "41", name: "Edge (U387)", years: "2006 - 2014" }, { id: "42", name: "S-Max II", years: "2015 - 2023" }, { id: "43", name: "S Max I", years: "2006 - 2015" }, { id: "44", name: "Kuga I", years: "2008 - 2012" }];
 assert.deepEqual(new Set(suggestOvokoModels(fordTitle, fordModels).map(row => row.id)), new Set(["41", "42", "43", "44"]), "The reported Ford title exposes every mentioned family; MK2 does not hide Kuga I");
-assert.equal(automaticOvokoModel(fordTitle, fordModels), "", "Three compatible families do not identify one origin vehicle, even if S-Max II ranks highest");
+assert.equal(automaticOvokoModel(fordTitle, fordModels), "42", "Best draft model is filled even when several compatible families are mentioned");
 assert.equal(automaticOvokoModel("FORD S-MAX MK2 CZYTNIK", fordModels), "42");
 assert.equal(automaticOvokoModel("FORD SMAX MK 2 CZYTNIK", fordModels), "42");
 assert.equal(automaticOvokoModel("FORD S MAX MKII CZYTNIK", fordModels), "42");
@@ -82,6 +82,14 @@ for (const changed of [{ stock: 0 }, { stock: null }, { status: "ENDED" }, { sta
 assert.equal(ovokoAutomaticFields({ ...sourceOffer, stock: 5 }, metadata).statusId, "0", "Positive multi-unit stock remains available, never silently reduced to one");
 assert.equal(ovokoAutomaticFields(sourceOffer, { ...metadata, qualities: [{ id: "9", name: "Used" }, { id: "0", name: "Używany" }] }).qualityId, undefined, "Duplicate semantic mappings are not selected");
 assert.equal(ovokoAutomaticFields(sourceOffer, { ...metadata, statuses: [{ id: "0", name: "Zarezerwowano" }] }).statusId, undefined, "Never rely on an ID without its live dictionary meaning");
-assert.equal(ovokoAutomaticFields({ ...sourceOffer, title: "AUDI POMPA ABS 5Q0959593E 5Q0959593F" }, metadata).manufacturerCode, undefined);
+const multiple = ovokoAutomaticFields({ ...sourceOffer, title: "AUDI POMPA ABS 5Q0959593E 5Q0959593F" }, metadata);
+assert.equal(multiple.manufacturerCode, "5Q0959593E"); assert.equal(multiple.additionalCodes, "5Q0959593F");
+const mercedesTitle = "MERCEDES-BENZ ML W164 STEROWNIK SAM TYŁ A1645457716 A1649020300 A1649004200";
+const mercedes = ovokoAutomaticFields({ ...sourceOffer, title: mercedesTitle }, {});
+assert.equal(mercedes.manufacturerCode, "A1645457716"); assert.equal(mercedes.additionalCodes, "A1649020300\nA1649004200");
+const mercedesModels = [{ id: "164", name: "M-Class (W164)", years: "2005 - 2011" }, { id: "163", name: "M-Class (W163)", years: "1997 - 2005" }, { id: "166", name: "ML-Class (W166)", years: "2011 - 2015" }];
+assert.equal(automaticOvokoModel(mercedesTitle, mercedesModels), "164", "W164 and ML match the provider's M-Class name");
+assert.equal(automaticOvokoModel("MERCEDES W164 STEROWNIK", mercedesModels), "164", "An exact chassis can identify a model without a matching class-name token");
+assert.equal(automaticOvokoModel("AUDI A4", models), "10", "A tie produces a stable draft choice, not an empty selector");
 const beforeAutomatic = JSON.stringify({ sourceOffer, metadata }); ovokoAutomaticFields(sourceOffer, metadata); assert.equal(JSON.stringify({ sourceOffer, metadata }), beforeAutomatic);
 console.log("Ovoko suggestions: complete indexed codes, categories, vehicle-specific parameters, brand boundaries and aliases, model generation ranking and ambiguity passed.");

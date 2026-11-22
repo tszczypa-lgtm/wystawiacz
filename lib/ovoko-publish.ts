@@ -1,41 +1,28 @@
 import { accountContext, type AccountEnv } from "./account-api";
 import { handleAllegroApi } from "./allegro-api";
 import { loadOvokoConnection, ovokoConnectionKey, type OvokoKeyEnv } from "./ovoko-connection";
-import { ovokoSourcePreview } from "./ovoko-preparation";
+import { ovokoSourcePreview, additionalOvokoCodes } from "./ovoko-preparation";
 import { OvokoError, parseOvokoRead } from "./ovoko-read";
+import { ovokoWriteClient, ovokoWriteDigest as digest } from "./ovoko-write-client";
 
 type Context = Awaited<ReturnType<typeof accountContext>>;
 export type OvokoPublishEnv = AccountEnv & OvokoKeyEnv & Parameters<typeof handleAllegroApi>[1] & { OVOKO_PUBLISH_ENABLED?: string };
-const digest = async (value: string) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)))].map(byte => byte.toString(16).padStart(2, "0")).join("");
 function text(input: Record<string, unknown>, key: string, pattern: RegExp, max = 255) {
   const value = input[key];
   if (typeof value !== "string" || !value || value.length > max || !pattern.test(value)) throw new OvokoError(400, `Sprawdz pole ${key}.`);
   return value;
 }
-async function boundedJson(response: Response) {
-  const reader = response.body?.getReader(); if (!reader) throw new Error("empty");
-  let total = 0; const chunks: Uint8Array[] = [];
-  try {
-    while (true) {
-      const { done, value } = await reader.read(); if (done) break;
-      total += value.length; if (total > 2000000) { await reader.cancel(); throw new Error("large"); }
-      chunks.push(value);
-    }
-  } finally { reader.releaseLock(); }
-  const bytes = new Uint8Array(total); let offset = 0;
-  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
-  const result = JSON.parse(new TextDecoder().decode(bytes));
-  if (!result || typeof result !== "object" || Array.isArray(result)) throw new Error("shape");
-  return result as Record<string, any>;
-}
 export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, context: Context, input: Record<string, unknown>) {
   if (env.OVOKO_PUBLISH_ENABLED !== "true") throw new OvokoError(503, "Publikacja pojedyncza jest wylaczona. Wykonaj migracje 012 i ustaw OVOKO_PUBLISH_ENABLED=true w Cloudflare.");
   if (input.confirmSingle !== true || input.shippingConfirmed !== true || input.donorConfirmed !== true) throw new OvokoError(400, "Potwierdz pojedyncza wysylke, przypisanie rekordu auta i ustawienia wysylki Ovoko.");
-  if (Object.keys(input).some(key => !["offerId", "brandId", "modelId", "donorId", "categoryId", "qualityId", "statusId", "manufacturerCode", "price", "currency", "notes", "confirmSingle", "shippingConfirmed", "donorConfirmed", "expectedSource"].includes(key))) throw new OvokoError(400, "Nieobslugiwane pole publikacji.");
+  if (Object.keys(input).some(key => !["offerId", "brandId", "modelId", "donorId", "categoryId", "qualityId", "statusId", "manufacturerCode", "additionalCodes", "price", "currency", "notes", "confirmSingle", "shippingConfirmed", "donorConfirmed", "expectedSource"].includes(key))) throw new OvokoError(400, "Nieobslugiwane pole publikacji.");
   const offerId = text(input, "offerId", /^\d{1,30}$/), donorId = text(input, "donorId", /^[1-9]\d{0,11}$/);
   const brandId = text(input, "brandId", /^[1-9]\d{0,11}$/), modelId = text(input, "modelId", /^[1-9]\d{0,11}$/);
   const categoryId = text(input, "categoryId", /^[1-9]\d{0,11}$/), qualityId = text(input, "qualityId", /^\d{1,12}$/), statusId = text(input, "statusId", /^\d{1,12}$/);
   const code = text(input, "manufacturerCode", /^[A-Z0-9]{6,32}$/), price = text(input, "price", /^\d{1,10}(\.\d{1,2})?$/, 30), currency = text(input, "currency", /^(PLN|EUR)$/);
+  if (input.additionalCodes !== undefined && typeof input.additionalCodes !== "string") throw new OvokoError(400, "Nieprawidlowe numery dodatkowe.");
+  const optionalCodes = additionalOvokoCodes((input.additionalCodes as string | undefined) || "", code);
+  if (!optionalCodes) throw new OvokoError(400, "Sprawdz numery dodatkowe: maksymalnie 20 pelnych oznaczen.");
   if (Number(price) <= 0 || typeof input.notes !== "string" || input.notes.length > 40000 || /\0/.test(input.notes)) throw new OvokoError(400, "Sprawdz cene i opis.");
   const sourceRequest = new Request(`${new URL(request.url).origin}/api/allegro/ovoko-source/${offerId}`, { headers: { Authorization: request.headers.get("Authorization")! } });
   const sourceResponse = await handleAllegroApi(sourceRequest, env);
@@ -48,14 +35,7 @@ export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, c
   if (!expected || ["title", "price", "currency", "stock", "status", "condition"].some(key => expected[key] !== source[key as keyof typeof source]) || JSON.stringify(expected.images) !== JSON.stringify(source.images)) throw new OvokoError(409, "Oferta Allegro zmienila sie od otwarcia podgladu. Odswiez dane i sprawdz ponownie.");
   if (!source.images.length || source.rejectedImages) throw new OvokoError(400, "Zdjecia sa niepelne lub zawieraja nieobslugiwane adresy. Sprawdz oferte przed pierwsza proba.");
   const credentials = await loadOvokoConnection(context, await ovokoConnectionKey(env));
-  const remote = async (path: string, extra?: URLSearchParams) => {
-    const form = new URLSearchParams(credentials); extra?.forEach((value, key) => form.append(key, value));
-    const response = await fetch(`https://api.rrr.lt${path}`, { method: "POST", redirect: "manual", signal: AbortSignal.timeout(20000), headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" }, body: form.toString() });
-    if (!response.ok || (response.status >= 300 && response.status < 400)) { await response.body?.cancel(); throw new Error("provider"); }
-    const result = await boundedJson(response);
-    if (result.status_code !== "R200") throw new Error("provider");
-    return result;
-  };
+  const remote = ovokoWriteClient(credentials);
   const account = await digest(credentials.username.trim().toLowerCase()), seller = owned.sellerId;
   const selector = `ovoko_account=eq.${account}&allegro_seller_id=eq.${seller}&allegro_offer_id=eq.${offerId}`;
   const db = async (query: string, options?: RequestInit) => {
@@ -88,6 +68,7 @@ export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, c
     if (!Array.isArray(duplicates.data) || duplicates.data.length || duplicates.pagination?.total_count !== 0) throw new OvokoError(409, "Ovoko ma juz czesc z tym powiazaniem albo nie potwierdzilo pustego wyniku. Niczego nie nadpisujemy.");
     const form = new URLSearchParams({ category_id: categoryId, car_id: donorId, quality: qualityId, status: statusId, manufacturer_code: code, price, original_currency: currency, notes: input.notes, external_id: externalId, photo: source.images[0] });
     source.images.forEach((url, index) => form.append(`photos[${index}]`, url));
+    optionalCodes.forEach((value, index) => form.append(`optional_codes[${index}]`, value));
     const latestResponse = await handleAllegroApi(new Request(sourceRequest.url, { headers: sourceRequest.headers }), env);
     if (!latestResponse.ok) throw new OvokoError(409, "Nie potwierdzono oferty Allegro bezposrednio przed wysylka.");
     const latest = await latestResponse.json() as typeof owned;
@@ -95,6 +76,8 @@ export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, c
     if (latest.sellerId !== seller || fresh.status !== "ACTIVE" || fresh.stock !== 1 || fresh.bundle || JSON.stringify(fresh.images) !== JSON.stringify(source.images) || fresh.rejectedImages || ["title", "price", "currency", "condition"].some(key => fresh[key as keyof typeof fresh] !== source[key as keyof typeof source])) throw new OvokoError(409, "Oferta lub konto Allegro zmienily sie podczas sprawdzania. Nie wyslano czesci.");
     const permission = await accountContext(request, env);
     if (permission.user.id !== context.user.id || !permission.isAdmin || permission.account.suspended) throw new OvokoError(403, "Uprawnienia administratora zmienily sie podczas sprawdzania. Nie wyslano czesci.");
+    const latestCredentials = await loadOvokoConnection(permission, await ovokoConnectionKey(env));
+    if (latestCredentials.username !== credentials.username || latestCredentials.user_token !== credentials.user_token || latestCredentials.password !== credentials.password) throw new OvokoError(409, "Polaczenie Ovoko zmienilo sie podczas sprawdzania. Nie wyslano czesci.");
     const requestHash = await digest(form.toString());
     const reserved = await db("?on_conflict=ovoko_account,allegro_seller_id,allegro_offer_id", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=representation" }, body: JSON.stringify({ ovoko_account: account, allegro_seller_id: seller, allegro_offer_id: offerId, owner_id: context.user.id, request_hash: requestHash, state: "sending" }) });
     if (!Array.isArray(reserved) || reserved.length !== 1 || reserved[0].owner_id !== context.user.id || reserved[0].request_hash !== requestHash) throw new OvokoError(409, "Wysylka jest juz zablokowana lub nie potwierdzono rezerwacji. Sprawdz Ovoko przed kolejna proba.");

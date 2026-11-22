@@ -21,6 +21,7 @@ try {
   let holdStatuses = false, releaseStatuses = null, statusesStarted = null;
   let validImages = false, publicationFailure = false;
   let savedCars = [];
+  let carCreationFailure = false;
   const id = "1234567891";
   page.on("pageerror", error => errors.push(error.message)); page.on("request", request => allRequests.push(request.url()));
   await page.route("**/*", async route => {
@@ -43,9 +44,17 @@ try {
       assert.equal(body.photos, undefined); assert.equal(body.username, undefined);
       return route.fulfill(publicationFailure ? { status: 409, json: { message: "Wynik wysylki jest niepewny. Sprawdz Ovoko." } } : { json: { ok: true, partId: "77", visibilityConfirmed: false } });
     }
+    if (url.pathname === "/api/ovoko/create-car") {
+      assert.equal(request.method(), "POST"); const body = request.postDataJSON(); assert.equal(body.confirmCreate, true);
+      assert.deepEqual(Object.keys(body).sort(), ["brandId", "confirmCreate", "modelId", "year"]);
+      if (carCreationFailure) return route.fulfill({ status: 409, json: { message: "Niepewny wynik tworzenia auta. Sprawdz Ovoko." } });
+      assert.equal(body.modelId, "164"); assert.equal(body.year, "2009");
+      savedCars = [{ id: "301", name: "Auto ID 301", modelId: "164", years: "2009" }];
+      return route.fulfill({ json: { ok: true, carId: "301", modelId: "164", year: "2009", reused: false } });
+    }
     assert.ok(["/api/ovoko/read", "/api/ovoko/test"].includes(url.pathname), "Only dictionary reads, no publication or local save endpoints"); assert.equal(request.method(), "POST");
     const payload = request.postDataJSON(); assert.equal(payload.useSaved, true);
-    if (url.pathname === "/api/ovoko/test") { assert.deepEqual(payload, { useSaved: true }); return route.fulfill({ json: { ok: true, readOnly: true, brands: [{ id: "1", name: "Audi" }, { id: "2", name: "Volkswagen" }, { id: "3", name: "Land Rover" }, { id: "4", name: "Rover" }, { id: "5", name: "Ford" }] } }); }
+    if (url.pathname === "/api/ovoko/test") { assert.deepEqual(payload, { useSaved: true }); return route.fulfill({ json: { ok: true, readOnly: true, brands: [{ id: "1", name: "Audi" }, { id: "2", name: "Volkswagen" }, { id: "3", name: "Land Rover" }, { id: "4", name: "Rover" }, { id: "5", name: "Ford" }, { id: "6", name: "Mercedes-Benz" }] } }); }
     assert.deepEqual(Object.keys(payload).sort(), payload.operation === "models" ? ["brandId", "operation", "useSaved"] : payload.operation === "cars" ? ["modelId", "operation", "useSaved"] : ["operation", "useSaved"]);
     assert.ok(["categories", "qualities", "statuses", "models", "cars"].includes(payload.operation));
     if (payload.operation === "cars") {
@@ -54,7 +63,7 @@ try {
     }
     if (payload.operation === "models") {
       if (holdAudi && payload.brandId === "1") { audiStarted?.(); await new Promise(resolve => { releaseAudi = resolve; }); }
-      return route.fulfill({ json: { ok: true, readOnly: true, operation: "models", rows: payload.brandId === "1" ? [{ id: "10", name: "A4 (B8)", years: "2008 - 2015" }, { id: "11", name: "A4 (B9)", years: "2015 - " }] : payload.brandId === "3" ? [{ id: "30", name: "Range Rover Sport (L494)", years: "2013 - 2022" }, { id: "31", name: "Range Rover Sport (L320)", years: "2005 - 2013" }] : payload.brandId === "5" ? [{ id: "41", name: "Edge (U387)" }, { id: "42", name: "S-Max II" }, { id: "43", name: "S Max I" }, { id: "44", name: "Kuga I" }] : [{ id: "20", name: "Golf VII", years: "2012 - 2020" }] } });
+      return route.fulfill({ json: { ok: true, readOnly: true, operation: "models", rows: payload.brandId === "1" ? [{ id: "10", name: "A4 (B8)", years: "2008 - 2015" }, { id: "11", name: "A4 (B9)", years: "2015 - " }] : payload.brandId === "3" ? [{ id: "30", name: "Range Rover Sport (L494)", years: "2013 - 2022" }, { id: "31", name: "Range Rover Sport (L320)", years: "2005 - 2013" }] : payload.brandId === "5" ? [{ id: "41", name: "Edge (U387)" }, { id: "42", name: "S-Max II" }, { id: "43", name: "S Max I" }, { id: "44", name: "Kuga I" }] : payload.brandId === "6" ? [{ id: "164", name: "M-Class (W164)", years: "2005 - 2011" }, { id: "163", name: "M-Class (W163)", years: "1997 - 2005" }] : [{ id: "20", name: "Golf VII", years: "2012 - 2020" }] } });
     }
     if (dictionaryFailure) return route.fulfill({ status: 502, json: { message: "Blad slownika" } });
     if (holdStatuses && payload.operation === "statuses") { statusesStarted?.(); await new Promise(resolve => { releaseStatuses = resolve; }); }
@@ -98,7 +107,8 @@ try {
   await mount(); await page.getByText("Podpowiedzi numeru (2)", { exact: true }).click();
   await page.getByLabel("Marka auta Ovoko").locator('option[value="1"]').waitFor({ state: "attached" });
   await page.getByLabel("Model auta Ovoko").locator('option[value="10"]').waitFor({ state: "attached" });
-  assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "");
+  assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "5Q0959593E");
+  assert.equal(await page.getByLabel("Dodatkowe numery czesci").inputValue(), "5Q0959593F");
   assert.equal(await page.getByRole("button", { name: "Uzyj numeru 5Q0959593", exact: true }).count(), 0, "Never offer a truncated indexed title number");
   assert.equal(await page.getByLabel("Propozycje numerow").locator("li").count(), 2, "A title pasted in MPN is not an extra number candidate");
   const beforeSuggestions = calls.length;
@@ -197,7 +207,7 @@ try {
   offerTitle = "FORD EDGE S-MAX MK2 KUGA CZYTNIK KART SD USB EM2T14F014AA EM2T-14F014-AA"; numberParameter = offerTitle;
   await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="42"]').waitFor({ state: "attached" });
   assert.equal(await page.getByLabel("Marka auta Ovoko").inputValue(), "5");
-  assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "", "Compatibility with Edge, S-Max and Kuga does not fabricate a single vehicle origin");
+  assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "42", "Several recognized models still produce a reproducible best draft choice");
   assert.equal(await page.getByLabel("Model auta Ovoko").locator('optgroup[label="Pasujace slowa z tytulu"] option').count(), 4);
   await page.getByRole("status").filter({ hasText: "Rozpoznano pasujace warianty: 4" }).waitFor();
   assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "EM2T14F014AA");
@@ -217,6 +227,31 @@ try {
   await page.getByLabel("Model auta Ovoko").selectOption("41");
   await page.getByText(/Nie znaleziono zapisanego auta dla tego modelu/).waitFor();
   assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "", "Changing model clears the previous vehicle record");
+  await mount(); await page.getByLabel("Moje samochody Ovoko").locator('option[value="202"]').waitFor({ state: "attached" });
+  assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "201", "Several saved records still fill the first matching ID automatically");
+  offerTitle = "MERCEDES-BENZ ML W164 STEROWNIK SAM TYŁ A1645457716 A1649020300 A1649004200"; numberParameter = offerTitle; savedCars = [];
+  await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="164"]').waitFor({ state: "attached" });
+  assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "164");
+  assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "A1645457716");
+  assert.equal(await page.getByLabel("Dodatkowe numery czesci").inputValue(), "A1649020300\nA1649004200");
+  await page.getByText("Dodaj brakujacy rekord auta do Ovoko", { exact: true }).click();
+  const createCarButton = page.getByRole("button", { name: "Utworz rekord auta i uzupelnij ID", exact: true });
+  assert.equal(await page.getByLabel("Rok nowego rekordu auta", { exact: true }).inputValue(), "", "Never invent a year from the model range");
+  assert.equal(await createCarButton.isDisabled(), true);
+  await page.getByLabel("Rok nowego rekordu auta", { exact: true }).fill("2009"); assert.equal(await createCarButton.isDisabled(), true);
+  await page.getByLabel("Potwierdzam model i podany rok nowego rekordu auta.").check();
+  assert.equal(calls.filter(call => call.path === "/api/ovoko/create-car").length, 0, "No vehicle creation during autofill or merely filling a year");
+  await createCarButton.dblclick(); await page.getByRole("status").filter({ hasText: "Utworzono nowy rekord auta ID 301" }).waitFor();
+  assert.equal(calls.filter(call => call.path === "/api/ovoko/create-car").length, 1);
+  assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "301");
+  assert.equal(await createCarButton.isDisabled(), true);
+  await page.screenshot({ path: fileURLToPath(new URL("../outputs/ovoko-preparation-preview/mercedes-auto-mobile.png", import.meta.url)), fullPage: true });
+  carCreationFailure = true;
+  await page.getByLabel("Model auta Ovoko").selectOption("163");
+  await page.getByLabel("Rok nowego rekordu auta", { exact: true }).fill("2001");
+  await page.getByLabel("Potwierdzam model i podany rok nowego rekordu auta.").check();
+  await createCarButton.click(); await page.getByRole("status").filter({ hasText: "Niepewny wynik tworzenia auta" }).waitFor();
+  assert.equal(await createCarButton.isDisabled(), true, "Never automatically retry an uncertain vehicle creation");
   currency = "CZK"; await mount(); await page.getByLabel("Cena robocza").waitFor(); assert.equal(await page.getByLabel("Cena robocza").inputValue(), "");
   assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "", "Draft never persists across reloads");
   failure = true; await mount(); await page.getByRole("alert").filter({ hasText: "Oferta nie nalezy" }).waitFor(); assert.equal(await page.getByLabel("Nazwa robocza", { exact: true }).count(), 0);

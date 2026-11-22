@@ -1,0 +1,31 @@
+import type { OvokoCredentials } from "./ovoko-connection";
+
+export const ovokoWriteDigest = async (value: string) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)))].map(byte => byte.toString(16).padStart(2, "0")).join("");
+async function boundedJson(response: Response) {
+  const reader = response.body?.getReader(); if (!reader) throw new Error("empty");
+  let total = 0; const chunks: Uint8Array[] = [];
+  try {
+    while (true) {
+      const { done, value } = await reader.read(); if (done) break;
+      total += value.length; if (total > 2000000) { await reader.cancel(); throw new Error("large"); }
+      chunks.push(value);
+    }
+  } finally { reader.releaseLock(); }
+  const bytes = new Uint8Array(total); let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+  const result = JSON.parse(new TextDecoder().decode(bytes));
+  if (!result || typeof result !== "object" || Array.isArray(result)) throw new Error("shape");
+  return result as Record<string, any>;
+}
+export function ovokoWriteClient(credentials: OvokoCredentials) {
+  return async (path: string, extra?: URLSearchParams) => {
+    // Paths are constructed by the two server-side handlers, never supplied by the browser.
+    if (!path.startsWith("/") || path.startsWith("//") || /[\r\n\\#]/.test(path)) throw new Error("path");
+    const form = new URLSearchParams(credentials); extra?.forEach((value, key) => form.append(key, value));
+    const response = await fetch(`https://api.rrr.lt${path}`, { method: "POST", redirect: "manual", signal: AbortSignal.timeout(20000), headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" }, body: form.toString() });
+    if (!response.ok || (response.status >= 300 && response.status < 400)) { await response.body?.cancel(); throw new Error("provider"); }
+    const result = await boundedJson(response);
+    if (result.status_code !== "R200") throw new Error("provider");
+    return result;
+  };
+}

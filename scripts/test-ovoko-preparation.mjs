@@ -4,7 +4,7 @@ import ts from "typescript";
 
 const source = readFileSync(new URL("../lib/ovoko-preparation.ts", import.meta.url), "utf8");
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-const { ovokoSourcePreview, initialOvokoDraft, ovokoPreparationIssues, ovokoPublicationBlockers } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
+const { ovokoSourcePreview, initialOvokoDraft, ovokoPreparationIssues, ovokoPublicationBlockers, additionalOvokoCodes } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
 const offer = { id: "123", name: "Pompa 123456", images: ["https://a.allegroimg.com/picture", "https://evil.test/x.jpg", "javascript:alert(1)", "https://a.allegroimg.com/picture"], description: { sections: [{ items: [{ type: "TEXT", content: "Text" }, { type: "IMAGE", url: "https://evil.test" }] }] }, parameters: [{ id: "p1", name: "Numer katalogowy części", values: ["ABC123"] }], productSet: [{ product: { parameters: [] }, quantity: { value: 1 } }], sellingMode: { price: { amount: "123.45", currency: "PLN" } }, stock: { available: 1 }, publication: { status: "ACTIVE" }, category: { id: "999" }, delivery: { shippingRates: { id: "rate-id" } }, external: { id: "BIN-1" } };
 const preview = ovokoSourcePreview(offer, "123", html => html);
 assert.deepEqual(preview.images, ["https://a.allegroimg.com/picture"]); assert.equal(preview.skippedImages, 3);
@@ -13,6 +13,9 @@ assert.equal(preview.suggestedCode, "ABC123"); assert.equal(preview.shippingRate
 assert.equal(preview.description, "Text");
 const draft = initialOvokoDraft(preview); assert.equal(draft.price, "123.45"); assert.equal(draft.currency, "PLN");
 assert.equal(preview.condition, "");
+assert.deepEqual(additionalOvokoCodes("A1649020300\na164-900-4200\nA1649020300\nA1645457716", "A1645457716"), ["A1649020300", "A1649004200"]);
+assert.equal(additionalOvokoCodes("<script>", "A1645457716"), null);
+assert.equal(additionalOvokoCodes(Array.from({ length: 21 }, (_, index) => `CODE${100000 + index}`).join("\n"), "A1645457716"), null);
 for (const [name, expected] of [["Używany", "used"], ["Nowy", "new"], ["Uszkodzony", "damaged"], ["Regenerowany", "restored"], ["Powystawowy", ""]]) {
   assert.equal(ovokoSourcePreview({ ...offer, parameters: [{ id: "11323", name: "Stan", values: [name] }] }, "123", html => html).condition, expected);
 }

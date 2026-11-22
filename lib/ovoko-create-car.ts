@@ -1,0 +1,67 @@
+import { accountContext } from "./account-api";
+import { loadOvokoConnection, ovokoConnectionKey } from "./ovoko-connection";
+import type { OvokoPublishEnv } from "./ovoko-publish";
+import { OvokoError, parseOvokoRead } from "./ovoko-read";
+import { ovokoWriteClient, ovokoWriteDigest } from "./ovoko-write-client";
+
+type Context = Awaited<ReturnType<typeof accountContext>>;
+export async function createOvokoCar(request: Request, env: OvokoPublishEnv, context: Context, input: Record<string, unknown>) {
+  if (env.OVOKO_PUBLISH_ENABLED !== "true") throw new OvokoError(503, "Tworzenie aut jest wylaczone flaga OVOKO_PUBLISH_ENABLED.");
+  if (input.confirmCreate !== true || Object.keys(input).some(key => !["brandId", "modelId", "year", "confirmCreate"].includes(key))) throw new OvokoError(400, "Potwierdz utworzenie rekordu auta z wybranym modelem i rokiem.");
+  const { brandId, modelId, year } = input;
+  if (typeof brandId !== "string" || !/^[1-9]\d{0,11}$/.test(brandId) || typeof modelId !== "string" || !/^[1-9]\d{0,11}$/.test(modelId) || typeof year !== "string" || !/^\d{4}$/.test(year) || Number(year) < 1886 || Number(year) > new Date().getUTCFullYear() + 1) throw new OvokoError(400, "Wybierz marke, model i poprawny rok. Nie zgadujemy roku produkcji.");
+  const credentials = await loadOvokoConnection(context, await ovokoConnectionKey(env));
+  const remote = ovokoWriteClient(credentials), account = await ovokoWriteDigest(credentials.username.trim().toLowerCase());
+  const selector = `ovoko_account=eq.${account}&model_id=eq.${modelId}&vehicle_year=eq.${year}`;
+  const db = async (query: string, options?: RequestInit) => {
+    try { return await context.db(`ovoko_vehicle_creations${query}`, options); }
+    catch { throw new OvokoError(503, "Nie potwierdzono rejestru tworzenia aut. Wykonaj migracje 013 w Supabase. Nie ponawiaj niepewnego zapisu bez sprawdzenia Ovoko."); }
+  };
+  const existing = await db(`?${selector}&owner_id=eq.${context.user.id}&select=state,car_id`);
+  if (!Array.isArray(existing)) throw new OvokoError(503, "Nieprawidlowy rejestr tworzenia aut.");
+  if (existing.length) {
+    if (existing[0].state === "created" && /^[1-9]\d{0,11}$/.test(existing[0].car_id)) return { ok: true, carId: existing[0].car_id, modelId, year, reused: true };
+    throw new OvokoError(409, "Ten model i rok maja juz rozpoczeta lub niepewna probe utworzenia auta. Sprawdz Ovoko; nie tworzymy kolejnego rekordu.");
+  }
+  try {
+    const models = parseOvokoRead("models", await remote(`/get/car_models/${brandId}`), brandId).rows;
+    const model = models.find(row => row.id === modelId);
+    if (!model) throw new OvokoError(400, "Model nie nalezy do wybranej marki Ovoko.");
+    const range = model.years?.match(/^(\d{4})? - (\d{4})?$/);
+    if (range && ((range[1] && Number(year) < Number(range[1])) || (range[2] && Number(year) > Number(range[2])))) throw new OvokoError(400, "Podany rok nie pasuje do zakresu wybranego modelu Ovoko.");
+    const externalId = `tymo:car:${modelId}:${year}`;
+    const prior = await remote(`/v2/get/cars?external_ids=${encodeURIComponent(externalId)}&page=1&limit=1`);
+    if (!Array.isArray(prior.data) || !prior.pagination || !Number.isSafeInteger(prior.pagination.total_count)) throw new Error("shape");
+    if (prior.data.length) {
+      const row = prior.data[0];
+      if (prior.data.length !== 1 || prior.pagination.total_count !== 1 || !/^[1-9]\d{0,11}$/.test(String(row.id)) || String(row.car_model) !== modelId || String(row.car_years) !== year) throw new OvokoError(409, "Znaleziono niezgodny rekord auta z tym powiazaniem. Nie nadpisujemy go.");
+      return { ok: true, carId: String(row.id), modelId, year, reused: true };
+    }
+    if (prior.pagination.total_count !== 0) throw new Error("incomplete");
+    const statuses = await remote("/get/car_status");
+    if (!statuses.list || typeof statuses.list !== "object" || Array.isArray(statuses.list)) throw new Error("status shape");
+    const added = Object.entries(statuses.list as Record<string, { pl?: string; en?: string }>).filter(([id, row]) => /^[1-9]\d{0,11}$/.test(id) && ["dodano", "added"].includes(String(row?.pl || row?.en || "").trim().toLowerCase()));
+    if (added.length !== 1) throw new OvokoError(400, "Nie potwierdzono statusu Dodano w slowniku aut. Nie ustawiamy Kupiony ani Do demontazu.");
+    const permission = await accountContext(request, env);
+    if (!permission.isAdmin || permission.account.suspended || permission.user.id !== context.user.id) throw new OvokoError(403, "Uprawnienia zmienily sie przed utworzeniem auta.");
+    const latestCredentials = await loadOvokoConnection(permission, await ovokoConnectionKey(env));
+    if (latestCredentials.username !== credentials.username || latestCredentials.user_token !== credentials.user_token || latestCredentials.password !== credentials.password) throw new OvokoError(409, "Polaczenie Ovoko zmienilo sie podczas sprawdzania. Nie utworzono auta.");
+    const reserved = await db("?on_conflict=ovoko_account,model_id,vehicle_year", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=representation" }, body: JSON.stringify({ ovoko_account: account, model_id: modelId, vehicle_year: year, owner_id: context.user.id, state: "sending" }) });
+    if (!Array.isArray(reserved) || reserved.length !== 1 || reserved[0].owner_id !== context.user.id) throw new OvokoError(409, "Tworzenie tego auta jest juz zablokowane. Sprawdz Ovoko przed kolejna proba.");
+    try {
+      // Minimal user-confirmed catalogue record. No fabricated VIN, engine, purchase or storage data.
+      const result = await remote("/crm/importCar", new URLSearchParams({ car_model: modelId, car_years: year, status: added[0][0], external_id: externalId }));
+      if (!/^[1-9]\d{0,11}$/.test(String(result.car_id))) throw new Error("missing id");
+      const carId = String(result.car_id);
+      const saved = await db(`?${selector}&owner_id=eq.${context.user.id}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ state: "created", car_id: carId, updated_at: new Date().toISOString() }) });
+      if (!Array.isArray(saved) || saved.length !== 1 || saved[0].car_id !== carId) throw new Error("log");
+      return { ok: true, carId, modelId, year, reused: false };
+    } catch {
+      try { await db(`?${selector}&owner_id=eq.${context.user.id}&state=eq.sending`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ state: "uncertain", updated_at: new Date().toISOString() }) }); } catch { /* Sending remains a durable lock. */ }
+      throw new OvokoError(409, "Niepewny wynik tworzenia auta. Moglo powstac w Ovoko. Nie ponawiaj; sprawdz Moje samochody. Blokada duplikatu pozostaje aktywna.");
+    }
+  } catch (error) {
+    if (error instanceof OvokoError) throw error;
+    throw new OvokoError(502, "Nie udalo sie sprawdzic danych auta w Ovoko. Nie uruchomiono tworzenia nowego rekordu.");
+  }
+}

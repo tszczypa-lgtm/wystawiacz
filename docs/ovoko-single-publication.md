@@ -3,18 +3,25 @@
 ## Wdrozenie
 
 1. Wykonaj `supabase/012_ovoko_single_publications.sql` w SQL Editor Supabase. Tworzy tylko nowy rejestr prob z RLS i uprawnieniami service_role; nie zmienia ofert, aut ani magazynow.
+   Do osobnego tworzenia brakujacych aut wykonaj rowniez `supabase/013_ovoko_vehicle_creations.sql`. To drugi rejestr idempotencji, bez zmian istniejacych aut i czesci.
 2. Wdroz kod i ustaw `OVOKO_PUBLISH_ENABLED=true` w Cloudflare. Brak flagi lub inna wartosc blokuje zapis. `OVOKO_TEST_ENABLED=false` blokuje rowniez caly modul Ovoko.
 3. Otworz Przygotuj do Ovoko przy jednej wlasnej ofercie Allegro. Proba jest tylko dla aktywnego administratora, jednej sztuki, bez zestawu i z kompletem dozwolonych zdjec.
-4. Sprawdz numer, cene, kategorie, stan, marke i model. Lista Moje samochody Ovoko automatycznie odczytuje do 20 zapisanych aut wybranego modelu. Wybierasz rekord, a techniczny car_id wypelnia sie sam (rowniez automatycznie przy jednym pasujacym rekordzie). To nie ID modelu. Serwer ponownie odczytuje rekord i porownuje model przed zapisem. Nie tworzymy aut i nie zgadujemy VIN ani roku produkcji.
+4. Sprawdz numer, cene, kategorie, stan, marke i model. Lista Moje samochody Ovoko automatycznie odczytuje do 20 zapisanych aut wybranego modelu. Pierwszy pasujacy rekord uzupelnia car_id, chyba ze wybrano inny. To nie ID modelu. Serwer ponownie odczytuje rekord i porownuje model przed wyslaniem czesci. Nie zgadujemy VIN ani roku produkcji.
 5. Kliknij widoczny u gory Wystaw 1 czesc w Ovoko lub Sprawdz pojedyncza wysylke na dole. Oba przyciski otwieraja podsumowanie bez zapisu. Lista Co blokuje wystawienie podaje konkretne braki. Potwierdz poprawne przypisanie rekordu auta i zweryfikowane ustawienia wysylki Ovoko. Dopiero Wyslij 1 czesc do Ovoko wykonuje jeden zapis.
 
-Panel Ovoko oferuje Moje samochody oraz Nowy samochod / Sugerowane. Zrzuty potwierdzaja wymaganie modelu i roku przy nowym rekordzie, nie obowiazek recznego zakladania fizycznego dawcy z VIN. Nasz obecny zapis korzysta z istniejacego car_id. Jesli brakuje rekordu, dodaj go w Ovoko i uzyj Odswiez moje samochody. Tworzenie nowego rekordu i kopiowanie sugestii Ovoko przez API nie sa jeszcze zaimplementowane.
+Panel Ovoko oferuje Moje samochody oraz Nowy samochod / Sugerowane. W Wystawiaczu mozna teraz rozwinac Dodaj brakujacy rekord auta do Ovoko, podac rok i osobno potwierdzic model/rok. Dopiero klikniecie Utworz rekord auta i uzupelnij ID wywoluje POST /api/ovoko/create-car. Nie odtwarzamy nieudokumentowanego endpointu Sugerowane z panelu Ovoko: korzystamy z publicznego importCar i dopasowanego slownika modeli.
 
-Tytul moze wymieniac kilka kompatybilnych modeli (Ford Edge / S-Max MK2 / Kuga). Dopasowania trafiaja do grupy na gorze listy; nie wybieramy arbitralnie jednego auta. Rozpoznajemy S-MAX/SMAX/S MAX oraz MK2/MKII/II. Pojedyncza rodzina i wyraznie najlepsza generacja nadal moga byc wybrane automatycznie.
+Utworzenie rekordu wymaga migracji 013 i flagi OVOKO_PUBLISH_ENABLED=true. Serwer sprawdza model/marke, podany rok (takze zakres modelu), aktualne uprawnienia i niezmienione polaczenie Ovoko. Przesyla tylko car_model, car_years, status Dodano z aktualnego slownika oraz external_id=tymo:car:<model>:<year>. Nie wymysla VIN, silnika, przebiegu, zakupu ani magazynu. Nie tworzy przy tym czesci.
+
+Przed importCar zapisujemy trwala, globalna dla danego konta Ovoko blokade model+rok. Istniejacy rekord z naszym external_id jest wykorzystywany ponownie. Jednoczesne klikniecia, retry i niepewny wynik nie tworza kolejnych aut. Po timeout/blędzie potwierdzenia pozostaje sending/uncertain, wymagajace sprawdzenia w Ovoko. R200/car_id uzupelnia formularz, ale nie publikuje czesci automatycznie.
+
+Tytul moze wymieniac kilka kompatybilnych modeli (Ford Edge / S-Max MK2 / Kuga). Wypelniamy najlepsza robocza propozycje, zamiast zostawiac pole puste. Remisy rozstrzyga kolejnosc wzmianki w tytule i staly porzadek, nie losowanie. Nadal odrzucamy jawnie niezgodny kod nadwozia/generacje; dokladny kod W164 ma pierwszenstwo. Obslugujemy ML/M-Class/Klasa M, S-MAX/SMAX/S MAX i MK2/MKII/II. To wybor roboczy do sprawdzenia, nie dowod pochodzenia konkretnego egzemplarza.
+
+Pierwszy znaleziony numer (z wyjatkiem mozliwego VIN o dlugosci 17) wypelnia manufacturer_code, pozostale pole Dodatkowe numery czesci. API wysyla kazdy numer oddzielnie jako optional_codes[n]. Deduplikujemy, usuwamy powtorzenie numeru glownego, zachowujemy pelne indeksy i poczatkowe zera. Maksymalnie 20 dodatkowych oznaczen; przekroczenie limitu blokuje wysylke zamiast cicho obcinac liste.
 
 ## Zakres i zabezpieczenia
 
-- Jedyna mutacja dostawcy: `POST /crm/importPart`. Nie ma update/delete, zmiany statusow istniejacych czesci, tworzenia aut, ustawiania miejsc skladowania ani modyfikacji Allegro.
+- Wysylka czesci wykonuje tylko `POST /crm/importPart`. Osobny, potwierdzany przycisk auta wykonuje tylko `POST /crm/importCar`. Nie ma update/delete, zmiany statusow istniejacych rekordow, ustawiania miejsc skladowania ani modyfikacji Allegro.
 - Zapis korzysta wylacznie z zaszyfrowanego polaczenia zalogowanego administratora. Dane dostepowe i adres dostawcy nie pochodza z formularza.
 - Serwer sprawdza aktualna przynaleznosc oferty do sprzedawcy, stock=1, ACTIVE, zestaw, zdjecia oraz zgodnosc snapshotu. Powtarza odczyt Allegro i kontrole uprawnien tuz przed rezerwacja wysylki. Zmiana konta, roli, zawieszenie lub brak stanu blokuje probe.
 - Kategorie poziomu 3, jakosc, status Na stanie, marka/model i istniejacy dawca sa ponownie odczytywane z Ovoko. Opony/felgi nie sa jeszcze obslugiwane z powodu dodatkowych atrybutow. Pozostale szczegolne wymagania dostawcy moga spowodowac odrzucenie proby.
@@ -28,6 +35,8 @@ Tytul moze wymieniac kilka kompatybilnych modeli (Ford Edge / S-Max MK2 / Kuga).
 ## Weryfikacja
 
 `scripts/test-ovoko-publish.mjs`: wszystkie uslugi sa atrapami; role/CSRF/flaga, wlasnosc, snapshot, dodatnia cena, jedna sztuka, slowniki, dawca-model, aktualnosc stanu i roli, brak trwalej blokady, duplikaty, jednoczesne zadania, replay i niepewne wyniki. `scripts/test-ovoko-preparation-browser.mjs`: brak wysylki przy otwarciu, dwa potwierdzenia, jeden finalny przycisk, podwojne klikniecie i brak ponowien. Dodatkowo testy inventory, read API, workerd, sugestii i TypeScript/build.
+
+`scripts/test-ovoko-create-car.mjs` sprawdza model/rok/status Dodano, brak dopisywania atrybutow, uprawnienia/CSRF/flage, rejestr blokady, jednoczesne zadania, ponowne wykorzystanie i brak retry po niepewnym wyniku. Browser test obejmuje tytul Mercedesa, trzy numery, W164, brak automatycznego roku, osobna zgode i przycisk tworzenia auta oraz automatyczne uzupelnienie ID. To atrapy, nie rzeczywiste publikacje.
 
 Nie wykonano migracji ani rzeczywistej publikacji automatycznie. Pierwsza proba konta nalezy do administratora po wdrozeniu.
 
