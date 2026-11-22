@@ -16,13 +16,22 @@ const browser = await chromium.launch({ headless: true, channel: process.env.PLA
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const errors = [], requests = [];
-  let fail = false;
+  let fail = false, transferFail = false;
   const shipping = "2991e29e-5fbc-46f5-963a-65c326ba65c2";
   page.on("pageerror", error => errors.push(error.message));
   await page.route("https://inventory.test/**", async route => {
     const req = route.request(), url = new URL(req.url());
     if (!url.pathname.startsWith("/api/")) return route.fulfill({ contentType: "text/html", body: '<html><body style="background:#0d1117;color:white"><main id="root" style="max-width:1100px;margin:auto"></main></body></html>' });
-    requests.push({ url, method: req.method() }); assert.equal(req.method(), "GET");
+    requests.push({ url, method: req.method() });
+    if (url.pathname === "/api/ovoko/transfer-inventory") {
+      assert.equal(req.method(), "POST");
+      const input = req.postDataJSON();
+      if (transferFail) return route.fulfill({ status: 503, json: { message: "Blad rejestru przeniesien" } });
+      if (input.operation === "statuses") return route.fulfill({ json: { ok: true, statuses: Object.fromEntries(input.offerIds.map((id, i) => [id, i ? { state: "transferred", partId: "77" } : { state: "not_transferred" }])) } });
+      assert.equal(input.operation, "inventory"); assert.equal(input.transfer, "transferred");
+      return route.fulfill({ json: { offers: [{ id: "9876543210", name: "Przeniesiony sterownik", image: "", status: "ACTIVE", stock: 1, price: null, ovokoTransfer: { state: "transferred", partId: "88" } }], totalCount: 100123, count: 1, limit: 50, offset: input.offset, nextOffset: input.offset === 0 ? 500 : null, scanned: 500, fetchedAt: new Date().toISOString() } });
+    }
+    assert.equal(req.method(), "GET");
     if (url.pathname === "/api/account/me") return route.fulfill({ json: { isAdmin: true } });
     if (url.pathname.endsWith("/shipping-rates")) return route.fulfill({ json: { shippingRates: [{ id: shipping, name: "Maly kurier" }] } });
     if (fail) return route.fulfill({ status: 502, json: { message: "Blad odczytu Allegro" } });
@@ -53,8 +62,8 @@ try {
   await page.getByRole("button", { name: "Pokaz oferty" }).click();
   await page.getByText("Strona 1 z 2003", { exact: true }).waitFor();
   await page.getByText("Allegro: 1234567891", { exact: true }).waitFor();
-  assert.equal(requests.at(-1).url.searchParams.get("query"), "1234567");
-  assert.equal(requests.at(-1).url.searchParams.get("shippingRate"), shipping);
+  assert.equal(requests.filter(req => req.url.pathname.endsWith("/inventory")).at(-1).url.searchParams.get("query"), "1234567");
+  assert.equal(requests.filter(req => req.url.pathname.endsWith("/inventory")).at(-1).url.searchParams.get("shippingRate"), shipping);
   await page.getByRole("checkbox", { name: "Zaznacz widoczna strone" }).check();
   fail = true; await page.getByRole("button", { name: "Odswiez", exact: true }).click();
   await page.getByRole("alert").waitFor();
@@ -64,11 +73,30 @@ try {
   await page.locator("tbody tr").first().waitFor();
   assert.equal(await page.locator('tbody input:checked').count(), 0);
   assert.equal(await page.getByRole("button", { name: /Usun|Wycofaj|Kopiuj|Wystaw|Zmien cene/ }).count(), 0);
-  assert.ok(requests.every(request => request.method === "GET")); assert.deepEqual(errors, []);
+  await page.getByText("Ovoko ID: 77", { exact: true }).waitFor();
+  await page.getByLabel("Przeniesienie do Ovoko").selectOption("transferred");
+  await page.getByRole("button", { name: "Pokaz oferty" }).click();
+  await page.getByText("Ovoko ID: 88", { exact: true }).waitFor();
+  await mkdir(new URL("../outputs/inventory-preview/", import.meta.url), { recursive: true });
+  await page.screenshot({ path: fileURLToPath(new URL("../outputs/inventory-preview/filtered.png", import.meta.url)), fullPage: true });
+  assert.equal(await page.getByLabel("Numer strony").count(), 0);
+  assert.ok(await page.getByText(/przed filtrem przeniesienia/).isVisible());
+  await page.getByRole("button", { name: "Nastepna", exact: true }).click();
+  await page.getByText("Partia 2", { exact: true }).waitFor();
+  await page.getByText(/Koniec dostepnych wynikow/).waitFor();
+  assert.ok(await page.getByRole("button", { name: "Nastepna", exact: true }).isDisabled());
+  await page.getByRole("button", { name: "Poprzednia", exact: true }).click();
+  await page.getByText("Partia 1", { exact: true }).waitFor();
+  transferFail = true;
+  await page.getByRole("button", { name: "Wyczysc filtry", exact: true }).click();
+  await page.getByText(/Status przeniesienia pozostaje nieustalony/).waitFor();
+  assert.equal(await page.getByText("Nieustalony", { exact: true }).count(), 2);
+  assert.equal(await page.locator("tbody").getByText("Nieprzeniesione", { exact: true }).count(), 0);
+  assert.ok(requests.every(request => request.method === "GET" || request.url.pathname === "/api/ovoko/transfer-inventory")); assert.deepEqual(errors, []);
   await mkdir(new URL("../outputs/inventory-preview/", import.meta.url), { recursive: true });
   await page.screenshot({ path: fileURLToPath(new URL("../outputs/inventory-preview/desktop.png", import.meta.url)), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), "Mobile viewport scroll is contained within the offer table");
   await page.screenshot({ path: fileURLToPath(new URL("../outputs/inventory-preview/mobile.png", import.meta.url)), fullPage: true });
-  console.log("Inventory browser: paging 100k+, shipping/search/status filters, page-only selection, failure/retry and no mutation controls passed.");
+  console.log("Inventory browser: paging 100k+, ordinary and Ovoko filters, cursor history, part IDs, unknown-on-error, selection and no mutation controls passed.");
 } finally { await browser.close(); }

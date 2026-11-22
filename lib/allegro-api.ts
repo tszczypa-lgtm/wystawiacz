@@ -314,6 +314,11 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
     const path = url.pathname.slice("/api/allegro".length);
     if (path === "/inventory" && request.method !== "GET") return json({ message: "Lista ofert jest tylko do odczytu." }, 405);
     if (request.method === "GET") {
+      if (path === "/seller-identity") {
+        const seller = await remote("/me", { signal: AbortSignal.timeout(15000) });
+        if (typeof seller.id !== "string" || !/^\d{1,30}$/.test(seller.id)) throw new ApiError(502, "Niepotwierdzony sprzedawca Allegro.");
+        return json({ sellerId: seller.id });
+      }
       if (path === "/inventory") {
         const { remote: query, limit, offset } = inventoryQuery(url.searchParams);
         // Seller identity comes exclusively from this user's encrypted connection, never query parameters.

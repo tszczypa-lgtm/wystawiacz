@@ -5,6 +5,7 @@ import { publishOvokoPart, type OvokoPublishEnv } from "./ovoko-publish";
 import { createOvokoCar } from "./ovoko-create-car";
 import { ovokoCarsResponse } from "./ovoko-cars";
 import { ovokoWriteClient } from "./ovoko-write-client";
+import { ovokoTransferInventory } from "./ovoko-transfer-inventory";
 
 type OvokoEnv = AccountEnv & OvokoKeyEnv & OvokoPublishEnv & { OVOKO_TEST_ENABLED?: string };
 const attempts = new Map<string, number[]>();
@@ -44,7 +45,7 @@ export async function handleOvokoApi(request: Request, env: OvokoEnv): Promise<R
       const status = storageReady ? await ovokoConnectionStatus(context) : { connected: false, verifiedAt: null };
       return reply({ allowed: true, readOnly: true, storageReady, credentialsStored: status.connected, ...status });
     }
-    if (!["/api/ovoko/test", "/api/ovoko/read", "/api/ovoko/connect", "/api/ovoko/disconnect", "/api/ovoko/publish", "/api/ovoko/create-car"].includes(url.pathname)) return reply({ message: "Nieznana operacja Ovoko." }, 404);
+    if (!["/api/ovoko/test", "/api/ovoko/read", "/api/ovoko/connect", "/api/ovoko/disconnect", "/api/ovoko/publish", "/api/ovoko/create-car", "/api/ovoko/transfer-inventory"].includes(url.pathname)) return reply({ message: "Nieznana operacja Ovoko." }, 404);
     if (request.method !== "POST") return reply({ message: "Nieprawidlowa metoda." }, 405);
     if (request.headers.get("Origin") !== url.origin || (env.APP_ORIGIN && env.APP_ORIGIN !== url.origin)) return reply({ message: "Nieprawidlowe zrodlo zadania." }, 403);
     if (request.headers.get("Content-Type")?.split(";")[0].trim() !== "application/json") return reply({ message: "Nieprawidlowy format formularza." }, 415);
@@ -52,6 +53,13 @@ export async function handleOvokoApi(request: Request, env: OvokoEnv): Promise<R
     try { input = JSON.parse(await boundedText(request, url.pathname === "/api/ovoko/publish" ? 200000 : 8192)); } catch (error) { if (error instanceof OvokoError) throw error; throw new OvokoError(400, "Nieprawidlowy formularz."); }
     if (!input || typeof input !== "object" || Array.isArray(input)) throw new OvokoError(400, "Nieprawidlowy formularz.");
     const values = input as Record<string, unknown>;
+    if (url.pathname === "/api/ovoko/transfer-inventory") {
+      const now = Date.now(), key = `${context.user.id}:transfer-inventory`, recent = (attempts.get(key) || []).filter(time => now - time < 60000);
+      if (recent.length >= 30) throw new OvokoError(429, "Maksymalnie 30 odczytow przeniesien na minute. Odczekaj chwile.");
+      if (attempts.size >= 1000 && !attempts.has(key)) attempts.delete(attempts.keys().next().value!);
+      attempts.set(key, [...recent, now]);
+      return reply(await ovokoTransferInventory(request, env, context, values));
+    }
     if (url.pathname === "/api/ovoko/publish" || url.pathname === "/api/ovoko/create-car") {
       const now = Date.now(), key = `${context.user.id}:${url.pathname}`, recent = (attempts.get(key) || []).filter(time => now - time < 60000);
       if (recent.length >= 3) throw new OvokoError(429, "Maksymalnie 3 pojedyncze proby na minute.");
