@@ -6,7 +6,7 @@
 2. Wdroz kod i ustaw `OVOKO_PUBLISH_ENABLED=true` w Cloudflare. Brak flagi lub inna wartosc blokuje zapis. `OVOKO_TEST_ENABLED=false` blokuje rowniez caly modul Ovoko.
 3. Otworz Przygotuj do Ovoko przy jednej wlasnej ofercie Allegro. Proba jest tylko dla aktywnego administratora, jednej sztuki, bez zestawu i z kompletem dozwolonych zdjec.
 4. Sprawdz numer, cene, kategorie, stan, marke i model. Podaj ID rzeczywistego auta-dawcy z wlasnego konta Ovoko, nie ID modelu. Serwer odczytuje dawce i sprawdza jego model. Nie tworzymy aut, nie zgadujemy VIN ani roku produkcji.
-5. Kliknij Sprawdz pojedyncza wysylke. Potwierdz rzeczywistego dawce i zweryfikowane ustawienia wysylki Ovoko. Dopiero Wyslij 1 czesc do Ovoko wykonuje jeden zapis.
+5. Kliknij widoczny u gory Wystaw 1 czesc w Ovoko lub Sprawdz pojedyncza wysylke na dole. Oba przyciski otwieraja podsumowanie bez zapisu. Lista Co blokuje wystawienie podaje konkretne braki. Potwierdz rzeczywistego dawce i zweryfikowane ustawienia wysylki Ovoko. Dopiero Wyslij 1 czesc do Ovoko wykonuje jeden zapis.
 
 ## Zakres i zabezpieczenia
 
@@ -14,7 +14,7 @@
 - Zapis korzysta wylacznie z zaszyfrowanego polaczenia zalogowanego administratora. Dane dostepowe i adres dostawcy nie pochodza z formularza.
 - Serwer sprawdza aktualna przynaleznosc oferty do sprzedawcy, stock=1, ACTIVE, zestaw, zdjecia oraz zgodnosc snapshotu. Powtarza odczyt Allegro i kontrole uprawnien tuz przed rezerwacja wysylki. Zmiana konta, roli, zawieszenie lub brak stanu blokuje probe.
 - Kategorie poziomu 3, jakosc, status Na stanie, marka/model i istniejacy dawca sa ponownie odczytywane z Ovoko. Opony/felgi nie sa jeszcze obslugiwane z powodu dodatkowych atrybutow. Pozostale szczegolne wymagania dostawcy moga spowodowac odrzucenie proby.
-- Zdjecia sa pobierane z aktualnej wlasnej oferty, tylko HTTPS na subdomenach allegroimg.com. Pierwszy adres trafia do photo i photos[0]. Nie dopisujemy rozszerzen URL i nie zamieniamy formatu plikow.
+- Zdjecia sa pobierane z aktualnej wlasnej oferty, tylko HTTPS na subdomenach allegroimg.com. Cala unikalna galeria, w kolejnosci Allegro, trafia do photos[0..n]; pierwszy adres rowniez do photo. Powtorzenia usuwamy bez blokowania wysylki; niedozwolone adresy i przekroczenie limitu 50 nadal blokuja. UI pokazuje liczbe przenoszonych zdjec i osobne liczniki powtorzen/odrzuconych adresow. Nie dopisujemy rozszerzen URL i nie zamieniamy formatu plikow.
 - `external_id=tymo:<seller_id>:<offer_id>` sluzy identyfikacji powiazania. Przed zapisem odczytujemy Ovoko po tym external_id. Nie nadpisujemy znalezionej czesci.
 - Trwaly klucz unikalny obejmuje hash loginu Ovoko, sprzedawce Allegro i oferte. Atomowy INSERT ignore-duplicates z potwierdzona odpowiedzia poprzedza zapis. Osobne konta Wystawiacza nie obchodza tego klucza. Hash formularza nie zawiera hasla/tokena; nie zapisujemy opisu ani zdjec w rejestrze prob.
 - Timeout, redirect, nieprawidlowy wynik, odrzucenie dostawcy lub blad zapisu potwierdzenia pozostawia blokade sending/uncertain. Brak automatycznych ponowien i cofania operacji. Kolejne wywolanie dla potwierdzonej created zwraca zapisane part_id bez ponownej mutacji.

@@ -32,7 +32,8 @@ try {
     if (url.pathname === `/api/allegro/own-offers/${id}`) {
       assert.equal(request.method(), "GET");
       if (failure) return route.fulfill({ status: 404, json: { message: "Oferta nie nalezy do polaczonego konta." } });
-      return route.fulfill({ json: { id, name: offerTitle, parameters: condition ? [{ id: "11323", name: "Stan", values: [condition] }] : [], stock: { available: stock }, publication: { status: publication }, productSet: [{ quantity: { value: 1 }, product: { parameters: [{ id: "mpn", name: "Numer katalogowy części", values: [numberParameter] }] } }], category: { id: "999" }, sellingMode: { price: { amount: "123.45", currency } }, delivery: { shippingRates: { id: "rate-1" } }, description: { sections: [{ items: [{ type: "TEXT", content: '<p>Opis <b>czesci</b></p><script>window.injected=true</script><iframe src="https://evil.test"></iframe><img src="https://evil.test/pic"><style>body{display:none}</style>' }] }] }, images: validImages ? ["https://a.allegroimg.com/photo"] : ["https://a.allegroimg.com/photo", "https://evil.test/x.jpg"] } });
+      const images = validImages ? ["https://a.allegroimg.com/photo", "https://a.allegroimg.com/second.jpg", "https://a.allegroimg.com/label.jpg"] : ["https://a.allegroimg.com/photo", "https://evil.test/x.jpg"];
+      return route.fulfill({ json: { id, name: offerTitle, parameters: condition ? [{ id: "11323", name: "Stan", values: [condition] }] : [], stock: { available: stock }, publication: { status: publication }, productSet: [{ quantity: { value: 1 }, product: { parameters: [{ id: "mpn", name: "Numer katalogowy części", values: [numberParameter] }] } }], category: { id: "999" }, sellingMode: { price: { amount: "123.45", currency } }, delivery: { shippingRates: { id: "rate-1" } }, description: { sections: [{ items: [{ type: "TEXT", content: '<p>Opis <b>czesci</b></p><script>window.injected=true</script><iframe src="https://evil.test"></iframe><img src="https://evil.test/pic"><style>body{display:none}</style>' }] }] }, images } });
     }
     if (url.pathname === "/api/allegro/shipping-rates") { assert.equal(request.method(), "GET"); return route.fulfill({ json: { shippingRates: [{ id: "rate-1", name: "Maly kurier" }] } }); }
     if (url.pathname === "/api/ovoko/publish") {
@@ -43,12 +44,12 @@ try {
     }
     assert.ok(["/api/ovoko/read", "/api/ovoko/test"].includes(url.pathname), "Only dictionary reads, no publication or local save endpoints"); assert.equal(request.method(), "POST");
     const payload = request.postDataJSON(); assert.equal(payload.useSaved, true);
-    if (url.pathname === "/api/ovoko/test") { assert.deepEqual(payload, { useSaved: true }); return route.fulfill({ json: { ok: true, readOnly: true, brands: [{ id: "1", name: "Audi" }, { id: "2", name: "Volkswagen" }] } }); }
+    if (url.pathname === "/api/ovoko/test") { assert.deepEqual(payload, { useSaved: true }); return route.fulfill({ json: { ok: true, readOnly: true, brands: [{ id: "1", name: "Audi" }, { id: "2", name: "Volkswagen" }, { id: "3", name: "Land Rover" }, { id: "4", name: "Rover" }] } }); }
     assert.deepEqual(Object.keys(payload).sort(), payload.operation === "models" ? ["brandId", "operation", "useSaved"] : ["operation", "useSaved"]);
     assert.ok(["categories", "qualities", "statuses", "models"].includes(payload.operation));
     if (payload.operation === "models") {
       if (holdAudi && payload.brandId === "1") { audiStarted?.(); await new Promise(resolve => { releaseAudi = resolve; }); }
-      return route.fulfill({ json: { ok: true, readOnly: true, operation: "models", rows: payload.brandId === "1" ? [{ id: "10", name: "A4 (B8)", years: "2008 - 2015" }, { id: "11", name: "A4 (B9)", years: "2015 - " }] : [{ id: "20", name: "Golf VII", years: "2012 - 2020" }] } });
+      return route.fulfill({ json: { ok: true, readOnly: true, operation: "models", rows: payload.brandId === "1" ? [{ id: "10", name: "A4 (B8)", years: "2008 - 2015" }, { id: "11", name: "A4 (B9)", years: "2015 - " }] : payload.brandId === "3" ? [{ id: "30", name: "Range Rover Sport (L494)", years: "2013 - 2022" }, { id: "31", name: "Range Rover Sport (L320)", years: "2005 - 2013" }] : [{ id: "20", name: "Golf VII", years: "2012 - 2020" }] } });
     }
     if (dictionaryFailure) return route.fulfill({ status: 502, json: { message: "Blad slownika" } });
     if (holdStatuses && payload.operation === "statuses") { statusesStarted?.(); await new Promise(resolve => { releaseStatuses = resolve; }); }
@@ -79,7 +80,11 @@ try {
   await page.getByText("Cennik Allegro: Maly kurier", { exact: true }).waitFor();
   await page.getByLabel("ID samochodu-dawcy Ovoko - roboczo, niezweryfikowane").fill("36");
   await page.getByLabel("Plan wysylki do sprawdzenia").fill("Sprawdze gabaryt i cene wysylki");
-  assert.equal(await page.getByRole("button", { name: "Sprawdz pojedyncza wysylke", exact: true }).isDisabled(), true, "Incomplete photos block even the confirmation step");
+  assert.equal(await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).isVisible(), true, "The publication entry point is always visible at the top");
+  await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).click();
+  await page.getByRole("heading", { name: "Potwierdzenie: jedna czesc", exact: true }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "Wyslij 1 czesc do Ovoko", exact: true }).isDisabled(), true);
+  assert.match(await page.getByLabel("Blokady wystawienia").textContent(), /nieobslugiwanym adresem/);
   assert.equal(calls.filter(call => call.path === "/api/ovoko/publish").length, 0);
   dictionaryFailure = true; await mount(); await page.getByRole("alert").filter({ hasText: "Blad slownika" }).waitFor();
   await page.getByLabel("Cena robocza").fill("88"); assert.equal(await page.getByLabel("Cena robocza").inputValue(), "88", "Failed metadata reads leave the draft editable");
@@ -155,6 +160,7 @@ try {
   await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="11"]').waitFor({ state: "attached" });
   await page.getByLabel("ID samochodu-dawcy Ovoko - roboczo, niezweryfikowane").fill("13");
   await page.getByRole("button", { name: "Sprawdz pojedyncza wysylke", exact: true }).click();
+  await page.getByText("Przenoszone zdjecia: 3 (cala galeria z Allegro)", { exact: true }).waitFor();
   const send = page.getByRole("button", { name: "Wyslij 1 czesc do Ovoko", exact: true });
   assert.equal(await send.isDisabled(), true);
   await page.getByLabel("Potwierdzam rzeczywistego dawce tej czesci, nie tylko pasujacy model.").check();
@@ -175,6 +181,14 @@ try {
   await page.getByLabel("Sprawdzilem zasady i koszt wysylki w Ovoko. Cennik Allegro nie zostanie przeniesiony.").check();
   await send.click(); await page.getByRole("alert").filter({ hasText: "Wynik wysylki jest niepewny" }).waitFor();
   assert.equal(await send.isDisabled(), true, "Uncertain responses cannot be retried automatically");
+  offerTitle = "MODUŁ STEROWNIK DRZWI LAND ROVER RANGE ROVER SPORT L494 JPLA-14D617-BA"; numberParameter = offerTitle;
+  await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="30"]').waitFor({ state: "attached" });
+  assert.equal(await page.getByLabel("Marka auta Ovoko").inputValue(), "3", "Reported Land Rover title selects the full make without a click");
+  assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "30");
+  assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "JPLA14D617BA");
+  await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).click();
+  assert.match(await page.getByLabel("Blokady wystawienia").textContent(), /ID rzeczywistego auta-dawcy/);
+  assert.equal(await send.isDisabled(), true, "The visible button never bypasses a missing real donor");
   currency = "CZK"; await mount(); await page.getByLabel("Cena robocza").waitFor(); assert.equal(await page.getByLabel("Cena robocza").inputValue(), "");
   assert.equal(await page.getByLabel("ID samochodu-dawcy Ovoko - roboczo, niezweryfikowane").inputValue(), "", "Draft never persists across reloads");
   failure = true; await mount(); await page.getByRole("alert").filter({ hasText: "Oferta nie nalezy" }).waitFor(); assert.equal(await page.getByLabel("Nazwa robocza", { exact: true }).count(), 0);

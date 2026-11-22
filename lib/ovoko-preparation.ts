@@ -1,7 +1,7 @@
 type Parameter = { id: string; name: string; values: string[] };
 export type OvokoSourceCondition = "used" | "new" | "damaged" | "restored" | "";
 export type OvokoSourcePreview = {
-  id: string; title: string; description: string; images: string[]; skippedImages: number;
+  id: string; title: string; description: string; images: string[]; skippedImages: number; rejectedImages: number; duplicateImages: number;
   price: string; currency: string; stock: number | null; status: string; categoryId: string;
   shippingRateId: string; externalId: string; parameters: Parameter[]; suggestedCode: string; bundle: boolean; condition: OvokoSourceCondition;
 };
@@ -45,15 +45,16 @@ export function ovokoSourcePreview(input: unknown, expectedId: string, toText: (
   const codeNames = new Set(["numer katalogowy czesci", "numer katalogowy części", "kod producenta", "manufacturer code", "numer oe"]);
   const candidates = [...new Set(parameters.filter(parameter => codeNames.has(parameter.name.toLowerCase().trim())).flatMap(parameter => parameter.values).filter(value => value.trim() && value.length <= 255))];
   const rawImages = Array.isArray(source.images) ? source.images : [];
-  const images = [...new Set(rawImages.slice(0, 50).flatMap((value: unknown) => {
+  const validImages = rawImages.slice(0, 50).flatMap((value: unknown) => {
     try {
       const url = new URL(typeof value === "string" ? value : text(object(value).url));
       return url.protocol === "https:" && !url.username && !url.password && url.hostname.endsWith(".allegroimg.com") ? [url.href] : [];
     } catch { return []; }
-  }))];
+  });
+  const images = [...new Set(validImages)];
   const description = (Array.isArray(object(source.description).sections) ? source.description.sections : []).slice(0, 100).flatMap((section: unknown) => Array.isArray(object(section).items) ? object(section).items : []).filter((item: unknown) => object(item).type === "TEXT").map((item: unknown) => text(object(item).content, 50000)).join("\n");
   const price = object(object(source.sellingMode).price), stock = object(source.stock).available;
-  return { id: expectedId, title: text(source.name, 500), description: toText(description.slice(0, 100000)).slice(0, 40000), images, skippedImages: Math.max(0, rawImages.length - images.length),
+  return { id: expectedId, title: text(source.name, 500), description: toText(description.slice(0, 100000)).slice(0, 40000), images, skippedImages: Math.max(0, rawImages.length - images.length), rejectedImages: rawImages.length - validImages.length, duplicateImages: validImages.length - images.length,
     price: typeof price.amount === "string" && price.amount.length <= 30 && /^\d+(\.\d+)?$/.test(price.amount) ? price.amount : "", currency: typeof price.currency === "string" && /^[A-Z]{3}$/.test(price.currency) ? price.currency : "",
     stock: Number.isSafeInteger(stock) && stock >= 0 ? stock : null, status: text(object(source.publication).status, 40), categoryId: text(object(source.category).id, 40),
     shippingRateId: text(object(object(source.delivery).shippingRates).id, 100), externalId: text(object(source.external).id, 1000), parameters, suggestedCode: candidates.length === 1 ? candidates[0] : "",
@@ -63,6 +64,23 @@ export type OvokoPreparationDraft = { title: string; notes: string; manufacturer
 export function initialOvokoDraft(source: OvokoSourcePreview): OvokoPreparationDraft {
   const supported = ["PLN", "EUR"].includes(source.currency);
   return { title: source.title, notes: source.description, manufacturerCode: "", price: supported ? source.price : "", currency: supported ? source.currency : "", categoryId: "", donorId: "", qualityId: "", statusId: "", shippingPlan: "" };
+}
+export function ovokoPublicationBlockers(source: OvokoSourcePreview, draft: OvokoPreparationDraft, brandId: string, modelId: string): string[] {
+  const issues: string[] = [];
+  if (source.status !== "ACTIVE") issues.push("Oferta Allegro musi byc aktywna.");
+  if (source.stock !== 1) issues.push(`Pierwsza proba wymaga dokladnie 1 sztuki; w Allegro: ${source.stock ?? "brak danych"}.`);
+  if (source.bundle) issues.push("Zestawy nie sa jeszcze obslugiwane w pojedynczej probie.");
+  if (!source.images.length) issues.push("Brak zdjec z Allegro do przeniesienia.");
+  if (source.rejectedImages) issues.push(`Zdjecia z nieobslugiwanym adresem lub ponad limit: ${source.rejectedImages}. Powtorzenia nie blokuja wysylki.`);
+  if (!/^[1-9]\d{0,11}$/.test(brandId)) issues.push("Wybierz marke auta Ovoko.");
+  if (!/^[1-9]\d{0,11}$/.test(modelId)) issues.push("Wybierz model auta Ovoko.");
+  if (!/^[1-9]\d{0,11}$/.test(draft.donorId)) issues.push("Wpisz ID rzeczywistego auta-dawcy z Ovoko, nie ID modelu.");
+  if (!/^[1-9]\d{0,11}$/.test(draft.categoryId)) issues.push("Wybierz kategorie Ovoko poziomu 3.");
+  if (!/^\d{1,12}$/.test(draft.qualityId)) issues.push("Wybierz stan czesci Ovoko.");
+  if (!/^\d{1,12}$/.test(draft.statusId)) issues.push("Wybierz dostepnosc czesci Ovoko (Na stanie).");
+  if (!/^[A-Z0-9]{6,32}$/.test(draft.manufacturerCode)) issues.push("Uzupelnij pelny numer czesci (6-32 litery lub cyfry).");
+  if (!/^\d{1,10}(\.\d{1,2})?$/.test(draft.price) || Number(draft.price) <= 0 || !["PLN", "EUR"].includes(draft.currency)) issues.push("Uzupelnij dodatnia cene i walute PLN lub EUR.");
+  return issues;
 }
 export function ovokoPreparationIssues(source: OvokoSourcePreview, draft: OvokoPreparationDraft): string[] {
   const issues = ["Samochod-dawca wymaga odczytu i potwierdzenia na Twoim koncie Ovoko; wpisany numer nie jest zweryfikowany.", "Pozostaje sprawdzenie wymaganych atrybutow zaleznych od kategorii oraz zasad wysylki Ovoko."];

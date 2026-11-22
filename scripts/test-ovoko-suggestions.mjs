@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 const compiled = ts.transpileModule(readFileSync(new URL("../lib/ovoko-suggestions.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-const { suggestPartNumbers, suggestOvokoCategories, suggestionSearchMatches, suggestOvokoBrands, suggestOvokoModels, vehicleSuggestionText, ovokoAutomaticFields } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
+const { suggestPartNumbers, suggestOvokoCategories, suggestionSearchMatches, suggestOvokoBrands, suggestOvokoModels, vehicleSuggestionText, ovokoAutomaticFields, automaticOvokoBrand } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
 const numbers = (title, parameters) => suggestPartNumbers(title, parameters).map(item => item.number);
 for (const suffix of ["E", "EA", "ABCD", "e", "1"]) {
   const code = `5Q0959593${suffix}`;
@@ -43,6 +43,16 @@ assert.deepEqual(suggestOvokoBrands("AUDI A4", brands).map(row => row.id), ["1"]
 assert.deepEqual(suggestOvokoBrands("VW GOLF", brands).map(row => row.id), ["2"]);
 assert.equal(suggestOvokoBrands("AUDITOR 5Q0959593E", brands).length, 0);
 assert.equal(suggestOvokoBrands("AUDI VW", brands).length, 2, "Ambiguous brands stay ambiguous");
+const landRoverTitle = "MODUŁ STEROWNIK DRZWI LAND ROVER RANGE ROVER SPORT L494 JPLA-14D617-BA";
+const expandedBrands = [...brands, { id: "3", name: "Land Rover" }, { id: "4", name: "Rover" }, { id: "5", name: "AC" }];
+assert.deepEqual(suggestOvokoBrands(landRoverTitle, expandedBrands).map(row => row.id), ["3"], "Full compound make wins over Rover in the reported title");
+assert.equal(automaticOvokoBrand(landRoverTitle, [], expandedBrands), "3");
+assert.equal(automaticOvokoBrand("ROVER 75 STEROWNIK", [], expandedBrands), "4", "Standalone Rover remains a valid make");
+assert.equal(automaticOvokoBrand("AUDI A4 AC", [], expandedBrands), "1", "An incidental AC token does not defeat an explicit longer make");
+assert.equal(automaticOvokoBrand("AUDI VW", [], expandedBrands), "");
+assert.equal(automaticOvokoBrand("AUDI VW", [{ name: "Marka pojazdu", values: ["Audi"] }], expandedBrands), "1");
+assert.equal(automaticOvokoBrand("AUDI", [{ name: "Producent", values: ["Bosch"] }], expandedBrands), "1", "Generic parts manufacturers are not vehicle brands");
+assert.equal(ovokoAutomaticFields({ title: landRoverTitle, parameters: [], condition: "", status: "ACTIVE", stock: 1, bundle: false }, {}).manufacturerCode, "JPLA14D617BA");
 assert.equal(vehicleSuggestionText("Pompa", [{ name: "Producent", values: ["Bosch"] }, { name: "Marka pojazdu", values: ["Audi"] }]), "Pompa Audi");
 const models = [{ id: "10", name: "A4, S4 (B8)", years: "2008 - 2015" }, { id: "11", name: "A4, S4 (B9)", years: "2015 - " }];
 assert.equal(suggestOvokoModels("AUDI A4 B9", models)[0].id, "11");

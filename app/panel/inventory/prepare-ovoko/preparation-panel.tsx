@@ -4,9 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { accountRequest, type AccountInfo } from "@/lib/account-client";
 import { allegroRequest } from "@/lib/allegro-client";
 import { createSupabaseBrowserClient } from "@/lib/supabase";
-import { initialOvokoDraft, offerDescriptionText, ovokoPreparationIssues, ovokoSourcePreview, type OvokoPreparationDraft, type OvokoSourcePreview } from "@/lib/ovoko-preparation";
+import { initialOvokoDraft, offerDescriptionText, ovokoPreparationIssues, ovokoPublicationBlockers, ovokoSourcePreview, type OvokoPreparationDraft, type OvokoSourcePreview } from "@/lib/ovoko-preparation";
 import type { OvokoReadResult, OvokoReadRow } from "@/lib/ovoko-read";
-import { suggestPartNumbers, suggestOvokoCategories, suggestionSearchMatches, suggestOvokoBrands, suggestOvokoModels, vehicleSuggestionText, ovokoAutomaticFields } from "@/lib/ovoko-suggestions";
+import { suggestPartNumbers, suggestOvokoCategories, suggestionSearchMatches, suggestOvokoBrands, suggestOvokoModels, vehicleSuggestionText, ovokoAutomaticFields, automaticOvokoBrand } from "@/lib/ovoko-suggestions";
 
 const button = "rounded-lg border border-white/20 px-3 py-2 text-sm font-bold disabled:opacity-40";
 const field = "mt-1 w-full rounded-lg border border-white/20 bg-[#0d1117] px-3 py-2 text-white";
@@ -27,6 +27,7 @@ export function OvokoPreparationPanel() {
   const numberSuggestions = useMemo(() => source ? suggestPartNumbers(source.title, source.parameters) : [], [source]);
   const categorySuggestions = useMemo(() => source ? suggestOvokoCategories(source.title, dictionaries.categories || []) : [], [source, dictionaries.categories]);
   const active = useRef<AbortController | null>(null);
+  const publicationPanel = useRef<HTMLElement | null>(null);
   const touched = useRef(new Set<string>());
   async function readOvoko(operation: string, signal: AbortSignal, selectedBrand?: string) {
     const { data } = await createSupabaseBrowserClient().auth.getSession();
@@ -86,8 +87,8 @@ export function OvokoPreparationPanel() {
             });
             if (automatic.categoryId && !touched.current.has("categoryId")) setCategoryAccepted(automatic.categoryId);
             if (operation === "brands") {
-              const matches = suggestOvokoBrands(vehicleSuggestionText(source.title, source.parameters), rows);
-              if (matches.length === 1 && !touched.current.has("brandId")) setBrandId(previous => previous || matches[0].id);
+              const selected = automaticOvokoBrand(source.title, source.parameters, rows);
+              if (selected && !touched.current.has("brandId")) setBrandId(previous => previous || selected);
             }
           }
         } catch (error) {
@@ -134,7 +135,18 @@ export function OvokoPreparationPanel() {
     }
     return `${names.join(" / ")} (ID ${row.id})`;
   }
-  const canPublish = Boolean(source && draft && !busy && !dictionaryBusy && !modelsBusy && source.status === "ACTIVE" && source.stock === 1 && !source.bundle && source.images.length && !source.skippedImages && brandId && modelId && /^[1-9]\d{0,11}$/.test(draft.donorId) && draft.categoryId && draft.qualityId && draft.statusId && /^[A-Z0-9]{6,32}$/.test(draft.manufacturerCode) && /^\d+(\.\d{1,2})?$/.test(draft.price) && Number(draft.price) > 0 && ["PLN", "EUR"].includes(draft.currency));
+  const publicationBlockers = source && draft ? [
+    ...ovokoPublicationBlockers(source, draft, brandId, modelId),
+    ...(busy || dictionaryBusy ? ["Trwa pobieranie i dopasowanie danych Ovoko."] : []),
+    ...(modelsBusy ? ["Trwa pobieranie modeli wybranej marki."] : []),
+    ...(draft.statusId && dictionaries.statuses && !dictionaries.statuses.some(row => row.id === draft.statusId && ["na stanie", "in stock"].includes(row.name.trim().toLowerCase())) ? ["Pierwsza proba wymaga dostepnosci Na stanie, nie Sprzedano ani Zarezerwowano."] : []),
+  ] : [];
+  const canPublish = Boolean(source && draft && !publicationBlockers.length);
+  function openPublicationReview() {
+    if (!source || publishing || attempted) return;
+    setReview(true); setDonorConfirmed(false); setShippingConfirmed(false);
+    publicationPanel.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
   async function publishSingle() {
     if (!canPublish || !source || !draft || publishing || attempted || !review || !donorConfirmed || !shippingConfirmed) return;
     setPublishing(true); setAttempted(true); setPublicationMessage("");
@@ -151,7 +163,7 @@ export function OvokoPreparationPanel() {
     } finally { setPublishing(false); }
   }
   return <section className="space-y-5">
-    <h1 className="text-3xl font-black">Przygotuj do Ovoko</h1>
+    <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-3xl font-black">Przygotuj do Ovoko</h1><button type="button" className={`${button} bg-orange-600`} disabled={!source || busy || dictionaryBusy || modelsBusy || publishing || attempted} onClick={openPublicationReview}>Wystaw 1 czesc w Ovoko</button></div>
     <p className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm leading-6"><strong>Przygotowanie jednej oferty.</strong> Sam podglad niczego nie wysyla. Dopiero osobne potwierdzenie na dole tworzy jedna czesc w Ovoko. Nie tworzymy samochodu i nie zmieniamy Allegro. Edycja formularza pozostaje w pamieci; rejestr proby wysylki jest zapisywany na serwerze.</p>
     <a href="/panel/inventory" className="inline-block text-sm underline">Wroc do ofert Allegro</a>
     {busy && <p role="status">Sprawdzam uprawnienia i pobieram oferte z polaczonego konta Allegro...</p>}
@@ -164,7 +176,7 @@ export function OvokoPreparationPanel() {
           <p>Cena zrodlowa: {source.price || "brak"} {source.currency}</p><p className="break-all text-sm">ID zewnetrzne: {source.externalId || "brak"}; kategoria Allegro ID: {source.categoryId || "brak"}</p>
           <p className="break-all text-sm">Cennik Allegro: {shippingName || source.shippingRateId || "brak"}</p>
           <div className="grid grid-cols-3 gap-2" aria-label="Zdjecia z Allegro">{source.images.map((url, index) => <img key={url} src={url} alt={`Zdjecie zrodlowe ${index + 1}`} loading="lazy" referrerPolicy="no-referrer" className="aspect-square w-full rounded-lg bg-white/5 object-contain" />)}</div>
-          <p className="text-sm text-white/60">Adresow zdjec do sprawdzenia: {source.images.length}. Pominiete lub powtorzone: {source.skippedImages}. Nie wyslano zdjec do Ovoko.</p>
+          <p className="text-sm text-white/60">Galeria do przeniesienia: {source.images.length} zdjec. Powtorzenia pominiete: {source.duplicateImages}. Niedozwolone lub ponad limit: {source.rejectedImages}. {partId ? "Przekazano adresy calej galerii do API Ovoko; sprawdz zdjecia na koncie." : "Przy wystawieniu przekazujemy cala te galerie, nie tylko miniature. Sam podglad jeszcze jej nie wysyla."}</p>
           <details><summary className="cursor-pointer text-sm font-bold">Parametry zrodlowe Allegro (bez mapowania ID)</summary><ul className="max-h-60 overflow-auto text-sm">{source.parameters.map((parameter, index) => <li key={index} className="mt-2 break-words">{parameter.name || parameter.id}: {parameter.values.join(", ") || "Brak wartosci tekstowej"}</li>)}</ul></details>
         </section>
         <fieldset disabled={publishing || attempted} className="min-w-0 space-y-4 rounded-2xl border border-white/10 p-4"><h2 className="text-xl font-bold">Robocze dane do Ovoko</h2>
@@ -205,11 +217,11 @@ export function OvokoPreparationPanel() {
         </fieldset>
       </div>
       {dictionaryError && <p role="alert" className="rounded-xl border border-amber-400/30 p-4">{dictionaryError} Dane robocze pozostaly bez zmian.</p>}
-      <section className="rounded-xl border border-amber-400/30 p-4"><h2 className="font-bold">Pierwsza pojedyncza wysylka do Ovoko</h2><ul className="mt-3 list-disc space-y-2 pl-5 text-sm" aria-label="Braki przygotowania">{ovokoPreparationIssues(source, draft).map(issue => <li key={issue}>{issue}</li>)}</ul>
+      <section ref={publicationPanel} className="scroll-mt-5 rounded-xl border border-amber-400/30 p-4"><h2 className="font-bold">Pierwsza pojedyncza wysylka do Ovoko</h2><ul className="mt-3 list-disc space-y-2 pl-5 text-sm" aria-label="Braki przygotowania">{ovokoPreparationIssues(source, draft).map(issue => <li key={issue}>{issue}</li>)}</ul>
         <p className="my-3 text-sm">Tylko aktywna oferta z jedna sztuka, bez zestawu i brakujacych zdjec. Podaj ID istniejacego, prawdziwego auta-dawcy w Ovoko. Opony i felgi nie sa jeszcze obslugiwane. Brak automatu konczacego oferty po sprzedazy: podczas proby pilnuj dostepnosci na obu portalach.</p>
-        <button type="button" className={button} disabled={!canPublish || publishing || attempted} onClick={() => { setReview(true); setDonorConfirmed(false); setShippingConfirmed(false); }}>Sprawdz pojedyncza wysylke</button>
-        {!canPublish && <p className="mt-2 text-sm text-amber-200">Uzupelnij numer, kategorie, stan, dostepnosc, marke, model, rzeczywiste ID dawcy i cene. Zrodlo musi miec dokladnie jedna sztuke i komplet zdjec.</p>}
-        {review && <div className="mt-4 space-y-3 rounded-xl border border-orange-400/40 p-4"><h3 className="font-bold">Potwierdzenie: jedna czesc</h3><p>{source.title}</p><p>Numer: {draft.manufacturerCode}; cena: {draft.price} {draft.currency}; zdjec: {source.images.length}</p><p>Kategoria: {dictionaries.categories?.find(row => row.id === draft.categoryId)?.name}; stan: {dictionaries.qualities?.find(row => row.id === draft.qualityId)?.name}; dostepnosc: {dictionaries.statuses?.find(row => row.id === draft.statusId)?.name}</p><p>Auto: {dictionaries.brands?.find(row => row.id === brandId)?.name} {dictionaries.models?.find(row => row.id === modelId)?.name}; dawca ID: {draft.donorId}</p>
+        <button type="button" className={button} disabled={publishing || attempted} onClick={openPublicationReview}>Sprawdz pojedyncza wysylke</button>
+        {publicationBlockers.length > 0 && <div className="mt-3 rounded-lg border border-amber-400/30 p-3 text-sm text-amber-200"><p className="font-bold">Co blokuje wystawienie:</p><ul className="mt-2 list-disc space-y-1 pl-5" aria-label="Blokady wystawienia">{publicationBlockers.map(issue => <li key={issue}>{issue}</li>)}</ul></div>}
+        {review && <div className="mt-4 space-y-3 rounded-xl border border-orange-400/40 p-4"><h3 className="font-bold">Potwierdzenie: jedna czesc</h3><p>{source.title}</p><p>Numer: {draft.manufacturerCode}; cena: {draft.price} {draft.currency}</p><p className="font-bold">Przenoszone zdjecia: {source.images.length} (cala galeria z Allegro)</p><p>Kategoria: {dictionaries.categories?.find(row => row.id === draft.categoryId)?.name}; stan: {dictionaries.qualities?.find(row => row.id === draft.qualityId)?.name}; dostepnosc: {dictionaries.statuses?.find(row => row.id === draft.statusId)?.name}</p><p>Auto: {dictionaries.brands?.find(row => row.id === brandId)?.name} {dictionaries.models?.find(row => row.id === modelId)?.name}; dawca ID: {draft.donorId}</p>
           <label className="flex gap-2 text-sm"><input type="checkbox" checked={donorConfirmed} disabled={attempted} onChange={event => setDonorConfirmed(event.target.checked)} />Potwierdzam rzeczywistego dawce tej czesci, nie tylko pasujacy model.</label>
           <label className="flex gap-2 text-sm"><input type="checkbox" checked={shippingConfirmed} disabled={attempted} onChange={event => setShippingConfirmed(event.target.checked)} />Sprawdzilem zasady i koszt wysylki w Ovoko. Cennik Allegro nie zostanie przeniesiony.</label>
           <button type="button" className={`${button} bg-orange-600`} disabled={!canPublish || publishing || attempted || !donorConfirmed || !shippingConfirmed} onClick={() => void publishSingle()}>{publishing ? "Wysylam jedna czesc..." : "Wyslij 1 czesc do Ovoko"}</button><p className="text-xs text-white/60">Powstanie rzeczywisty rekord czesci. Nie zmieniamy istniejacych czesci, magazynow, aut ani Allegro. Po niepewnym wyniku nie ponawiamy automatycznie.</p>

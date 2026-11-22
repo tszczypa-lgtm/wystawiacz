@@ -79,15 +79,30 @@ export function suggestPartNumbers(title: string, parameters: { name: string; va
 export type CategorySuggestion = { id: string; path: string; matches: string[]; score: number; weak: boolean };
 const fold = (value: string) => value.toLowerCase().replace(/ł/g, "l").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 export function vehicleSuggestionText(title: string, parameters: { name: string; values: string[] }[]) {
-  const labels = new Set(["marka pojazdu", "marka samochodu", "model pojazdu", "model samochodu"]);
+  const labels = new Set(["marka pojazdu", "marka samochodu", "marka auta", "producent pojazdu", "producent samochodu", "model pojazdu", "model samochodu"]);
   return [title, ...parameters.filter(row => labels.has(fold(row.name).trim())).flatMap(row => row.values)].join(" ");
 }
 export function suggestOvokoBrands(title: string, brands: OvokoReadRow[]) {
   const text = ` ${fold(title).replace(/[^a-z0-9]+/g, " ")} `;
-  return brands.filter(row => {
+  const matches = brands.filter(row => {
     const names = [row.name, ...(fold(row.name) === "volkswagen" ? ["VW"] : [])];
     return names.some(name => text.includes(` ${fold(name).replace(/[^a-z0-9]+/g, " ").trim()} `));
   });
+  // Compound makes are more specific than their contained make names (Land Rover vs Rover).
+  return matches.filter(row => !matches.some(other => other !== row && fold(other.name).length > fold(row.name).length && ` ${fold(other.name)} `.includes(` ${fold(row.name)} `)));
+}
+export function automaticOvokoBrand(title: string, parameters: { name: string; values: string[] }[], brands: OvokoReadRow[]): string {
+  const labels = new Set(["marka pojazdu", "marka samochodu", "marka auta", "producent pojazdu", "producent samochodu"]);
+  const explicit = parameters.filter(row => labels.has(fold(row.name).trim())).flatMap(row => row.values);
+  if (explicit.length) {
+    const matches = suggestOvokoBrands(explicit.join(" "), brands);
+    // An explicit but conflicting/unrecognized vehicle brand must not be overridden by title guesses.
+    return matches.length === 1 ? matches[0].id : "";
+  }
+  const matches = suggestOvokoBrands(title, brands);
+  const specific = matches.filter(row => fold(row.name).trim() !== "ac");
+  const candidates = specific.length ? specific : matches;
+  return candidates.length === 1 ? candidates[0].id : "";
 }
 export function suggestOvokoModels(title: string, models: OvokoReadRow[]) {
   const tokens = new Set(fold(title).match(/[a-z0-9]+/g) || []);

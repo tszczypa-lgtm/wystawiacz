@@ -4,10 +4,11 @@ import ts from "typescript";
 
 const source = readFileSync(new URL("../lib/ovoko-preparation.ts", import.meta.url), "utf8");
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-const { ovokoSourcePreview, initialOvokoDraft, ovokoPreparationIssues } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
+const { ovokoSourcePreview, initialOvokoDraft, ovokoPreparationIssues, ovokoPublicationBlockers } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
 const offer = { id: "123", name: "Pompa 123456", images: ["https://a.allegroimg.com/picture", "https://evil.test/x.jpg", "javascript:alert(1)", "https://a.allegroimg.com/picture"], description: { sections: [{ items: [{ type: "TEXT", content: "Text" }, { type: "IMAGE", url: "https://evil.test" }] }] }, parameters: [{ id: "p1", name: "Numer katalogowy części", values: ["ABC123"] }], productSet: [{ product: { parameters: [] }, quantity: { value: 1 } }], sellingMode: { price: { amount: "123.45", currency: "PLN" } }, stock: { available: 1 }, publication: { status: "ACTIVE" }, category: { id: "999" }, delivery: { shippingRates: { id: "rate-id" } }, external: { id: "BIN-1" } };
 const preview = ovokoSourcePreview(offer, "123", html => html);
 assert.deepEqual(preview.images, ["https://a.allegroimg.com/picture"]); assert.equal(preview.skippedImages, 3);
+assert.equal(preview.rejectedImages, 2); assert.equal(preview.duplicateImages, 1);
 assert.equal(preview.suggestedCode, "ABC123"); assert.equal(preview.shippingRateId, "rate-id"); assert.equal(preview.bundle, false);
 assert.equal(preview.description, "Text");
 const draft = initialOvokoDraft(preview); assert.equal(draft.price, "123.45"); assert.equal(draft.currency, "PLN");
@@ -24,6 +25,13 @@ assert.equal(draft.manufacturerCode, "", "MPN requires explicit user choice even
 assert.equal(draft.categoryId, ""); assert.equal(draft.donorId, ""); assert.equal(draft.qualityId, ""); assert.equal(draft.statusId, ""); assert.equal(draft.shippingPlan, "");
 const issues = ovokoPreparationIssues(preview, draft); assert.ok(issues.some(item => item.includes("formatu"))); assert.ok(issues.some(item => item.includes("Cennik Allegro")));
 const filled = { ...draft, categoryId: "3", donorId: "36", qualityId: "0", statusId: "0", shippingPlan: "Check" };
+const safePreview = ovokoSourcePreview({ ...offer, images: ["https://a.allegroimg.com/picture", "https://a.allegroimg.com/picture", "https://a.allegroimg.com/second.jpg"] }, "123", html => html);
+const ready = { ...filled, manufacturerCode: "5Q0959593E" };
+assert.deepEqual(safePreview.images, ["https://a.allegroimg.com/picture", "https://a.allegroimg.com/second.jpg"]);
+assert.deepEqual(ovokoPublicationBlockers(safePreview, ready, "1", "2"), [], "Duplicate photos do not block a complete unique gallery");
+assert.ok(ovokoPublicationBlockers(preview, ready, "1", "2").some(issue => issue.includes("nieobslugiwanym")));
+assert.ok(ovokoPublicationBlockers(safePreview, { ...ready, donorId: "" }, "1", "2").some(issue => issue.includes("ID rzeczywistego")));
+assert.ok(ovokoPublicationBlockers({ ...safePreview, stock: 5 }, ready, "1", "2").some(issue => issue.includes("Allegro: 5")));
 assert.ok(ovokoPreparationIssues(preview, filled).some(item => item.includes("Samochod-dawca")), "Filling a donor ID does not verify provenance");
 assert.ok(ovokoPreparationIssues(preview, filled).some(item => item.includes("nie jest zweryfikowany")));
 assert.equal(initialOvokoDraft({ ...preview, currency: "CZK" }).price, "", "Never reinterpret or convert unsupported currency");
