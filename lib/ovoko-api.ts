@@ -3,6 +3,8 @@ import { OvokoError, ovokoReadPlan, parseOvokoRead, ovokoInventoryPlan, ovokoNoC
 import { loadOvokoConnection, ovokoConnectionKey, ovokoConnectionStatus, removeOvokoConnection, saveOvokoConnection, validateOvokoCredentials, type OvokoKeyEnv } from "./ovoko-connection";
 import { publishOvokoPart, type OvokoPublishEnv } from "./ovoko-publish";
 import { createOvokoCar } from "./ovoko-create-car";
+import { ovokoCarsResponse } from "./ovoko-cars";
+import { ovokoWriteClient } from "./ovoko-write-client";
 
 type OvokoEnv = AccountEnv & OvokoKeyEnv & OvokoPublishEnv & { OVOKO_TEST_ENABLED?: string };
 const attempts = new Map<string, number[]>();
@@ -94,6 +96,7 @@ export async function handleOvokoApi(request: Request, env: OvokoEnv): Promise<R
       const code = typeof result.status_code === "string" && /^R\d{3}$/.test(result.status_code) ? result.status_code : "unknown";
       return reply({ message: `${errors[code] || "Ovoko nie potwierdzilo poprawnego odczytu."} Kod: ${code}. Nie zmieniono ofert.`, code }, code === "R008" ? 429 : 502);
     }
+    if (plan?.operation === "cars") result = await ovokoCarsResponse(result, plan.path, () => ovokoWriteClient(credentials)("/get/cars"));
     const checkedAt = new Date().toISOString();
     if (plan) return reply({ ok: true, code: "R200", readOnly: true, credentialsStored: useSaved, checkedAt, operation: plan.operation, ...parseOvokoRead(plan.operation, result, plan.operation === "cars" ? values.modelId : values.brandId, inventory ? ovokoInventoryPlan(values) : undefined) });
     if (!Array.isArray(result.list) || !result.list.length || result.list.length > 5000 || result.list.some(item => !item || typeof item !== "object" || !/^\d{1,12}$/.test(String(item.id)) || typeof item.name !== "string" || !item.name.trim() || item.name.length > 200)) throw new OvokoError(502, "Niepelna lista marek z Ovoko. Nie potwierdzono poprawnego odczytu.");

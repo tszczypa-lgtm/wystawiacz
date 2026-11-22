@@ -176,7 +176,7 @@ export function OvokoPreparationPanel() {
   const otherCodes = draft ? additionalOvokoCodes(draft.additionalCodes, draft.manufacturerCode) : [];
   async function createCar(): Promise<string | null> {
     const attemptKey = `${modelId}:${carYear}`;
-    if (!brandId || !modelId || !/^\d{4}$/.test(carYear) || creatingCar || carWriteLocks.current.has(attemptKey) || carAttempted || carsBusy || carsError || modelsBusy || dictionaryBusy) return null;
+    if (!brandId || !modelId || !/^\d{4}$/.test(carYear) || creatingCar || carWriteLocks.current.has(attemptKey) || carAttempted || carsBusy || modelsBusy || dictionaryBusy) return null;
     carWriteLocks.current.add(attemptKey);
     setCreatingCar(true); setCarAttempted(true); setCarMessage(""); setReview(false);
     setDraft(previous => previous ? { ...previous, donorId: "" } : previous);
@@ -190,6 +190,7 @@ export function OvokoPreparationPanel() {
         throw new Error(result.message || "Niepewny wynik tworzenia auta. Sprawdz Ovoko, nie ponawiaj automatycznie.");
       }
       setDraft(previous => previous ? { ...previous, donorId: result.carId! } : previous);
+      setCarsError("");
       setCarMessage(`${result.reused ? "Wykorzystano istniejacy" : "Utworzono nowy"} rekord auta ID ${result.carId}. ID uzupelniono automatycznie.`);
       setCarsRefresh(value => value + 1);
       return result.carId;
@@ -205,7 +206,7 @@ export function OvokoPreparationPanel() {
   async function publishSingle() {
     if (!source || !draft || publishing || attempted || publicationLock.current || publicationSent.current || creatingCar || carsBusy || modelsBusy || dictionaryBusy) return;
     const blockers = ovokoPublicationBlockers(source, { ...draft, donorId: draft.donorId || "1" }, brandId, modelId);
-    if (blockers.length || carsError || dictionaryError || modelError) {
+    if (blockers.length || dictionaryError || modelError) {
       setPublicationMessage([...blockers, carsError, dictionaryError, modelError].filter(Boolean).join(" "));
       openPublicationReview(); return;
     }

@@ -29,10 +29,11 @@ export function ovokoPageData(result: Record<string, unknown>, expected: { page:
 export function ovokoNoCars(result: Record<string, unknown>, path: string): Record<string, unknown> {
   if (result.status_code !== "R004") return result;
   const url = new URL(path, "https://api.rrr.lt");
-  if (url.pathname !== "/v2/get/cars") return result;
+  if (!["/v2/get/cars", "/get/cars"].includes(url.pathname)) return result;
   if (result.data != null && (!Array.isArray(result.data) || result.data.length)) throw invalid("cars.empty");
   if (result.list != null && (!Array.isArray(result.list) || result.list.length)) throw invalid("cars.empty");
   if (result.pagination !== undefined && (!record(result.pagination) || ovokoInteger(result.pagination.total_count) !== 0)) throw invalid("cars.empty");
+  if (url.pathname === "/get/cars") return { status_code: "R200", list: [] };
   const page = ovokoInteger(url.searchParams.get("page")), limit = ovokoInteger(url.searchParams.get("limit"));
   if (!page || limit < 1 || limit > 100) throw invalid("cars.empty");
   return { status_code: "R200", data: [], pagination: { page, limit, total_count: 0 } };

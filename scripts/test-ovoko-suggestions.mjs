@@ -100,6 +100,10 @@ assert.equal(ovokoAutomaticFields({ ...sourceOffer, title: "POMPA 0 281 010 038"
 assert.equal(ovokoAutomaticFields({ ...sourceOffer, title: "POMPA 5Q0 959 593 E" }, metadata).manufacturerCode, "5Q0959593E", "A separate index remains complete");
 assert.equal(ovokoAutomaticFields({ ...sourceOffer, title: "WAUZZZ8K9DA123456" }, metadata).manufacturerCode, undefined, "Potential VINs remain excluded");
 assert.deepEqual(automatic, { manufacturerCode: "5Q0959593E", categoryId: "3", qualityId: "0", statusId: "0" });
+const tiedCategories = [{ id: "81", name: "Sterowniki parkowania A", level: "3", parentId: "0" }, { id: "82", name: "Sterowniki parkowania B", level: "3", parentId: "0" }];
+const tied = suggestOvokoCategories(kangooTitle, tiedCategories);
+assert.equal(tied[0].score, tied[1].score);
+assert.equal(ovokoAutomaticFields({ ...sourceOffer, title: kangooTitle }, { categories: tiedCategories }).categoryId, tied[0].id, "Category ties always fill the first displayed proposal");
 for (const [condition, qualityId] of [["new", "17"], ["damaged", "18"], ["restored", "19"]]) assert.equal(ovokoAutomaticFields({ ...sourceOffer, condition }, metadata).qualityId, qualityId);
 assert.equal(ovokoAutomaticFields({ ...sourceOffer, condition: "" }, metadata).qualityId, undefined, "Availability does not prove condition");
 for (const changed of [{ stock: 0 }, { stock: null }, { status: "ENDED" }, { status: "INACTIVE" }, { bundle: true }]) assert.equal(ovokoAutomaticFields({ ...sourceOffer, ...changed }, metadata).statusId, undefined);

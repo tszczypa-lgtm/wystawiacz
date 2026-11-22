@@ -49,8 +49,13 @@ globalThis.fetch = async (input, options = {}) => {
   assert.equal(url.origin, "https://api.rrr.lt"); remoteCalls++; assert.equal(method, "POST"); assert.equal(options.redirect, "manual");
   const form = new URLSearchParams(options.body);
   for (const [name, value] of Object.entries(credentials)) assert.equal(form.get(name), value);
+  if (url.pathname === "/get/cars") {
+    assert.ok(mode.startsWith("legacy-"));
+    return Response.json({ status_code: "R200", list: mode === "legacy-bad" ? null : mode === "legacy-saved" ? [{ id: "88", car_model: "164", car_years: "2009" }] : [] });
+  }
   if (url.pathname === "/get/car_models/1") return Response.json({ status_code: mode === "bad-metadata" ? "R404" : "R200", list: [{ id: "164", brand: "1", name: "M-Class (W164)", year_start: "2005", year_end: "2011" }] });
   if (url.pathname === "/v2/get/cars") {
+    if (mode.startsWith("legacy-")) return Response.json({ status_code: "R200", data: [] });
     if (mode === "no-cars") return Response.json({ status_code: "R004", msg: "No cars found" });
     if (url.searchParams.has("model_ids")) {
       assert.equal(url.searchParams.get("model_ids"), "164");
@@ -90,6 +95,9 @@ try {
   reset(); mode = "saved-car"; const manual = await handleOvokoApi(req(), env); assert.equal(manual.status, 200); assert.equal((await manual.json()).carId, "88"); assert.equal(mutations, 0, "Reuse manually added same-model car, even with a different year, never create another");
   reset(); mode = "wrong-car"; assert.equal((await handleOvokoApi(req(), env)).status, 502); assert.equal(mutations, 0, "Untrusted model-filter response blocks creation");
   reset(); mode = "no-cars"; assert.equal((await handleOvokoApi(req(), env)).status, 200); assert.equal(mutations, 1, "Documented R004 empty lookup allows one guarded creation, never a retry");
+  reset(); mode = "legacy-empty"; const legacyCreated = await handleOvokoApi(req(), env); assert.equal(legacyCreated.status, 200, await legacyCreated.clone().text()); assert.equal(mutations, 1, "Missing V2 pagination is recovered by the complete legacy export before creating");
+  reset(); mode = "legacy-saved"; const legacyReused = await handleOvokoApi(req(), env); assert.equal(legacyReused.status, 200); assert.equal((await legacyReused.json()).carId, "88"); assert.equal(mutations, 0, "Fallback finds an existing vehicle instead of creating a duplicate");
+  reset(); mode = "legacy-bad"; assert.equal((await handleOvokoApi(req(), env)).status, 502); assert.equal(mutations, 0, "A broken fallback never means empty stock");
   reset(); const good = await handleOvokoApi(req(), env); assert.equal(good.status, 200, await good.clone().text()); assert.equal((await good.json()).carId, "77"); assert.equal(mutations, 1);
   const replay = await handleOvokoApi(req(), env); assert.equal(replay.status, 200); assert.equal((await replay.json()).reused, true); assert.equal(mutations, 1);
   user++; assert.equal((await handleOvokoApi(req(), env)).status, 409); assert.equal(mutations, 1, "Another owner cannot bypass a lock on the same Ovoko account/model/year");

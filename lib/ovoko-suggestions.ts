@@ -7,7 +7,7 @@ export function ovokoAutomaticFields(source: OvokoSourcePreview, dictionaries: R
   if (numbers.length) fields.manufacturerCode = numbers[0].number;
   if (numbers.length > 1) fields.additionalCodes = numbers.slice(1).map(candidate => candidate.number).join("\n");
   const categories = suggestOvokoCategories(source.title, dictionaries.categories || []);
-  if (categories.length && (!categories[1] || categories[0].score > categories[1].score)) fields.categoryId = categories[0].id;
+  if (categories.length) fields.categoryId = categories[0].id;
   const qualityNames: Record<string, string[]> = { used: ["uzywany", "used"], new: ["nowy", "new"], damaged: ["uszkodzony", "with defects"], restored: ["regenerowany", "restored"] };
   const qualities = (dictionaries.qualities || []).filter(row => (qualityNames[source.condition] || []).includes(fold(row.name).trim()));
   if (qualities.length === 1) fields.qualityId = qualities[0].id;

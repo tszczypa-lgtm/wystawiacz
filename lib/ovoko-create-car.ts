@@ -29,6 +29,10 @@ export async function createOvokoCar(request: Request, env: OvokoPublishEnv, con
     if (!model) throw new OvokoError(400, "Model nie nalezy do wybranej marki Ovoko.");
     const range = model.years?.match(/^(\d{4})? - (\d{4})?$/);
     if (range && ((range[1] && Number(year) < Number(range[1])) || (range[2] && Number(year) > Number(range[2])))) throw new OvokoError(400, "Podany rok nie pasuje do zakresu wybranego modelu Ovoko.");
+    // Find a reusable vehicle before the external-ID preflight, including older exports without external_id.
+    const savedCars = parseOvokoRead("cars", await remote(`/v2/get/cars?model_ids=${modelId}&page=1&limit=20`), modelId).rows;
+    const savedCar = savedCars.find(row => row.years === year) || savedCars[0];
+    if (savedCar && /^[1-9]\d{0,11}$/.test(savedCar.id)) return { ok: true, carId: savedCar.id, modelId, year, reused: true };
     const externalId = `tymo:car:${modelId}:${year}`;
     const prior = ovokoPageData(await remote(`/v2/get/cars?external_ids=${encodeURIComponent(externalId)}&page=1&limit=1`), { page: 1, limit: 1 }, "car-external");
     if (prior.data.length) {
@@ -36,10 +40,6 @@ export async function createOvokoCar(request: Request, env: OvokoPublishEnv, con
       if (prior.pagination.total !== 1 || !row || typeof row !== "object" || !/^[1-9]\d{0,11}$/.test(String(row.id)) || String(row.car_model) !== modelId || String(row.car_years) !== year) throw new OvokoError(409, "Znaleziono niezgodny rekord auta z tym powiazaniem. Nie nadpisujemy go.");
       return { ok: true, carId: String(row.id), modelId, year, reused: true };
     }
-    // Recheck the account's existing cars immediately before any creation, including manually added cars.
-    const savedCars = parseOvokoRead("cars", await remote(`/v2/get/cars?model_ids=${modelId}&page=1&limit=20`), modelId).rows;
-    const savedCar = savedCars.find(row => row.years === year) || savedCars[0];
-    if (savedCar && /^[1-9]\d{0,11}$/.test(savedCar.id)) return { ok: true, carId: savedCar.id, modelId, year, reused: true };
     const statuses = await remote("/get/car_status");
     if (!statuses.list || typeof statuses.list !== "object" || Array.isArray(statuses.list)) throw new Error("status shape");
     const added = Object.entries(statuses.list as Record<string, { pl?: string; en?: string }>).filter(([id, row]) => /^[1-9]\d{0,11}$/.test(id) && ["dodano", "added"].includes(String(row?.pl || row?.en || "").trim().toLowerCase()));

@@ -68,7 +68,7 @@ globalThis.fetch = async (input, options = {}) => {
   if (url.pathname === "/get/part_quality") return Response.json({ status_code: "R200", list: { "0": { pl: "Używany" } } });
   if (url.pathname === "/get/part_status") return Response.json({ status_code: "R200", list: { "0": { pl: "Na stanie" }, "2": { pl: "Sprzedano" } } });
   if (url.pathname === "/get/car_models/1") return Response.json({ status_code: "R200", list: [{ id: "11", brand: "1", name: "A4", year_start: "2000", year_end: "2010" }] });
-  if (url.pathname === "/v2/get/cars") { assert.equal(url.searchParams.get("car_ids"), "13"); return Response.json({ status_code: "R200", data: [{ id: "13", car_model: donorModel }] }); }
+  if (url.pathname === "/v2/get/cars") { assert.equal(url.searchParams.get("car_ids"), "13"); return Response.json({ status_code: "R200", data: [{ id: "13", car_model: donorModel }], pagination: { page: 1, limit: 1, total_count: 1 } }); }
   if (url.pathname === "/v2/get/parts") { assert.equal(url.searchParams.get("external_ids"), "tymo:555:101"); return Response.json({ status_code: "R200", data: duplicate ? [{ id: "99" }] : [], pagination: { page: "1", limit: "1", total_count: duplicate ? "1" : "0" } }); }
   assert.equal(url.pathname, "/crm/importPart", "No arbitrary mutation, update, delete, status change, donor or warehouse operations");
   assert.equal(records.size, 1); assert.equal([...records.values()][0].state, "sending", "Durable reservation precedes every mutation");

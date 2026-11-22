@@ -1,5 +1,6 @@
 import type { OvokoCredentials } from "./ovoko-connection";
 import { ovokoNoCars } from "./ovoko-read";
+import { ovokoCarsResponse } from "./ovoko-cars";
 
 export const ovokoWriteDigest = async (value: string) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)))].map(byte => byte.toString(16).padStart(2, "0")).join("");
 async function boundedJson(response: Response) {
@@ -19,7 +20,7 @@ async function boundedJson(response: Response) {
   return result as Record<string, any>;
 }
 export function ovokoWriteClient(credentials: OvokoCredentials) {
-  return async (path: string, extra?: URLSearchParams) => {
+  const remote = async (path: string, extra?: URLSearchParams): Promise<Record<string, any>> => {
     // Paths are constructed by the two server-side handlers, never supplied by the browser.
     if (!path.startsWith("/") || path.startsWith("//") || /[\r\n\\#]/.test(path)) throw new Error("path");
     const form = new URLSearchParams(credentials); extra?.forEach((value, key) => form.append(key, value));
@@ -27,6 +28,7 @@ export function ovokoWriteClient(credentials: OvokoCredentials) {
     if (!response.ok || (response.status >= 300 && response.status < 400)) { await response.body?.cancel(); throw new Error("provider"); }
     const result = ovokoNoCars(await boundedJson(response), path);
     if (result.status_code !== "R200") throw new Error("provider");
-    return result;
+    return path.startsWith("/v2/get/cars?") ? ovokoCarsResponse(result, path, () => remote("/get/cars")) : result;
   };
+  return remote;
 }

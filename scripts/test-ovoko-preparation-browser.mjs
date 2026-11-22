@@ -21,7 +21,7 @@ try {
   let holdStatuses = false, releaseStatuses = null, statusesStarted = null;
   let validImages = false, publicationFailure = false;
   let savedCars = [];
-  let carCreationFailure = false;
+  let carCreationFailure = false, carsReadFailure = false;
   const id = "1234567891";
   page.on("pageerror", error => errors.push(error.message)); page.on("request", request => allRequests.push(request.url()));
   await page.route("**/*", async route => {
@@ -45,6 +45,7 @@ try {
       return route.fulfill(publicationFailure ? { status: 409, json: { message: "Wynik wysylki jest niepewny. Sprawdz Ovoko." } } : { json: { ok: true, partId: "77", visibilityConfirmed: false } });
     }
     if (url.pathname === "/api/ovoko/create-car") {
+      carsReadFailure = false;
       assert.equal(request.method(), "POST"); const body = request.postDataJSON(); assert.equal(body.confirmCreate, true);
       assert.deepEqual(Object.keys(body).sort(), ["brandId", "confirmCreate", "modelId", "year"]);
       if (carCreationFailure) return route.fulfill({ status: 409, json: { message: "Niepewny wynik tworzenia auta. Sprawdz Ovoko." } });
@@ -59,6 +60,7 @@ try {
     assert.deepEqual(Object.keys(payload).sort(), payload.operation === "models" ? ["brandId", "operation", "useSaved"] : payload.operation === "cars" ? ["modelId", "operation", "useSaved"] : ["operation", "useSaved"]);
     assert.ok(["categories", "qualities", "statuses", "models", "cars"].includes(payload.operation));
     if (payload.operation === "cars") {
+      if (carsReadFailure) return route.fulfill({ status: 502, json: { message: "Nieprawidlowy format danych Ovoko (cars.pagination)." } });
       const rows = savedCars.filter(row => row.modelId === payload.modelId);
       return route.fulfill({ json: { ok: true, readOnly: true, operation: "cars", rows, pagination: { page: 1, limit: 20, total: rows.length } } });
     }
@@ -69,7 +71,7 @@ try {
     }
     if (dictionaryFailure) return route.fulfill({ status: 502, json: { message: "Blad slownika" } });
     if (holdStatuses && payload.operation === "statuses") { statusesStarted?.(); await new Promise(resolve => { releaseStatuses = resolve; }); }
-    return route.fulfill({ json: { ok: true, readOnly: true, operation: payload.operation, rows: payload.operation === "categories" ? [{ id: "1", name: "Rodzic", level: "1" }, { id: "3", name: "Pompy", level: "3" }] : payload.operation === "qualities" ? [{ id: "0", name: "Używany" }, { id: "1", name: "Nowy" }, { id: "3", name: "Uszkodzony" }, { id: "4", name: "Regenerowany" }] : [{ id: "0", name: "Na stanie" }, { id: "2", name: "Sprzedano" }] } });
+    return route.fulfill({ json: { ok: true, readOnly: true, operation: payload.operation, rows: payload.operation === "categories" ? [{ id: "1", name: "Rodzic", level: "1" }, { id: "3", name: "Pompy", level: "3" }, { id: "81", name: "Sterowniki parkowania A", level: "3" }, { id: "82", name: "Sterowniki parkowania B", level: "3" }] : payload.operation === "qualities" ? [{ id: "0", name: "Używany" }, { id: "1", name: "Nowy" }, { id: "3", name: "Uszkodzony" }, { id: "4", name: "Regenerowany" }] : [{ id: "0", name: "Na stanie" }, { id: "2", name: "Sprzedano" }] } });
   });
   async function mount(query = `offerId=${id}`) { await page.goto(`https://prepare.test/panel/inventory/prepare-ovoko?${query}`); await page.addStyleTag({ content: css.css }); await page.addScriptTag({ content: bundle.outputFiles[0].text }); }
   await mount(); await page.getByLabel("Nazwa robocza", { exact: true }).waitFor();
@@ -195,13 +197,14 @@ try {
   await send.click(); await page.getByRole("alert").filter({ hasText: "Wynik wysylki jest niepewny" }).waitFor();
   assert.equal(await send.isDisabled(), true, "Uncertain responses cannot be retried automatically");
   offerTitle = "MODUL STEROWNIK PARKOWANIA PDC KANGOO III 259903137R"; numberParameter = offerTitle;
+  carsReadFailure = true;
   await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="71"]').waitFor({ state: "attached" });
   assert.equal(await page.getByLabel("Marka auta Ovoko").inputValue(), "7");
   assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "71");
   assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "259903137R");
   publicationFailure = false;
-  await page.getByLabel("Kategoria Ovoko", { exact: true }).selectOption("3");
-  await page.getByText(/Brak zapisanego auta dla tego modelu/).waitFor();
+  assert.equal(await page.getByLabel("Kategoria Ovoko", { exact: true }).inputValue(), "81", "First tied category is automatic, without a manual selection");
+  await page.getByRole("alert").filter({ hasText: "cars.pagination" }).waitFor();
   const beforeKangooCars = calls.filter(call => call.path === "/api/ovoko/create-car").length;
   const beforeKangooParts = calls.filter(call => call.path === "/api/ovoko/publish").length;
   await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).dblclick();
@@ -215,6 +218,7 @@ try {
   assert.equal(await page.getByLabel("Marka auta Ovoko").inputValue(), "3", "Reported Land Rover title selects the full make without a click");
   assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "30");
   assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "JPLA14D617BA");
+  await page.getByLabel("Kategoria Ovoko", { exact: true }).selectOption("");
   const beforeBlocked = calls.filter(call => ["/api/ovoko/create-car", "/api/ovoko/publish"].includes(call.path)).length;
   await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).click();
   assert.match(await page.getByLabel("Blokady wystawienia").textContent(), /Moje samochody/);
