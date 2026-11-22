@@ -44,7 +44,27 @@ globalThis.fetch = async (input, options = {}) => {
     if (method === "GET") return Response.json(row?.owner_id === owner() ? [row] : []);
     assert.equal(method, "PATCH");
     if (!row || row.owner_id !== owner() || (url.searchParams.has("state") && url.searchParams.get("state") !== `eq.${row.state}`)) return Response.json([]);
-    Object.assign(row, JSON.parse(options.body)); return Response.json([row]);
+    const patch = JSON.parse(options.body);
+    if (patch.state === "created") {
+      assert.equal(new Headers(options.headers).get("Prefer"), "return=representation");
+      if (mode === "confirmation-rejected") return new Response("private-db-error", { status: 403 });
+      if (mode === "confirmation-network") throw new Error("private-network-error");
+      if (mode === "confirmation-unsafe-status") throw { status: "503 private-token", message: "private-db-error" };
+      if (mode === "confirmation-empty") return Response.json([]); // No matching row, no update.
+    }
+    Object.assign(row, patch);
+    if (patch.state === "created") {
+      // These writes committed, but the response cannot prove it. Replay must not import again.
+      if (mode === "confirmation-no-representation") return new Response(null, { status: 204 });
+      if (mode === "confirmation-invalid") return Response.json({ message: "private-db-error" });
+      if (mode === "confirmation-multiple") return Response.json([row, row]);
+      if (mode.startsWith("confirmation-mismatch-")) {
+        const field = mode.slice("confirmation-mismatch-".length);
+        return Response.json([{ ...row, [field]: "private-wrong-value" }]);
+      }
+      if (mode === "confirmation-null-row") return Response.json([null]);
+    }
+    return Response.json([row]);
   }
   assert.equal(url.origin, "https://api.rrr.lt"); remoteCalls++; assert.equal(method, "POST"); assert.equal(options.redirect, "manual");
   const form = new URLSearchParams(options.body);
@@ -114,6 +134,29 @@ try {
     reset(); mode = failure; if (failure === "log-failure") failDb = "PATCH";
     const response = await handleOvokoApi(req(), env); assert.equal(response.status, 409); assert.ok(!(await response.text()).includes("private-")); assert.equal(mutations, 1);
     assert.equal((await handleOvokoApi(req(), env)).status, 409); assert.equal(mutations, 1, "Uncertain vehicle creation is never retried");
+  }
+  for (const [failure, diagnosis, committed] of [
+    ["confirmation-rejected", /status adaptera bazy: 503; rzeczywisty HTTP Supabase niedostepny/, false],
+    ["confirmation-network", /status adaptera bazy niedostepny/, false],
+    ["confirmation-unsafe-status", /status adaptera bazy niedostepny/, false],
+    ["confirmation-empty", /Pusta reprezentacja po PATCH/, false],
+    ["confirmation-no-representation", /Brak reprezentacji po PATCH/, true],
+    ["confirmation-invalid", /Nieprawidlowa reprezentacja po PATCH/, true],
+    ["confirmation-multiple", /Nieprawidlowa reprezentacja po PATCH/, true],
+    ["confirmation-null-row", /Niezgodny wiersz po PATCH/, true],
+    ...["state", "car_id", "ovoko_account", "model_id", "vehicle_year", "owner_id"].map(field => [`confirmation-mismatch-${field}`, /Niezgodny wiersz po PATCH/, true]),
+  ]) {
+    reset(); mode = failure;
+    const response = await handleOvokoApi(req(), env), body = await response.text();
+    assert.equal(response.status, 409, body);
+    assert.match(body, /etap: zapis potwierdzenia/);
+    assert.match(body, diagnosis);
+    assert.match(body, /Nie ponawiaj/);
+    assert.doesNotMatch(body, /private-|HTTP 403/, "Neither DB body/secrets nor fabricated upstream status is exposed");
+    if (failure === "confirmation-rejected") assert.match(body, /jesli brakuje tabeli lub kolumn, wymagany jest SQL migracji 013/);
+    assert.equal([...rows.values()][0].state, committed ? "created" : "uncertain", "Durable duplicate lock survives the diagnostic failure");
+    assert.equal((await handleOvokoApi(req(), env)).status, committed ? 200 : 409);
+    assert.equal(mutations, 1, "Diagnosis never retries an import, including after a committed PATCH with a lost representation");
   }
   console.log("Ovoko vehicle creation: explicit confirmation, model/year validation, Added status, no invented attributes, RLS-backed reservation, replay/concurrency, existing record reuse and uncertain no-retry passed. All services mocked; no live records created.");
 } finally { globalThis.fetch = originalFetch; }

@@ -14,7 +14,10 @@ import { matchOvokoFitment, type FitmentRow } from "./ovoko-fitment";
 type Context = Awaited<ReturnType<typeof accountContext>>;
 export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, context: Context, input: Record<string, unknown>) {
   if (env.OVOKO_PUBLISH_ENABLED !== "true") throw new OvokoError(503, "Publikacja Ovoko jest wylaczona.");
-  if (!["start", "prepare", "item"].includes(String(input.operation)) || Object.keys(input).some(key => !["operation", "offerId", "adjustment", "binding", "notes", "expectedSource", "prepared", "fallbackVehicle"].includes(key))) throw new OvokoError(400, "Nieprawidlowa operacja przenoszenia.");
+  if (!["start", "prepare", "item"].includes(String(input.operation)) || Object.keys(input).some(key => !["operation", "offerId", "adjustment", "binding", "notes", "expectedSource", "prepared", "fallbackVehicle", "overrides", "allowTechnicalModel"].includes(key))) throw new OvokoError(400, "Nieprawidlowa operacja przenoszenia.");
+  if (input.allowTechnicalModel !== undefined && typeof input.allowTechnicalModel !== "boolean") throw new OvokoError(400, "Nieprawidlowy tryb modelu roboczego.");
+  const overrides = input.overrides as Record<string, unknown> | undefined;
+  if (overrides !== undefined && (!overrides || typeof overrides !== "object" || Array.isArray(overrides) || Object.keys(overrides).some(key => !["categoryId", "manufacturerCode"].includes(key)) || Object.values(overrides).some(value => typeof value !== "string") || (overrides.categoryId !== undefined && !/^[1-9]\d{0,11}$/.test(String(overrides.categoryId))) || (overrides.manufacturerCode !== undefined && overrides.manufacturerCode !== "" && !/^[A-Z0-9]{6,32}$/.test(String(overrides.manufacturerCode))))) throw new OvokoError(400, "Sprawdz reczne uzupelnienie kategorii lub numeru.");
   const fallback = input.fallbackVehicle as { brandId: string; modelId: string } | undefined;
   if (fallback !== undefined && (!fallback || typeof fallback !== "object" || Array.isArray(fallback) || Object.keys(fallback).some(key => !["brandId", "modelId"].includes(key)) || typeof fallback.brandId !== "string" || !/^[1-9]\d{0,11}$/.test(fallback.brandId) || typeof fallback.modelId !== "string" || !/^[1-9]\d{0,11}$/.test(fallback.modelId))) throw new OvokoError(400, "Nieprawidlowy model pomocniczy.");
   try { validateOvokoAdjustment(input.adjustment); } catch (error) { throw new OvokoError(400, (error as Error).message); }
@@ -66,6 +69,11 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
     } else dictionaries[operation] = parseOvokoRead(operation, result).rows;
   }
   const draft = { ...initialOvokoDraft(source), ...ovokoAutomaticFields(source, dictionaries), price, donorId: "1" };
+  if (overrides?.categoryId !== undefined) {
+    if (!dictionaries.categories.some(row => row.id === overrides.categoryId && row.level === "3")) throw new OvokoError(400, "Wybierz kategorie koncowa Ovoko z listy.");
+    draft.categoryId = overrides.categoryId as string;
+  }
+  if (overrides?.manufacturerCode !== undefined) draft.manufacturerCode = overrides.manufacturerCode as string;
   let brandId = automaticOvokoBrand(source.title, source.parameters, dictionaries.brands);
   const modelCache = new Map<string, OvokoReadRow[]>();
   const loadModels = async (brand: string) => {
@@ -104,7 +112,7 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
     if (!draft.categoryId && fitment.names.length) draft.categoryId = ovokoAutomaticFields({ ...source, title: `${source.title} ${fitment.names.join(" ")}` }, dictionaries).categoryId || "";
   }
   if (!modelId && fallback) {
-    if (!allowedBrands.some(row => row.id === fallback.brandId)) throw new OvokoError(400, "Model pomocniczy nie pasuje do marek tej oferty. Wybierz model pojedynczo.");
+    if (allowedBrands.length && !allowedBrands.some(row => row.id === fallback.brandId)) throw new OvokoError(400, "Model pomocniczy nie pasuje do marek tej oferty. Wybierz model pojedynczo.");
     // Do not use a fallback to bypass an explicitly conflicting model generation.
     if (generationConflict) throw new OvokoError(400, "Model z tytulu ma sprzeczna generacje. Sprawdz oferte pojedynczo.");
     if (fallback.brandId !== brandId) models = await loadModels(fallback.brandId);
@@ -112,6 +120,12 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
     if (!fallbackModel) throw new OvokoError(400, "Model pomocniczy nie nalezy do wybranej marki Ovoko.");
     if (ovokoModelHasConflict(vehicleText, fallbackModel)) throw new OvokoError(400, "Model pomocniczy ma sprzeczna generacje z tytulem. Nie utworzono auta.");
     brandId = fallback.brandId; modelId = fallback.modelId; usedFallback = true;
+  }
+  if (!modelId && input.allowTechnicalModel === true && !generationConflict && brandId && allowedBrands.some(row => row.id === brandId)) {
+    // Explicit batch preference: a real dictionary model, not verified fitment or a physical donor.
+    models = await loadModels(brandId);
+    const technical = [...models].sort((a, b) => a.id.localeCompare(b.id, "en", { numeric: true })).find(row => !ovokoModelHasConflict(vehicleText, row) && ovokoCarYear(source, row).year);
+    if (technical) { modelId = technical.id; fitmentOrigin = "technical"; }
   }
   const model = models.find(row => row.id === modelId);
   const year = ovokoCarYear(source, model).year;
@@ -124,5 +138,5 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
   if (blockers.length) throw new OvokoError(400, blockers.join(" "));
   const car = await createOvokoCar(request, env, context, { brandId, modelId, year, confirmCreate: true }, fingerprint);
   // Separate preparation (including car reuse/create) from part publication to bound Worker subrequests.
-  return { ok: true, vehicle: { brand: dictionaries.brands.find(row => row.id === brandId)?.name || brandId, model: model!.name, usedFallback, evidence: fitmentOrigin ? fitmentOrigin.startsWith("catalog") ? "Katalog Allegro - pelny MPN" : "Pasuje do Allegro" : "Dane oferty" }, prepared: { brandId, modelId, donorId: car.carId, categoryId: draft.categoryId, qualityId: draft.qualityId, statusId: draft.statusId, manufacturerCode: draft.manufacturerCode, additionalCodes: draft.additionalCodes || "" }, price, currency: source.currency };
+  return { ok: true, vehicle: { brand: dictionaries.brands.find(row => row.id === brandId)?.name || brandId, model: model!.name, usedFallback, evidence: fitmentOrigin === "technical" ? "Model roboczy marki - zgodnosc niepotwierdzona" : fitmentOrigin ? fitmentOrigin.startsWith("catalog") ? "Katalog Allegro - pelny MPN" : "Pasuje do Allegro" : "Dane oferty" }, prepared: { brandId, modelId, donorId: car.carId, categoryId: draft.categoryId, qualityId: draft.qualityId, statusId: draft.statusId, manufacturerCode: draft.manufacturerCode, additionalCodes: draft.additionalCodes || "" }, price, currency: source.currency };
 }

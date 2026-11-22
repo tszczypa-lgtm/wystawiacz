@@ -5,6 +5,11 @@ import { OvokoError, parseOvokoRead } from "./ovoko-read";
 import { ovokoWriteClient, ovokoWriteDigest } from "./ovoko-write-client";
 
 type Context = Awaited<ReturnType<typeof accountContext>>;
+class VehicleJournalError extends OvokoError {
+  constructor(public adapterStatus?: number) {
+    super(503, "Nie potwierdzono rejestru tworzenia aut. Administrator powinien sprawdzic dostep do bazy i schemat; jesli brakuje tabeli lub kolumn, wymagany jest SQL migracji 013 w Supabase. Nie ponawiaj niepewnego zapisu bez sprawdzenia Ovoko.");
+  }
+}
 export async function createOvokoCar(request: Request, env: OvokoPublishEnv, context: Context, input: Record<string, unknown>, expectedFingerprint?: string) {
   if (env.OVOKO_PUBLISH_ENABLED !== "true") throw new OvokoError(503, "Tworzenie aut jest wylaczone flaga OVOKO_PUBLISH_ENABLED.");
   if (input.confirmCreate !== true || Object.keys(input).some(key => !["brandId", "modelId", "year", "confirmCreate"].includes(key))) throw new OvokoError(400, "Potwierdz utworzenie rekordu auta z wybranym modelem i rokiem.");
@@ -16,7 +21,11 @@ export async function createOvokoCar(request: Request, env: OvokoPublishEnv, con
   const selector = `ovoko_account=eq.${account}&model_id=eq.${modelId}&vehicle_year=eq.${year}`;
   const db = async (query: string, options?: RequestInit) => {
     try { return await context.db(`ovoko_vehicle_creations${query}`, options); }
-    catch { throw new OvokoError(503, "Nie potwierdzono rejestru tworzenia aut. Wykonaj migracje 013 w Supabase. Nie ponawiaj niepewnego zapisu bez sprawdzenia Ovoko."); }
+    catch (error) {
+      // accountContext normalizes HTTP failures to status 503; never call it the upstream HTTP status.
+      const status = error && typeof error === "object" && "status" in error ? error.status : undefined;
+      throw new VehicleJournalError(typeof status === "number" && Number.isInteger(status) && status >= 400 && status <= 599 ? status : undefined);
+    }
   };
   const existing = await db(`?${selector}&owner_id=eq.${context.user.id}&select=state,car_id`);
   if (!Array.isArray(existing)) throw new OvokoError(503, "Nieprawidlowy rejestr tworzenia aut.");
@@ -46,6 +55,7 @@ export async function createOvokoCar(request: Request, env: OvokoPublishEnv, con
     const reserved = await db("?on_conflict=ovoko_account,model_id,vehicle_year", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=representation" }, body: JSON.stringify({ ovoko_account: account, model_id: modelId, vehicle_year: year, owner_id: context.user.id, state: "sending" }) });
     if (!Array.isArray(reserved) || reserved.length !== 1 || reserved[0].owner_id !== context.user.id) throw new OvokoError(409, "Tworzenie tego auta jest juz zablokowane. Sprawdz Ovoko przed kolejna proba.");
     let writeStage = "importCar";
+    let confirmationDiagnosis = "";
     try {
       // Minimal user-confirmed catalogue record. No fabricated VIN, engine, purchase or storage data.
       const result = await remote("/crm/importCar", new URLSearchParams({ car_model: modelId, car_years: year, status: added[0][0], external_id: externalId }));
@@ -58,11 +68,19 @@ export async function createOvokoCar(request: Request, env: OvokoPublishEnv, con
       if (!car || String(car.id) !== carId || String(car.car_model) !== modelId || String(car.car_years) !== year) throw new Error("unverified car");
       writeStage = "zapis potwierdzenia";
       const saved = await db(`?${selector}&owner_id=eq.${context.user.id}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ state: "created", car_id: carId, updated_at: new Date().toISOString() }) });
-      if (!Array.isArray(saved) || saved.length !== 1 || saved[0].car_id !== carId) throw new Error("log");
+      if (saved === null || saved === undefined) confirmationDiagnosis = "Brak reprezentacji po PATCH rejestru (np. odpowiedz 204). Sprawdz obsluge Prefer: return=representation w bazie/proxy.";
+      else if (Array.isArray(saved) && saved.length === 0) confirmationDiagnosis = "Pusta reprezentacja po PATCH rejestru: brak potwierdzonego wiersza. Sprawdz selektor konta/modelu/roku/wlasciciela i uprawnienia bazy.";
+      else if (!Array.isArray(saved) || saved.length !== 1) confirmationDiagnosis = "Nieprawidlowa reprezentacja po PATCH rejestru: oczekiwano jednego wiersza. Sprawdz odpowiedz bazy/proxy.";
+      else {
+        const row = saved[0];
+        if (!row || typeof row !== "object" || Array.isArray(row) || row.state !== "created" || row.car_id !== carId || row.ovoko_account !== account || row.model_id !== modelId || row.vehicle_year !== year || row.owner_id !== context.user.id) confirmationDiagnosis = "Niezgodny wiersz po PATCH rejestru: stan, car_id lub zakres konta/modelu/roku/wlasciciela nie odpowiada potwierdzeniu. Sprawdz rejestr w bazie.";
+      }
+      if (confirmationDiagnosis) throw new Error("log");
       return { ok: true, carId, modelId, year, reused: false };
-    } catch {
+    } catch (error) {
+      if (writeStage === "zapis potwierdzenia" && error instanceof VehicleJournalError) confirmationDiagnosis = `Blad zapisu lub odczytu odpowiedzi PATCH rejestru (${error.adapterStatus === undefined ? "status adaptera bazy niedostepny" : `status adaptera bazy: ${error.adapterStatus}`}; rzeczywisty HTTP Supabase niedostepny). Sprawdz logi bazy/proxy, uprawnienia i schemat; jesli brakuje tabeli lub kolumn, wymagany jest SQL migracji 013.`;
       try { await db(`?${selector}&owner_id=eq.${context.user.id}&state=eq.sending`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ state: "uncertain", updated_at: new Date().toISOString() }) }); } catch { /* Sending remains a durable lock. */ }
-      throw new OvokoError(409, `Niepewny wynik tworzenia auta (etap: ${writeStage}). Moglo powstac w Ovoko. Nie ponawiaj; sprawdz Moje samochody. Blokada duplikatu pozostaje aktywna.`);
+      throw new OvokoError(409, `Niepewny wynik tworzenia auta (etap: ${writeStage}). ${confirmationDiagnosis ? `${confirmationDiagnosis} ` : ""}Moglo powstac w Ovoko. Nie ponawiaj; sprawdz Moje samochody. Blokada duplikatu pozostaje aktywna.`);
     }
   } catch (error) {
     if (error instanceof OvokoError) throw error;

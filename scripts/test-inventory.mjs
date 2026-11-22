@@ -13,7 +13,8 @@ const connections = await Promise.all(owners.map((id, index) => sealConnection({
 const shipping = "2991e29e-5fbc-46f5-963a-65c326ba65c2";
 const request = (query = "", method = "GET", index = 0) => new Request(`https://example.test/api/allegro/inventory${query}`, { method, headers: { Authorization: `Bearer user-${index}` } });
 const originalFetch = globalThis.fetch;
-let calls = [], status = 200, malformed = false, detailMode = false;
+let calls = [], status = 200, malformed = false, detailMode = false, pageSize = null, pricedRows = null;
+const cents = amount => BigInt(amount.replace(".", ""));
 globalThis.fetch = async (address, options = {}) => {
   const url = new URL(address), headers = new Headers(options.headers);
   const auth = headers.get("Authorization");
@@ -38,6 +39,13 @@ globalThis.fetch = async (address, options = {}) => {
   calls.push({ url, auth });
   if (status !== 200) return Response.json({ errors: [{ userMessage: "Odczyt niedostepny" }] }, { status });
   if (malformed) return Response.json({ totalCount: 0 });
+  if (pricedRows) {
+    const from = url.searchParams.get("sellingMode.price.amount.gte"), to = url.searchParams.get("sellingMode.price.amount.lte");
+    const rows = pricedRows.filter(row => (!from || cents(row.amount) >= cents(from)) && (!to || cents(row.amount) <= cents(to)));
+    const offset = Number(url.searchParams.get("offset")), limit = Number(url.searchParams.get("limit"));
+    return Response.json({ totalCount: rows.length, offers: rows.slice(offset, offset + limit).map(row => ({ id: row.id, sellingMode: { price: { amount: row.amount, currency: "PLN" } } })) });
+  }
+  if (pageSize !== null) return Response.json({ totalCount: 100123, offers: Array.from({ length: pageSize }, (_, i) => ({ id: String(i + 1), sellingMode: { price: { amount: "123.45", currency: "PLN" } } })) });
   return Response.json({ totalCount: 100123, offers: [{ id: auth === "Bearer seller-0" ? "1234567890" : "2234567890", name: "Pompa 1234567", primaryImage: { url: "https://a.allegroimg.com/test.jpg" }, stock: { available: 2 }, external: { id: "BIN-1" }, publication: { status: "ACTIVE" }, delivery: { shippingRates: { id: shipping } }, sellingMode: { price: { amount: "123.45", currency: "PLN" } }, internalSecret: "must-not-leak" }] });
 };
 try {
@@ -57,6 +65,65 @@ try {
   assert.equal(calls.at(-1).url.searchParams.get("delivery.shippingRates.id"), shipping);
   assert.equal(calls.at(-1).url.searchParams.get("publication.status"), null);
   assert.equal((await (await handleAllegroApi(request("", "GET", 1), env)).json()).offers[0].id, "2234567890", "Each owner uses only their encrypted seller connection");
+  for (const [input, from, to] of [
+    ["priceFrom=123.45&priceTo=123.45", "123.45", "123.45"],
+    ["priceFrom=0", "0.00", null],
+    ["priceTo=00123%2C5", null, "123.50"],
+    ["priceFrom=9007199254740993.01&priceTo=9007199254740993.02", "9007199254740993.01", "9007199254740993.02"],
+    ["priceFrom=&priceTo=", null, null],
+  ]) {
+    assert.equal((await handleAllegroApi(request(`?${input}`), env)).status, 200);
+    assert.equal(calls.at(-1).url.searchParams.get("sellingMode.price.amount.gte"), from);
+    assert.equal(calls.at(-1).url.searchParams.get("sellingMode.price.amount.lte"), to);
+    assert.equal(calls.at(-1).url.searchParams.has("priceFrom"), false);
+    assert.equal(calls.at(-1).url.searchParams.has("priceTo"), false);
+  }
+  pageSize = 200;
+  const before200 = calls.length;
+  const page200 = await (await handleAllegroApi(request("?limit=200&offset=9999800&priceFrom=123.45&priceTo=123.45"), env)).json();
+  assert.equal(page200.offers.length, 200); assert.equal(page200.count, 200); assert.equal(page200.limit, 200); assert.equal(page200.offset, 9999800);
+  assert.equal(page200.offers[199].price.amount, "123.45", "Offers at both inclusive bounds remain in the page");
+  assert.equal(calls.length, before200 + 1, "200 offers require one supported upstream request");
+  assert.equal(calls.at(-1).url.searchParams.get("limit"), "200");
+  pageSize = 201;
+  assert.equal((await handleAllegroApi(request("?limit=200"), env)).status, 502);
+  pageSize = null;
+  pricedRows = ["47.99", "48.00", ...Array(198).fill("50.00"), "52.00", "52.01"].map((amount, i) => ({ id: String(i + 1), amount }));
+  for (const [bounds, expectedCount, first, last] of [
+    [{ priceFrom: "48", priceTo: "52" }, 200, "48.00", "52.00"],
+    [{ priceFrom: "48" }, 201, "48.00", "52.00"],
+    [{ priceTo: "52" }, 201, "47.99", "50.00"],
+  ]) {
+    const before = calls.length;
+    const response = await handleAllegroApi(request(`?${new URLSearchParams({ ...bounds, limit: "200", query: "1234567", searchBy: "name" })}`), env);
+    assert.equal(response.status, 200);
+    const page = await response.json();
+    assert.equal(page.totalCount, expectedCount); assert.equal(page.count, 200);
+    assert.equal(page.offers[0].price.amount, first); assert.equal(page.offers.at(-1).price.amount, last);
+    assert.equal(calls.length, before + 1, "Number-first inventory search must not scan globally to fill 200 rows");
+    const forwarded = calls.at(-1).url.searchParams;
+    assert.equal(forwarded.get("name"), "1234567"); assert.equal(forwarded.get("limit"), "200");
+    assert.deepEqual(forwarded.getAll("sellingMode.price.amount.gte"), bounds.priceFrom ? ["48.00"] : []);
+    assert.deepEqual(forwarded.getAll("sellingMode.price.amount.lte"), bounds.priceTo ? ["52.00"] : []);
+  }
+  pricedRows = null;
+  assert.equal((await handleAllegroApi(request("?priceTo=1.00&limit=200"), env)).status, 200, "Allegro's documented upper-bound minimum is inclusive");
+  for (const duplicate of ["priceFrom=48&priceFrom=48&priceTo=52", "priceFrom=48&priceTo=52&priceTo=52", "priceFrom=&priceFrom=48"]) {
+    const before = calls.length;
+    assert.equal((await handleAllegroApi(request(`?limit=200&${duplicate}`), env)).status, 400, duplicate);
+    assert.equal(calls.length, before, "Duplicate bounds must be rejected, even when identical or blank");
+  }
+  const invalidPrices = ["-1", "1e2", "NaN", "Infinity", "1.001", "1,000.00", "1.", ".5", "+2", "1&owner=other", "9".repeat(31)];
+  for (const name of ["priceFrom", "priceTo"]) for (const value of invalidPrices) {
+    const before = calls.length;
+    assert.equal((await handleAllegroApi(request(`?${new URLSearchParams({ [name]: value })}`), env)).status, 400);
+    assert.equal(calls.length, before, "Invalid decimals never reach Allegro");
+  }
+  for (const input of ["priceFrom=2&priceTo=1.99", "priceTo=0", "priceTo=0.99", "priceFrom=9007199254740993.02&priceTo=9007199254740993.01", "priceFrom=1&priceFrom=2", "priceTo=2&priceTo=3", "limit=200&offset=9999801", "limit=201"]) {
+    const before = calls.length;
+    assert.equal((await handleAllegroApi(request(`?${input}`), env)).status, 400, input);
+    assert.equal(calls.length, before);
+  }
   const count = calls.length;
   for (const invalid of ["?limit=1000", "?offset=-1", "?offset=10000000", "?offset=9999999&limit=100", "?limit=50&limit=20", "?seller.id=other", "?owner=other", "?sort=bad", "?shippingRate=other", "?status=BAD", "?searchBy=offerId&query=abc", "?query=" + "a".repeat(101)]) assert.equal((await handleAllegroApi(request(invalid), env)).status, 400, invalid);
   for (const method of ["POST", "PATCH", "DELETE", "PUT"]) assert.equal((await handleAllegroApi(request("", method), env)).status, 405);
@@ -78,5 +145,5 @@ try {
   assert.equal((await handleAllegroApi(new Request("https://example.test/api/allegro/ovoko-fitment/1234567890?number=5Q0959593EA", { headers: { Authorization: "Bearer user-1" } }), env)).status, 404, "Automatic fitment also requires an owned source offer");
   assert.equal((await handleAllegroApi(new Request("https://example.test/api/allegro/ovoko-fitment/1234567890?number=../delete", { headers: { Authorization: "Bearer user-0" } }), env)).status, 400);
   assert.equal(inventoryQuery(new URLSearchParams("shippingRate=none")).remote.get("delivery.shippingRates.id.empty"), "true");
-  console.log("Inventory API: seller isolation, read-only methods, bounded pagination beyond 100k, strict filters, shipping IDs, no-store and failure handling passed. No live requests.");
+  console.log("Inventory API: 200-row number-first pages, inclusive 48..52 fixtures, single bounds, exact decimals, duplicate/invalid/reversed bounds, seller isolation and read-only failures passed. No live requests.");
 } finally { globalThis.fetch = originalFetch; }

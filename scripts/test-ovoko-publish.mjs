@@ -160,7 +160,7 @@ try {
     if (checkBounds) assert.ok(calls.length - ready < 50, "Publication uses a bounded separate Worker request");
     return result;
   }
-  for (const [adjustment, price] of [[{ mode: "none", value: "0" }, "100.00"], [{ mode: "percent", value: "-10" }, "90.00"], [{ mode: "amount", value: "+25.50" }, "125.50"]]) {
+  for (const [adjustment, price] of [[{ mode: "none", value: "0" }, "100.00"], [{ mode: "percent", value: "-10" }, "90.00"], [{ mode: "amount", value: "+25.50" }, "125.50"], [{ mode: "fixed", value: "200" }, "200.00"]]) {
     reset(); bulk = true; expectedPrice = price; mode = "price-format";
     const item = await bulkPlan(adjustment); item.expectedSource.price = "100";
     const result = await bulkSend(item);
@@ -188,6 +188,19 @@ try {
   reset(); bulk = true; snapshot.title = "AUDI VW POMPA 0281010038";
   const noModel = await bulkPlan({ mode: "none", value: "0" });
   const missing = await bulkSend(noModel); assert.equal(missing.status, 400); assert.match(await missing.text(), /Automat nie znalazl modelu/); assert.equal(writes, 0);
+  reset(); bulk = true;
+  const technicalPlan = { ...await bulkPlan({ mode: "none", value: "0" }), allowTechnicalModel: true };
+  const technicalResult = await bulkSend(technicalPlan);
+  assert.equal(technicalResult.status, 200, await technicalResult.clone().text()); assert.equal(writes, 1);
+  assert.equal(preparedVehicle.brand, "Audi"); assert.match(preparedVehicle.evidence, /Model roboczy marki.*niepotwierdzona/);
+  reset(); bulk = true; categoryName = "Nieznana kategoria";
+  const correctedCategory = { ...await bulkPlan({ mode: "none", value: "0" }), allowTechnicalModel: true, overrides: { categoryId: "3", manufacturerCode: "0281010038" } };
+  assert.equal((await bulkSend(correctedCategory)).status, 200); assert.equal(writes, 1, "Manual correction uses the same guarded publication flow");
+  for (const overrides of [{ categoryId: "1" }, { categoryId: "999" }, { manufacturerCode: "brak" }, { place: "1" }, { categoryId: 3 }]) {
+    reset(); bulk = true;
+    const invalid = { ...await bulkPlan({ mode: "none", value: "0" }), overrides, allowTechnicalModel: true };
+    assert.equal((await bulkSend(invalid)).status, 400); assert.equal(writes, 0);
+  }
   for (const fitment of ["own", "suggestion", "catalog", "catalog-title", "catalog-parameters"]) {
     reset(); bulk = true; fitmentMode = fitment;
     const item = await bulkPlan({ mode: "none", value: "0" });
@@ -214,8 +227,10 @@ try {
   const explicit = { ...await bulkPlan({ mode: "none", value: "0" }), fallbackVehicle: { brandId: "2", modelId: "22" } };
   assert.equal((await bulkSend(explicit)).status, 400); assert.equal(writes, 0); vehicleParams = [];
   reset(); bulk = true; generationTest = true; snapshot.title = "AUDI A4 B9 POMPA 0281010038";
-  const conflict = { ...await bulkPlan({ mode: "none", value: "0" }), fallbackVehicle: { brandId: "1", modelId: "11" } };
-  assert.equal((await bulkSend(conflict)).status, 400); assert.equal(writes, 0, "A fallback cannot bypass an explicit conflicting generation"); generationTest = false;
+  const conflict = { ...await bulkPlan({ mode: "none", value: "0" }), fallbackVehicle: { brandId: "1", modelId: "11" }, allowTechnicalModel: true };
+  assert.equal((await bulkSend(conflict)).status, 400); assert.equal(writes, 0, "A fallback cannot bypass an explicit conflicting generation");
+  const technicalConflict = { ...await bulkPlan({ mode: "none", value: "0" }), allowTechnicalModel: true };
+  assert.equal((await bulkSend(technicalConflict)).status, 400); assert.equal(writes, 0, "Technical models cannot bypass an explicit conflicting generation either"); generationTest = false;
   reset(); bulk = true; snapshot.title = originalTitle;
   const ignoredFallback = { ...await bulkPlan({ mode: "none", value: "0" }), fallbackVehicle: { brandId: "2", modelId: "22" } };
   assert.equal((await bulkSend(ignoredFallback)).status, 200); assert.equal(preparedVehicle.usedFallback, false); assert.equal(preparedVehicle.brand, "Audi");

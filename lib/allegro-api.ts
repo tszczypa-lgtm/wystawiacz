@@ -42,7 +42,7 @@ type TitleGroup = { source: string; titles: Title[]; message?: string; errorCode
 const titleCache = new Map<string, { until: number; result: { groups: TitleGroup[] } }>();
 const titleLimits = new Map<string, number[]>();
 export function inventoryQuery(params: URLSearchParams) {
-  const allowed = new Set(["query", "searchBy", "status", "shippingRate", "sort", "limit", "offset"]);
+  const allowed = new Set(["query", "searchBy", "status", "shippingRate", "sort", "limit", "offset", "priceFrom", "priceTo"]);
   for (const name of params.keys()) if (!allowed.has(name) || params.getAll(name).length !== 1) throw new ApiError(400, "Nieprawidlowy filtr listy ofert.");
   const query = (params.get("query") || "").trim();
   const searchBy = params.get("searchBy") || "name";
@@ -51,11 +51,21 @@ export function inventoryQuery(params: URLSearchParams) {
   const sort = params.get("sort") || "";
   const limitText = params.get("limit") ?? "50";
   const offsetText = params.get("offset") ?? "0";
+  const priceBound = (name: string) => {
+    const text = (params.get(name) || "").trim();
+    if (!text) return null;
+    if (!/^\d{1,30}(?:[.,]\d{1,2})?$/.test(text)) throw new ApiError(400, "Nieprawidlowa cena filtra.");
+    const [whole, fraction = ""] = text.replace(",", ".").split(".");
+    const cents = BigInt(whole) * BigInt(100) + BigInt(fraction.padEnd(2, "0"));
+    return { cents, amount: `${cents / BigInt(100)}.${String(cents % BigInt(100)).padStart(2, "0")}` };
+  };
+  const priceFrom = priceBound("priceFrom"), priceTo = priceBound("priceTo");
+  if ((priceTo && priceTo.cents < BigInt(100)) || (priceFrom && priceTo && priceFrom.cents > priceTo.cents)) throw new ApiError(400, "Nieprawidlowy zakres cen.");
   if (query.length > 100 || /[\u0000-\u001f]/.test(query) || !["name", "offerId", "externalId"].includes(searchBy)
     || !["", "ACTIVE", "ENDED", "INACTIVE", "ACTIVATING"].includes(status)
     || (shipping && shipping !== "none" && !/^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(shipping))
     || !["", "sellingMode.price.amount", "-sellingMode.price.amount", "stock.available", "-stock.available"].includes(sort)
-    || !["20", "50", "100"].includes(limitText) || !/^\d{1,7}$/.test(offsetText)) throw new ApiError(400, "Nieprawidlowe filtry lub numer strony.");
+    || !["20", "50", "100", "200"].includes(limitText) || !/^\d{1,7}$/.test(offsetText)) throw new ApiError(400, "Nieprawidlowe filtry lub numer strony.");
   const limit = Number(limitText), offset = Number(offsetText);
   if (offset + limit > 10000000 || (query && searchBy === "offerId" && !/^\d{1,30}$/.test(query))) throw new ApiError(400, "Nieprawidlowy numer oferty lub strony.");
   const remote = new URLSearchParams({ limit: String(limit), offset: String(offset) });
@@ -64,6 +74,8 @@ export function inventoryQuery(params: URLSearchParams) {
   if (shipping === "none") remote.set("delivery.shippingRates.id.empty", "true");
   else if (shipping) remote.set("delivery.shippingRates.id", shipping);
   if (sort) remote.set("sort", sort);
+  if (priceFrom) remote.set("sellingMode.price.amount.gte", priceFrom.amount);
+  if (priceTo) remote.set("sellingMode.price.amount.lte", priceTo.amount);
   return { remote, limit, offset };
 }
 export async function searchTitleSuggestions(number: string, owner: string, _env: Env, remote: (path: string, options?: RequestInit) => Promise<RemotePayload>) {

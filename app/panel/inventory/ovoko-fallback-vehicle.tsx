@@ -13,8 +13,8 @@ async function read(operation: "brands" | "models", signal: AbortSignal, brandId
   if (!response.ok || !result.ok || !result.readOnly || !Array.isArray(rows)) throw new Error(result.message || "Nie odczytano modeli Ovoko.");
   return rows;
 }
-export function OvokoFallbackVehicle({ disabled, onChange }: { disabled: boolean; onChange: (value: FallbackVehicle | undefined) => void }) {
-  const [opened, setOpened] = useState(false), [brands, setBrands] = useState<Row[]>([]), [models, setModels] = useState<Row[]>([]);
+export function OvokoFallbackVehicle({ disabled, onChange, initiallyOpen = false, title = "Model pomocniczy dla ofert bez rozpoznanego modelu (opcjonalnie)" }: { disabled: boolean; onChange: (value: FallbackVehicle | undefined) => void; initiallyOpen?: boolean; title?: string }) {
+  const [opened, setOpened] = useState(initiallyOpen), [brands, setBrands] = useState<Row[]>([]), [models, setModels] = useState<Row[]>([]);
   const [brandId, setBrandId] = useState(""), [modelId, setModelId] = useState(""), [busy, setBusy] = useState(false), [error, setError] = useState("");
   useEffect(() => {
     if (!opened) return;
@@ -30,8 +30,8 @@ export function OvokoFallbackVehicle({ disabled, onChange }: { disabled: boolean
   }, [brandId]);
   const field = "w-full rounded-lg border border-white/20 bg-[#0d1117] px-3 py-2 disabled:opacity-40";
   return <details className="rounded-lg border border-white/10 p-3 text-sm" open={opened} onToggle={event => setOpened(event.currentTarget.open)}>
-    <summary className="cursor-pointer font-bold">Model pomocniczy dla ofert bez rozpoznanego modelu (opcjonalnie)</summary>
-    <p className="my-3 text-white/65">Np. gdy tytuly zawieraja tylko Citroen / Peugeot / Opel. Wybierz sprawdzony przez Ciebie model. Automat uzyje go tylko przy zgodnej marce i braku modelu w danych oferty. To nie jest potwierdzenie kompatybilnosci po numerze czesci.</p>
+    <summary className="cursor-pointer font-bold">{title}</summary>
+    <p className="my-2 text-xs text-white/65">Wybor dla brakujacego modelu. Pierwszenstwo maja dane rozpoznane; marka nie moze byc sprzeczna z oferta.</p>
     <div className="grid gap-3 sm:grid-cols-2"><label>Marka pomocnicza<select aria-label="Marka pomocnicza" className={field} value={brandId} disabled={disabled || busy} onChange={event => { setBrandId(event.target.value); setModelId(""); setModels([]); onChange(undefined); }}><option value="">Bez modelu pomocniczego</option>{brands.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label><label>Model pomocniczy<select aria-label="Model pomocniczy" className={field} value={modelId} disabled={disabled || busy || !models.length} onChange={event => { setModelId(event.target.value); onChange(event.target.value ? { brandId, modelId: event.target.value } : undefined); }}><option value="">Wybierz model</option>{models.map(row => <option key={row.id} value={row.id}>{row.name} {row.years}</option>)}</select></label></div>
     {busy && <p role="status">Pobieram slownik Ovoko...</p>}{error && <p role="status" className="text-amber-200">{error}</p>}
   </details>;

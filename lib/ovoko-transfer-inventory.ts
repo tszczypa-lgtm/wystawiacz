@@ -18,11 +18,11 @@ export async function ovokoTransferInventory(request: Request, env: OvokoPublish
   if (!["statuses", "inventory"].includes(String(input.operation))) throw new OvokoError(400, "Nieznana operacja listy.");
   let params: URLSearchParams | null = null;
   if (input.operation === "statuses") {
-    if (!Array.isArray(input.offerIds) || input.offerIds.length > 100 || !input.offerIds.every(id => typeof id === "string" && /^\d{1,30}$/.test(id))) throw new OvokoError(400, "Nieprawidlowe ID ofert.");
+    if (!Array.isArray(input.offerIds) || input.offerIds.length > 200 || !input.offerIds.every(id => typeof id === "string" && /^\d{1,30}$/.test(id))) throw new OvokoError(400, "Nieprawidlowe ID ofert.");
   } else {
     if (!input.filters || typeof input.filters !== "object" || Array.isArray(input.filters) || !Object.values(input.filters).every(value => typeof value === "string") || !Number.isSafeInteger(input.offset) || Number(input.offset) < 0 || Number(input.offset) >= 10000000 || !["not_transferred", "transferred", "sending", "uncertain"].includes(String(input.transfer))) throw new OvokoError(400, "Nieprawidlowe filtry przeniesienia.");
     params = new URLSearchParams(input.filters as Record<string, string>);
-    params.set("offset", String(Math.min(Number(input.offset), 9999900)));
+    params.set("offset", String(Math.min(Number(input.offset), 9999800)));
     try { inventoryQuery(params); } catch { throw new OvokoError(400, "Nieprawidlowe filtry Allegro."); }
   }
   const credentials = await loadOvokoConnection(context, await ovokoConnectionKey(env));
@@ -32,7 +32,7 @@ export async function ovokoTransferInventory(request: Request, env: OvokoPublish
   const statuses = async (ids: string[]): Promise<Record<string, Transfer>> => {
     if (!ids.length) return {};
     let rows;
-    try { rows = await context.db(`ovoko_single_publications?ovoko_account=eq.${account}&allegro_seller_id=eq.${sellerId}&allegro_offer_id=in.(${[...new Set(ids)].join(",")})&select=allegro_offer_id,state,part_id&limit=100`); }
+    try { rows = await context.db(`ovoko_single_publications?ovoko_account=eq.${account}&allegro_seller_id=eq.${sellerId}&allegro_offer_id=in.(${[...new Set(ids)].join(",")})&select=allegro_offer_id,state,part_id&limit=200`); }
     catch { throw new OvokoError(503, "Nie odczytano rejestru przeniesien Ovoko. Nie oznaczamy ofert jako nieprzeniesione przy bledzie bazy."); }
     if (!Array.isArray(rows) || rows.length > ids.length) throw new OvokoError(502, "Nieprawidlowy rejestr przeniesien.");
     const output: Record<string, Transfer> = Object.fromEntries(ids.map(id => [id, { state: "not_transferred" }]));
@@ -51,11 +51,11 @@ export async function ovokoTransferInventory(request: Request, env: OvokoPublish
   // A bounded forward scan preserves Allegro's filtering/order without pretending this is a filtered total.
   for (let batch = 0; batch < 5 && offers.length < limit; batch++) {
     if (cursor >= 10000000) break;
-    const batchOffset = Math.min(cursor, 9999900);
-    params!.set("limit", "100"); params!.set("offset", String(batchOffset));
+    const batchOffset = Math.min(cursor, 9999800);
+    params!.set("limit", "200"); params!.set("offset", String(batchOffset));
     const data = await allegro(`/inventory?${params}`);
     total = data.totalCount;
-    if (!Array.isArray(data.offers) || data.offers.length > 100 || !Number.isSafeInteger(total) || total < 0 || data.offers.some((row: any) => typeof row?.id !== "string" || !/^\d{1,30}$/.test(row.id)) || new Set(data.offers.map((row: any) => row.id)).size !== data.offers.length) throw new OvokoError(502, "Nieprawidlowa lista Allegro.");
+    if (!Array.isArray(data.offers) || data.offers.length > 200 || !Number.isSafeInteger(total) || total < 0 || data.offers.some((row: any) => typeof row?.id !== "string" || !/^\d{1,30}$/.test(row.id)) || new Set(data.offers.map((row: any) => row.id)).size !== data.offers.length) throw new OvokoError(502, "Nieprawidlowa lista Allegro.");
     const remaining = data.offers.slice(cursor - batchOffset);
     if (!remaining.length) { if (cursor < total) throw new OvokoError(502, "Allegro zwrocilo niepelna strone. Nie potwierdzono wynikow filtra."); break; }
     const states = await statuses(remaining.map((row: any) => row.id));

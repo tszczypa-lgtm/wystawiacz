@@ -5,7 +5,7 @@ import { accountRequest, type AccountInfo } from "@/lib/account-client";
 import { OvokoBulkPanel, type BulkOffer } from "../ovoko-bulk-panel";
 
 function selection(input: unknown): BulkOffer[] | null {
-  if (!Array.isArray(input) || !input.length || input.length > 100) return null;
+  if (!Array.isArray(input) || !input.length || input.length > 200) return null;
   const ids = new Set<string>();
   const output: BulkOffer[] = [];
   for (const row of input) {
@@ -40,7 +40,7 @@ export function OvokoTransferWindow() {
     ready();
     return () => { window.removeEventListener("message", receive); window.clearInterval(timer); window.clearTimeout(timeout); };
   }, []);
-  return <main className="min-h-screen bg-[#0d1117] p-5 text-white"><div className="mx-auto max-w-6xl space-y-5">
+  return <main className="min-h-screen bg-[#0d1117] p-3 text-white"><div className="mx-auto max-w-[1600px] space-y-3">
     <div className="flex items-center justify-between gap-3"><h1 className="text-2xl font-black">Przenoszenie do Ovoko</h1><button className="rounded-lg border border-white/20 px-3 py-2" onClick={() => window.close()}>Zamknij okno</button></div>
     {error ? <p role="alert" className="text-amber-200">{error}</p> : allowed && offers ? <OvokoBulkPanel offers={offers} onFinished={() => { if (window.opener && !window.opener.closed) window.opener.postMessage({ type: "ovoko-bulk-finished" }, window.location.origin); }} /> : <p role="status">Odbieram zaznaczone oferty i sprawdzam uprawnienia...</p>}
   </div></main>;
