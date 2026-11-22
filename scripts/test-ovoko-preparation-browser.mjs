@@ -40,7 +40,7 @@ try {
     if (url.pathname === "/api/allegro/shipping-rates") { assert.equal(request.method(), "GET"); return route.fulfill({ json: { shippingRates: [{ id: "rate-1", name: "Maly kurier" }] } }); }
     if (url.pathname === "/api/ovoko/publish") {
       assert.equal(request.method(), "POST"); const body = request.postDataJSON();
-      assert.equal(body.offerId, id); assert.equal(body.donorId, "13"); assert.equal(body.modelId, "11"); assert.equal(body.confirmSingle, true); assert.equal(body.donorConfirmed, true); assert.equal(body.shippingConfirmed, true); assert.equal(body.qualityId, "0"); assert.equal(body.statusId, "0");
+      assert.equal(body.offerId, id); assert.equal(body.donorId, ({ "11": "13", "164": "301", "71": "371" })[body.modelId]); assert.equal(body.confirmSingle, true); assert.equal(body.donorConfirmed, undefined); assert.equal(body.shippingConfirmed, undefined); assert.equal(body.qualityId, "0"); assert.equal(body.statusId, "0");
       assert.equal(body.photos, undefined); assert.equal(body.username, undefined);
       return route.fulfill(publicationFailure ? { status: 409, json: { message: "Wynik wysylki jest niepewny. Sprawdz Ovoko." } } : { json: { ok: true, partId: "77", visibilityConfirmed: false } });
     }
@@ -48,9 +48,10 @@ try {
       assert.equal(request.method(), "POST"); const body = request.postDataJSON(); assert.equal(body.confirmCreate, true);
       assert.deepEqual(Object.keys(body).sort(), ["brandId", "confirmCreate", "modelId", "year"]);
       if (carCreationFailure) return route.fulfill({ status: 409, json: { message: "Niepewny wynik tworzenia auta. Sprawdz Ovoko." } });
-      assert.equal(body.modelId, "164"); assert.ok(["2005", "2009"].includes(body.year));
-      savedCars = [{ id: "301", name: "Auto ID 301", modelId: "164", years: body.year }];
-      return route.fulfill({ json: { ok: true, carId: "301", modelId: "164", year: body.year, reused: false } });
+      assert.ok(["164", "71"].includes(body.modelId)); assert.ok(["2005", "2009", "2021"].includes(body.year));
+      const carId = body.modelId === "71" ? "371" : "301";
+      savedCars = [{ id: carId, name: `Auto ID ${carId}`, modelId: body.modelId, years: body.year }];
+      return route.fulfill({ json: { ok: true, carId, modelId: body.modelId, year: body.year, reused: false } });
     }
     assert.ok(["/api/ovoko/read", "/api/ovoko/test"].includes(url.pathname), "Only dictionary reads, no publication or local save endpoints"); assert.equal(request.method(), "POST");
     const payload = request.postDataJSON(); assert.equal(payload.useSaved, true);
@@ -97,8 +98,8 @@ try {
   await page.getByLabel("Plan wysylki do sprawdzenia").fill("Sprawdze gabaryt i cene wysylki");
   assert.equal(await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).isVisible(), true, "The publication entry point is always visible at the top");
   await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).click();
-  await page.getByRole("heading", { name: "Potwierdzenie: jedna czesc", exact: true }).waitFor();
-  assert.equal(await page.getByRole("button", { name: "Wyslij 1 czesc do Ovoko", exact: true }).isDisabled(), true);
+  await page.getByRole("heading", { name: "Podsumowanie: jedna czesc", exact: true }).waitFor();
+  assert.equal(await page.locator('input[type="checkbox"]').count(), 0, "No confirmation checkboxes");
   assert.match(await page.getByLabel("Blokady wystawienia").textContent(), /nieobslugiwanym adresem/);
   assert.equal(calls.filter(call => call.path === "/api/ovoko/publish").length, 0);
   dictionaryFailure = true; await mount(); await page.getByRole("alert").filter({ hasText: "Blad slownika" }).waitFor();
@@ -178,10 +179,8 @@ try {
   await page.getByRole("button", { name: "Sprawdz pojedyncza wysylke", exact: true }).click();
   await page.getByText("Przenoszone zdjecia: 3 (cala galeria z Allegro)", { exact: true }).waitFor();
   const send = page.getByRole("button", { name: "Wyslij 1 czesc do Ovoko", exact: true });
-  assert.equal(await send.isDisabled(), true);
-  await page.getByLabel("Potwierdzam poprawne przypisanie czesci do wskazanego auta w Ovoko.").check();
-  assert.equal(await send.isDisabled(), true);
-  await page.getByLabel("Sprawdzilem zasady i koszt wysylki w Ovoko. Cennik Allegro nie zostanie przeniesiony.").check();
+  assert.equal(await send.isDisabled(), false, "A single click can publish valid data without checkbox confirmations");
+  assert.equal(await page.locator('input[type="checkbox"]').count(), 0);
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), "Confirmation fits the mobile viewport");
   await page.screenshot({ path: fileURLToPath(new URL("../outputs/ovoko-preparation-preview/confirmation-mobile.png", import.meta.url)), fullPage: true });
   assert.equal(calls.filter(call => call.path === "/api/ovoko/publish").length, 0, "No write before explicit final action");
@@ -193,8 +192,6 @@ try {
   await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="11"]').waitFor({ state: "attached" });
   await page.getByLabel("ID rekordu auta w Ovoko (car_id)").fill("13");
   await page.getByRole("button", { name: "Sprawdz pojedyncza wysylke", exact: true }).click();
-  await page.getByLabel("Potwierdzam poprawne przypisanie czesci do wskazanego auta w Ovoko.").check();
-  await page.getByLabel("Sprawdzilem zasady i koszt wysylki w Ovoko. Cennik Allegro nie zostanie przeniesiony.").check();
   await send.click(); await page.getByRole("alert").filter({ hasText: "Wynik wysylki jest niepewny" }).waitFor();
   assert.equal(await send.isDisabled(), true, "Uncertain responses cannot be retried automatically");
   offerTitle = "MODUL STEROWNIK PARKOWANIA PDC KANGOO III 259903137R"; numberParameter = offerTitle;
@@ -202,15 +199,26 @@ try {
   assert.equal(await page.getByLabel("Marka auta Ovoko").inputValue(), "7");
   assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "71");
   assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "259903137R");
+  publicationFailure = false;
+  await page.getByLabel("Kategoria Ovoko", { exact: true }).selectOption("3");
+  await page.getByText(/Brak zapisanego auta dla tego modelu/).waitFor();
+  const beforeKangooCars = calls.filter(call => call.path === "/api/ovoko/create-car").length;
+  const beforeKangooParts = calls.filter(call => call.path === "/api/ovoko/publish").length;
+  await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).dblclick();
+  await page.getByRole("status").filter({ hasText: "utworzenie czesci ID 77" }).waitFor();
+  assert.equal(calls.filter(call => call.path === "/api/ovoko/create-car").length, beforeKangooCars + 1);
+  assert.equal(calls.filter(call => call.path === "/api/ovoko/publish").length, beforeKangooParts + 1, "One click prepares car and publishes part, no intermediate confirmations or duplicate writes");
+  assert.equal(await page.locator('input[type="checkbox"]').count(), 0);
+  await page.screenshot({ path: fileURLToPath(new URL("../outputs/ovoko-preparation-preview/kangoo-one-click-mobile.png", import.meta.url)), fullPage: true });
   offerTitle = "MODUŁ STEROWNIK DRZWI LAND ROVER RANGE ROVER SPORT L494 JPLA-14D617-BA"; numberParameter = offerTitle;
   await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="30"]').waitFor({ state: "attached" });
   assert.equal(await page.getByLabel("Marka auta Ovoko").inputValue(), "3", "Reported Land Rover title selects the full make without a click");
   assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "30");
   assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "JPLA14D617BA");
-  await page.getByLabel("Automatyczne auto przy kliknieciu Wystaw: uzyj istniejacego lub utworz brakujace.").uncheck();
+  const beforeBlocked = calls.filter(call => ["/api/ovoko/create-car", "/api/ovoko/publish"].includes(call.path)).length;
   await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).click();
   assert.match(await page.getByLabel("Blokady wystawienia").textContent(), /Moje samochody/);
-  assert.equal(await send.isDisabled(), true, "The visible button never bypasses a missing real donor");
+  assert.equal(calls.filter(call => ["/api/ovoko/create-car", "/api/ovoko/publish"].includes(call.path)).length, beforeBlocked, "Missing required category blocks all writes before car creation");
   offerTitle = "FORD EDGE S-MAX MK2 KUGA CZYTNIK KART SD USB EM2T14F014AA EM2T-14F014-AA"; numberParameter = offerTitle;
   await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="42"]').waitFor({ state: "attached" });
   assert.equal(await page.getByLabel("Marka auta Ovoko").inputValue(), "5");
@@ -241,15 +249,16 @@ try {
   assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "164");
   assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "A1645457716");
   assert.equal(await page.getByLabel("Dodatkowe numery czesci").inputValue(), "A1649020300\nA1649004200");
+  await page.getByText(/Brak zapisanego auta dla tego modelu/).waitFor();
+  const beforeManualCar = calls.filter(call => call.path === "/api/ovoko/create-car").length;
   await page.getByText("Dodaj brakujacy rekord auta do Ovoko", { exact: true }).click();
   const createCarButton = page.getByRole("button", { name: "Utworz rekord auta i uzupelnij ID", exact: true });
   assert.equal(await page.getByLabel("Rok nowego rekordu auta", { exact: true }).inputValue(), "2005", "Explicitly labelled technical year uses beginning of production range");
-  assert.equal(await createCarButton.isDisabled(), true);
-  await page.getByLabel("Rok nowego rekordu auta", { exact: true }).fill("2009"); assert.equal(await createCarButton.isDisabled(), true);
-  await page.getByLabel("Potwierdzam model i podany rok nowego rekordu auta.").check();
-  assert.equal(calls.filter(call => call.path === "/api/ovoko/create-car").length, 0, "No vehicle creation during autofill or merely filling a year");
+  assert.equal(await createCarButton.isDisabled(), false);
+  await page.getByLabel("Rok nowego rekordu auta", { exact: true }).fill("2009"); assert.equal(await createCarButton.isDisabled(), false);
+  assert.equal(calls.filter(call => call.path === "/api/ovoko/create-car").length, beforeManualCar, "No vehicle creation during autofill or merely filling a year");
   await createCarButton.dblclick(); await page.getByRole("status").filter({ hasText: "Utworzono nowy rekord auta ID 301" }).waitFor();
-  assert.equal(calls.filter(call => call.path === "/api/ovoko/create-car").length, 1);
+  assert.equal(calls.filter(call => call.path === "/api/ovoko/create-car").length, beforeManualCar + 1);
   assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "301");
   assert.equal(await createCarButton.isDisabled(), true);
   await page.screenshot({ path: fileURLToPath(new URL("../outputs/ovoko-preparation-preview/mercedes-auto-mobile.png", import.meta.url)), fullPage: true });
@@ -261,24 +270,25 @@ try {
   savedCars = [];
   await mount(); await page.getByText(/Brak zapisanego auta dla tego modelu/).waitFor();
   assert.equal(calls.filter(call => call.path === "/api/ovoko/create-car").length, beforeAutomatic, "Opening page does not create a car despite automatic mode");
+  await page.getByLabel("Kategoria Ovoko", { exact: true }).selectOption("3");
   await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).dblclick();
   await page.getByRole("status").filter({ hasText: "Utworzono nowy rekord auta ID 301" }).waitFor();
   assert.equal(calls.filter(call => call.path === "/api/ovoko/create-car").length, beforeAutomatic + 1, "One click flow uses inferred year, no manual year confirmation, no duplicate on double click");
   assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "301");
   await page.screenshot({ path: fileURLToPath(new URL("../outputs/ovoko-preparation-preview/mercedes-automatic-car-mobile.png", import.meta.url)), fullPage: true });
   carCreationFailure = true;
+  await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="163"]').waitFor({ state: "attached" });
   await page.getByLabel("Model auta Ovoko").selectOption("163");
   await page.getByText("Dodaj brakujacy rekord auta do Ovoko", { exact: true }).click();
   await page.getByLabel("Rok nowego rekordu auta", { exact: true }).fill("2001");
-  await page.getByLabel("Potwierdzam model i podany rok nowego rekordu auta.").check();
   await createCarButton.click(); await page.getByRole("status").filter({ hasText: "Niepewny wynik tworzenia auta" }).waitFor();
   assert.equal(await createCarButton.isDisabled(), true, "Never automatically retry an uncertain vehicle creation");
-  currency = "CZK"; await mount(); await page.getByLabel("Cena robocza").waitFor(); assert.equal(await page.getByLabel("Cena robocza").inputValue(), "");
+  savedCars = []; currency = "CZK"; await mount(); await page.getByText(/Brak zapisanego auta dla tego modelu/).waitFor(); assert.equal(await page.getByLabel("Cena robocza").inputValue(), "");
   assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "", "Draft never persists across reloads");
   failure = true; await mount(); await page.getByRole("alert").filter({ hasText: "Oferta nie nalezy" }).waitFor(); assert.equal(await page.getByLabel("Nazwa robocza", { exact: true }).count(), 0);
   admin = false; const beforeDenied = calls.filter(call => call.path.includes("own-offers")).length;
   await mount(); await page.getByRole("alert").filter({ hasText: "administratora" }).waitFor(); assert.equal(calls.filter(call => call.path.includes("own-offers")).length, beforeDenied);
   admin = true; const beforeInvalid = calls.length; await mount("offerId=123&offerId=456"); await page.getByRole("alert").filter({ hasText: "Wybierz jedna" }).waitFor(); assert.equal(calls.length, beforeInvalid);
   assert.equal(await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage })), "{}"); assert.deepEqual(errors, []);
-  console.log("Ovoko preparation browser: autofill, no automatic publication, required confirmations, single explicit send, double-click/no-retry guards, donor separation, inert HTML, roles and desktop/mobile passed. No live services.");
+  console.log("Ovoko preparation browser: autofill, no writes on mount, no checkbox confirmations, one-click car+part flow, double-click/no-retry guards, donor separation, inert HTML, roles and desktop/mobile passed. No live services.");
 } finally { await browser.close(); }

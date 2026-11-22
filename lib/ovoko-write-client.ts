@@ -1,4 +1,5 @@
 import type { OvokoCredentials } from "./ovoko-connection";
+import { ovokoNoCars } from "./ovoko-read";
 
 export const ovokoWriteDigest = async (value: string) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)))].map(byte => byte.toString(16).padStart(2, "0")).join("");
 async function boundedJson(response: Response) {
@@ -24,7 +25,7 @@ export function ovokoWriteClient(credentials: OvokoCredentials) {
     const form = new URLSearchParams(credentials); extra?.forEach((value, key) => form.append(key, value));
     const response = await fetch(`https://api.rrr.lt${path}`, { method: "POST", redirect: "manual", signal: AbortSignal.timeout(20000), headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" }, body: form.toString() });
     if (!response.ok || (response.status >= 300 && response.status < 400)) { await response.body?.cancel(); throw new Error("provider"); }
-    const result = await boundedJson(response);
+    const result = ovokoNoCars(await boundedJson(response), path);
     if (result.status_code !== "R200") throw new Error("provider");
     return result;
   };

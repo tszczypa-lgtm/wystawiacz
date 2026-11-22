@@ -51,13 +51,14 @@ globalThis.fetch = async (input, options = {}) => {
   for (const [name, value] of Object.entries(credentials)) assert.equal(form.get(name), value);
   if (url.pathname === "/get/car_models/1") return Response.json({ status_code: mode === "bad-metadata" ? "R404" : "R200", list: [{ id: "164", brand: "1", name: "M-Class (W164)", year_start: "2005", year_end: "2011" }] });
   if (url.pathname === "/v2/get/cars") {
+    if (mode === "no-cars") return Response.json({ status_code: "R004", msg: "No cars found" });
     if (url.searchParams.has("model_ids")) {
       assert.equal(url.searchParams.get("model_ids"), "164");
-      const data = mode === "saved-car" ? [{ id: "88", car_model: "164", car_years: "2008" }] : mode === "wrong-car" ? [{ id: "89", car_model: "163", car_years: "2009" }] : [];
+      const data = mode === "saved-car" ? [{ id: 88, car_model: 164, car_years: 2008 }] : mode === "wrong-car" ? [{ id: "89", car_model: "163", car_years: "2009" }] : [];
       return Response.json({ status_code: "R200", data, pagination: { page: 1, limit: 20, total_count: data.length } });
     }
     assert.equal(url.searchParams.get("external_ids"), "tymo:car:164:2009");
-    return Response.json({ status_code: "R200", data: prior ? [{ id: "77", car_model: "164", car_years: "2009" }] : [], pagination: { total_count: prior ? 1 : 0 } });
+    return Response.json({ status_code: "R200", data: prior ? [{ id: "77", car_model: "164", car_years: "2009" }] : [], pagination: { page: "1", limit: "1", total_count: prior ? "1" : "0" } });
   }
   if (url.pathname === "/get/car_status") {
     if (revoked) admin = false;
@@ -88,6 +89,7 @@ try {
   reset(); prior = true; const reused = await handleOvokoApi(req(), env); assert.equal(reused.status, 200); assert.equal((await reused.json()).reused, true); assert.equal(mutations, 0);
   reset(); mode = "saved-car"; const manual = await handleOvokoApi(req(), env); assert.equal(manual.status, 200); assert.equal((await manual.json()).carId, "88"); assert.equal(mutations, 0, "Reuse manually added same-model car, even with a different year, never create another");
   reset(); mode = "wrong-car"; assert.equal((await handleOvokoApi(req(), env)).status, 502); assert.equal(mutations, 0, "Untrusted model-filter response blocks creation");
+  reset(); mode = "no-cars"; assert.equal((await handleOvokoApi(req(), env)).status, 200); assert.equal(mutations, 1, "Documented R004 empty lookup allows one guarded creation, never a retry");
   reset(); const good = await handleOvokoApi(req(), env); assert.equal(good.status, 200, await good.clone().text()); assert.equal((await good.json()).carId, "77"); assert.equal(mutations, 1);
   const replay = await handleOvokoApi(req(), env); assert.equal(replay.status, 200); assert.equal((await replay.json()).reused, true); assert.equal(mutations, 1);
   user++; assert.equal((await handleOvokoApi(req(), env)).status, 409); assert.equal(mutations, 1, "Another owner cannot bypass a lock on the same Ovoko account/model/year");

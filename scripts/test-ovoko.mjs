@@ -129,7 +129,15 @@ try {
   expectedPath = carsFixture.path; fixtureResult = carsFixture.result;
   for (let i = 0; i < 6; i++) assert.equal((await handleOvokoApi(req("/read", { body: { ...credentials, operation: "cars", modelId: "9" } }), env)).status, 200);
   assert.equal((await handleOvokoApi(req("/read", { body: { ...credentials, operation: "cars", modelId: "9" } }), env)).status, 429, "Vehicle picker has its own bounded read budget");
-  const { parseOvokoRead, ovokoInventoryPlan, ovokoPartImage } = load(path.join(root, "lib/ovoko-read.ts"));
+  const { parseOvokoRead, ovokoInventoryPlan, ovokoPartImage, ovokoNoCars } = load(path.join(root, "lib/ovoko-read.ts"));
+  const stringPage = { page: "1", limit: "20", total_count: "1" };
+  assert.equal(parseOvokoRead("cars", { data: [{ id: 36, car_model: 9, car_years: 2021, car_engine_code: 0 }], pagination: stringPage }, "9").rows[0].years, "2021");
+  assert.deepEqual(parseOvokoRead("cars", { data: null, pagination: { ...stringPage, total_count: "0" } }, "9").rows, []);
+  assert.deepEqual(parseOvokoRead("cars", ovokoNoCars({ status_code: "R004" }, "/v2/get/cars?model_ids=9&page=1&limit=20"), "9").rows, []);
+  assert.throws(() => ovokoNoCars({ status_code: "R004", data: [{ id: "36" }] }, "/v2/get/cars?page=1&limit=20"), /cars.empty/);
+  assert.equal(ovokoNoCars({ status_code: "R004" }, "/crm/importCar").status_code, "R004", "Never turn a write rejection into success");
+  for (const pagination of [{ ...stringPage, page: false }, { ...stringPage, total_count: "NaN" }, { ...stringPage, limit: "20.0" }, { ...stringPage, page: "2" }]) assert.throws(() => parseOvokoRead("cars", { data: [], pagination }, "9"), /format danych/);
+  assert.throws(() => parseOvokoRead("cars", { data: null, pagination: stringPage }, "9"), /cars.data/, "Unknown/nonempty count never permits car creation");
   assert.equal(ovokoInventoryPlan({}).path, "/v2/get/parts?page=1&limit=50&sort%5Bid%5D=desc");
   for (const values of [{ page: 0 }, { page: "2" }, { page: 1.5 }, { page: 1000001 }, { limit: 200 }, { limit: "50" }, { search: "x\n" }, { search: "x".repeat(101) }, { sort: "price" }, { externalId: "x,y" }]) assert.throws(() => ovokoInventoryPlan(values), /Nieprawidlow/);
   assert.equal(ovokoPartImage("https://images.ovoko.com/a.jpg"), "https://images.ovoko.com/a.jpg");

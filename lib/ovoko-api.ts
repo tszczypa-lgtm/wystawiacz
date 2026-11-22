@@ -1,5 +1,5 @@
 import { accountContext, type AccountEnv } from "./account-api";
-import { OvokoError, ovokoReadPlan, parseOvokoRead, ovokoInventoryPlan } from "./ovoko-read";
+import { OvokoError, ovokoReadPlan, parseOvokoRead, ovokoInventoryPlan, ovokoNoCars } from "./ovoko-read";
 import { loadOvokoConnection, ovokoConnectionKey, ovokoConnectionStatus, removeOvokoConnection, saveOvokoConnection, validateOvokoCredentials, type OvokoKeyEnv } from "./ovoko-connection";
 import { publishOvokoPart, type OvokoPublishEnv } from "./ovoko-publish";
 import { createOvokoCar } from "./ovoko-create-car";
@@ -89,6 +89,7 @@ export async function handleOvokoApi(request: Request, env: OvokoEnv): Promise<R
     let result: Record<string, unknown>;
     try { result = JSON.parse(await boundedText(response, plan ? 2000000 : 512000)); } catch { throw new OvokoError(502, "Niepelna lub nieprawidlowa odpowiedz Ovoko. Nie potwierdzono polaczenia."); }
     if (!result || typeof result !== "object" || Array.isArray(result)) throw new OvokoError(502, "Nieprawidlowa odpowiedz Ovoko.");
+    if (plan?.operation === "cars") result = ovokoNoCars(result, plan.path);
     if (result.status_code !== "R200") {
       const code = typeof result.status_code === "string" && /^R\d{3}$/.test(result.status_code) ? result.status_code : "unknown";
       return reply({ message: `${errors[code] || "Ovoko nie potwierdzilo poprawnego odczytu."} Kod: ${code}. Nie zmieniono ofert.`, code }, code === "R008" ? 429 : 502);

@@ -1,7 +1,7 @@
 import { accountContext } from "./account-api";
 import { loadOvokoConnection, ovokoConnectionKey } from "./ovoko-connection";
 import type { OvokoPublishEnv } from "./ovoko-publish";
-import { OvokoError, parseOvokoRead } from "./ovoko-read";
+import { OvokoError, parseOvokoRead, ovokoPageData } from "./ovoko-read";
 import { ovokoWriteClient, ovokoWriteDigest } from "./ovoko-write-client";
 
 type Context = Awaited<ReturnType<typeof accountContext>>;
@@ -30,14 +30,12 @@ export async function createOvokoCar(request: Request, env: OvokoPublishEnv, con
     const range = model.years?.match(/^(\d{4})? - (\d{4})?$/);
     if (range && ((range[1] && Number(year) < Number(range[1])) || (range[2] && Number(year) > Number(range[2])))) throw new OvokoError(400, "Podany rok nie pasuje do zakresu wybranego modelu Ovoko.");
     const externalId = `tymo:car:${modelId}:${year}`;
-    const prior = await remote(`/v2/get/cars?external_ids=${encodeURIComponent(externalId)}&page=1&limit=1`);
-    if (!Array.isArray(prior.data) || !prior.pagination || !Number.isSafeInteger(prior.pagination.total_count)) throw new Error("shape");
+    const prior = ovokoPageData(await remote(`/v2/get/cars?external_ids=${encodeURIComponent(externalId)}&page=1&limit=1`), { page: 1, limit: 1 }, "car-external");
     if (prior.data.length) {
       const row = prior.data[0];
-      if (prior.data.length !== 1 || prior.pagination.total_count !== 1 || !/^[1-9]\d{0,11}$/.test(String(row.id)) || String(row.car_model) !== modelId || String(row.car_years) !== year) throw new OvokoError(409, "Znaleziono niezgodny rekord auta z tym powiazaniem. Nie nadpisujemy go.");
+      if (prior.pagination.total !== 1 || !row || typeof row !== "object" || !/^[1-9]\d{0,11}$/.test(String(row.id)) || String(row.car_model) !== modelId || String(row.car_years) !== year) throw new OvokoError(409, "Znaleziono niezgodny rekord auta z tym powiazaniem. Nie nadpisujemy go.");
       return { ok: true, carId: String(row.id), modelId, year, reused: true };
     }
-    if (prior.pagination.total_count !== 0) throw new Error("incomplete");
     // Recheck the account's existing cars immediately before any creation, including manually added cars.
     const savedCars = parseOvokoRead("cars", await remote(`/v2/get/cars?model_ids=${modelId}&page=1&limit=20`), modelId).rows;
     const savedCar = savedCars.find(row => row.years === year) || savedCars[0];

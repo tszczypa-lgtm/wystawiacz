@@ -5,7 +5,38 @@ export type OvokoReadOperation = "models" | "categories" | "statuses" | "qualiti
 export type OvokoReadRow = { id: string; name: string; image?: string; brand?: string; years?: string; modelId?: string; engineCode?: string; level?: string; parentId?: string; carId?: string; categoryId?: string; manufacturerCode?: string; externalId?: string; price?: string; status?: string; quality?: string };
 export type OvokoReadResult = { ok: true; code: "R200"; readOnly: true; credentialsStored: boolean; checkedAt: string; operation: OvokoReadOperation; rows: OvokoReadRow[]; pagination?: { page: number; limit: number; total: number } };
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
-const invalid = () => new OvokoError(502, "Nieprawidlowy lub niepelny format danych Ovoko. Nie potwierdzono odczytu; nie zmieniono ofert.");
+const invalid = (stage = "schema") => new OvokoError(502, `Nieprawidlowy lub niepelny format danych Ovoko (${stage}). Nie potwierdzono odczytu; nie zmieniono ofert.`);
+export function ovokoInteger(value: unknown): number {
+  if (typeof value !== "number" && (typeof value !== "string" || !/^\d{1,16}$/.test(value))) throw invalid("integer");
+  const number = Number(value);
+  if (!Number.isSafeInteger(number) || number < 0) throw invalid("integer");
+  return number;
+}
+export function ovokoPage(result: Record<string, unknown>, expected: { page: number; limit: number }, stage = "pagination") {
+  if (!record(result.pagination)) throw invalid(stage);
+  const page = ovokoInteger(result.pagination.page), limit = ovokoInteger(result.pagination.limit), total = ovokoInteger(result.pagination.total_count);
+  if (page !== expected.page || limit !== expected.limit) throw invalid(stage);
+  return { page, limit, total };
+}
+export function ovokoPageData(result: Record<string, unknown>, expected: { page: number; limit: number }, stage = "page") {
+  const pagination = ovokoPage(result, expected, `${stage}.pagination`);
+  const raw = result.data;
+  const empty = raw === null || (record(raw) && Object.keys(raw).length === 0);
+  const data = empty && pagination.total === 0 ? [] : raw;
+  if (!Array.isArray(data) || data.length !== Math.max(0, Math.min(pagination.total - (pagination.page - 1) * pagination.limit, pagination.limit))) throw invalid(`${stage}.data`);
+  return { data, pagination };
+}
+export function ovokoNoCars(result: Record<string, unknown>, path: string): Record<string, unknown> {
+  if (result.status_code !== "R004") return result;
+  const url = new URL(path, "https://api.rrr.lt");
+  if (url.pathname !== "/v2/get/cars") return result;
+  if (result.data != null && (!Array.isArray(result.data) || result.data.length)) throw invalid("cars.empty");
+  if (result.list != null && (!Array.isArray(result.list) || result.list.length)) throw invalid("cars.empty");
+  if (result.pagination !== undefined && (!record(result.pagination) || ovokoInteger(result.pagination.total_count) !== 0)) throw invalid("cars.empty");
+  const page = ovokoInteger(url.searchParams.get("page")), limit = ovokoInteger(url.searchParams.get("limit"));
+  if (!page || limit < 1 || limit > 100) throw invalid("cars.empty");
+  return { status_code: "R200", data: [], pagination: { page, limit, total_count: 0 } };
+}
 export function ovokoInventoryPlan(input: Record<string, unknown>) {
   const page = input.page ?? 1, limit = input.limit ?? 50, search = input.search ?? "", sort = input.sort ?? "newest";
   if (!Number.isSafeInteger(page) || Number(page) < 1 || Number(page) > 1000000 || ![20, 50, 100].includes(Number(limit)) || typeof limit !== "number" || typeof search !== "string" || search.length > 100 || /[\x00-\x1f]/.test(search) || !["newest", "oldest"].includes(String(sort))) throw new OvokoError(400, "Nieprawidlowe filtry lub numer strony Ovoko.");
@@ -59,15 +90,18 @@ export function parseOvokoRead(operation: OvokoReadOperation, result: Record<str
     });
   } else {
     const inventory = operation === "parts" || operation === "cars" || operation === "inventory";
-    const list = inventory ? result.data : result.list;
+    const list = inventory ? ovokoPageData(result, operation === "inventory" ? requested : { page: 1, limit: 20 }, operation).data : result.list;
     if (!Array.isArray(list) || list.length > (inventory ? operation === "inventory" ? requested.limit : 20 : 10000)) throw invalid();
     rows = list.map(value => {
       if (!record(value)) throw invalid();
-      const base = { id: id(value.id), name: text(operation === "categories" ? value.pl || value.en : value.name, 500, !inventory) };
       if (operation === "cars") {
-        if (id(value.car_model) !== selectedId) throw invalid();
-        return { id: base.id, name: `Auto ID ${base.id}`, modelId: id(value.car_model), years: text(value.car_years, 4), engineCode: text(value.car_engine_code, 100) };
+        const carId = id(value.id);
+        if (id(value.car_model) !== selectedId) throw invalid("cars.model");
+        const year = value.car_years;
+        if (year !== undefined && year !== null && year !== "" && !/^(0|\d{4})$/.test(String(year))) throw invalid("cars.year");
+        return { id: carId, name: `Auto ID ${carId}`, modelId: id(value.car_model), years: year === undefined || year === null ? "" : String(year), engineCode: value.car_engine_code === 0 ? "" : text(value.car_engine_code, 100) };
       }
+      const base = { id: id(value.id), name: text(operation === "categories" ? value.pl || value.en : value.name, 500, !inventory) };
       if (operation === "categories") {
         if (!["1", "2", "3"].includes(String(value.level))) throw invalid();
         return { ...base, level: String(value.level), parentId: id(value.parent_id) };
@@ -84,10 +118,6 @@ export function parseOvokoRead(operation: OvokoReadOperation, result: Record<str
   const inventory = operation === "parts" || operation === "cars" || operation === "inventory";
   if (new Set(rows.map(row => row.id)).size !== rows.length || (!inventory && rows.length === 0)) throw invalid();
   if (!inventory) return { rows };
-  const pagination = result.pagination;
-  if (!record(pagination)) throw invalid();
-  const { page, limit, total_count: total } = pagination;
   const expected = operation === "inventory" ? requested : { page: 1, limit: 20 };
-  if (page !== expected.page || limit !== expected.limit || typeof total !== "number" || !Number.isSafeInteger(total) || total < 0 || rows.length !== Math.max(0, Math.min(total - (expected.page - 1) * expected.limit, expected.limit))) throw invalid();
-  return { rows, pagination: { page, limit, total } };
+  return { rows, pagination: ovokoPage(result, expected, `${operation}.pagination`) };
 }
