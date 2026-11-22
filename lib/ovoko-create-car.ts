@@ -38,6 +38,10 @@ export async function createOvokoCar(request: Request, env: OvokoPublishEnv, con
       return { ok: true, carId: String(row.id), modelId, year, reused: true };
     }
     if (prior.pagination.total_count !== 0) throw new Error("incomplete");
+    // Recheck the account's existing cars immediately before any creation, including manually added cars.
+    const savedCars = parseOvokoRead("cars", await remote(`/v2/get/cars?model_ids=${modelId}&page=1&limit=20`), modelId).rows;
+    const savedCar = savedCars.find(row => row.years === year) || savedCars[0];
+    if (savedCar && /^[1-9]\d{0,11}$/.test(savedCar.id)) return { ok: true, carId: savedCar.id, modelId, year, reused: true };
     const statuses = await remote("/get/car_status");
     if (!statuses.list || typeof statuses.list !== "object" || Array.isArray(statuses.list)) throw new Error("status shape");
     const added = Object.entries(statuses.list as Record<string, { pl?: string; en?: string }>).filter(([id, row]) => /^[1-9]\d{0,11}$/.test(id) && ["dodano", "added"].includes(String(row?.pl || row?.en || "").trim().toLowerCase()));

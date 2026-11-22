@@ -48,9 +48,9 @@ try {
       assert.equal(request.method(), "POST"); const body = request.postDataJSON(); assert.equal(body.confirmCreate, true);
       assert.deepEqual(Object.keys(body).sort(), ["brandId", "confirmCreate", "modelId", "year"]);
       if (carCreationFailure) return route.fulfill({ status: 409, json: { message: "Niepewny wynik tworzenia auta. Sprawdz Ovoko." } });
-      assert.equal(body.modelId, "164"); assert.equal(body.year, "2009");
-      savedCars = [{ id: "301", name: "Auto ID 301", modelId: "164", years: "2009" }];
-      return route.fulfill({ json: { ok: true, carId: "301", modelId: "164", year: "2009", reused: false } });
+      assert.equal(body.modelId, "164"); assert.ok(["2005", "2009"].includes(body.year));
+      savedCars = [{ id: "301", name: "Auto ID 301", modelId: "164", years: body.year }];
+      return route.fulfill({ json: { ok: true, carId: "301", modelId: "164", year: body.year, reused: false } });
     }
     assert.ok(["/api/ovoko/read", "/api/ovoko/test"].includes(url.pathname), "Only dictionary reads, no publication or local save endpoints"); assert.equal(request.method(), "POST");
     const payload = request.postDataJSON(); assert.equal(payload.useSaved, true);
@@ -201,6 +201,7 @@ try {
   assert.equal(await page.getByLabel("Marka auta Ovoko").inputValue(), "3", "Reported Land Rover title selects the full make without a click");
   assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "30");
   assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "JPLA14D617BA");
+  await page.getByLabel("Automatyczne auto przy kliknieciu Wystaw: uzyj istniejacego lub utworz brakujace.").uncheck();
   await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).click();
   assert.match(await page.getByLabel("Blokady wystawienia").textContent(), /Moje samochody/);
   assert.equal(await send.isDisabled(), true, "The visible button never bypasses a missing real donor");
@@ -213,7 +214,7 @@ try {
   assert.equal(await page.getByLabel("Numer katalogowy - propozycja do sprawdzenia").inputValue(), "EM2T14F014AA");
   await page.getByLabel("Model auta Ovoko").selectOption("42");
   assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "42", "A found model remains available for explicit selection");
-  await page.getByText(/Nie znaleziono zapisanego auta dla tego modelu/).waitFor();
+  await page.getByText(/Brak zapisanego auta dla tego modelu/).waitFor();
   savedCars = [{ id: "201", name: "Auto ID 201", modelId: "42", years: "2018", engineCode: "TEST" }];
   await page.getByRole("button", { name: "Odswiez moje samochody", exact: true }).click();
   await page.getByLabel("Moje samochody Ovoko").locator('option[value="201"]').waitFor({ state: "attached" });
@@ -225,7 +226,7 @@ try {
   assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "202");
   await page.screenshot({ path: fileURLToPath(new URL("../outputs/ovoko-preparation-preview/ford-cars-mobile.png", import.meta.url)), fullPage: true });
   await page.getByLabel("Model auta Ovoko").selectOption("41");
-  await page.getByText(/Nie znaleziono zapisanego auta dla tego modelu/).waitFor();
+  await page.getByText(/Brak zapisanego auta dla tego modelu/).waitFor();
   assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "", "Changing model clears the previous vehicle record");
   await mount(); await page.getByLabel("Moje samochody Ovoko").locator('option[value="202"]').waitFor({ state: "attached" });
   assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "201", "Several saved records still fill the first matching ID automatically");
@@ -236,7 +237,7 @@ try {
   assert.equal(await page.getByLabel("Dodatkowe numery czesci").inputValue(), "A1649020300\nA1649004200");
   await page.getByText("Dodaj brakujacy rekord auta do Ovoko", { exact: true }).click();
   const createCarButton = page.getByRole("button", { name: "Utworz rekord auta i uzupelnij ID", exact: true });
-  assert.equal(await page.getByLabel("Rok nowego rekordu auta", { exact: true }).inputValue(), "", "Never invent a year from the model range");
+  assert.equal(await page.getByLabel("Rok nowego rekordu auta", { exact: true }).inputValue(), "2005", "Explicitly labelled technical year uses beginning of production range");
   assert.equal(await createCarButton.isDisabled(), true);
   await page.getByLabel("Rok nowego rekordu auta", { exact: true }).fill("2009"); assert.equal(await createCarButton.isDisabled(), true);
   await page.getByLabel("Potwierdzam model i podany rok nowego rekordu auta.").check();
@@ -246,8 +247,22 @@ try {
   assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "301");
   assert.equal(await createCarButton.isDisabled(), true);
   await page.screenshot({ path: fileURLToPath(new URL("../outputs/ovoko-preparation-preview/mercedes-auto-mobile.png", import.meta.url)), fullPage: true });
+  const beforeAutomatic = calls.filter(call => call.path === "/api/ovoko/create-car").length;
+  await mount(); await page.getByLabel("Moje samochody Ovoko").locator('option[value="301"]').waitFor({ state: "attached" });
+  assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "301");
+  await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).click();
+  assert.equal(calls.filter(call => call.path === "/api/ovoko/create-car").length, beforeAutomatic, "An existing car is reused with no creation");
+  savedCars = [];
+  await mount(); await page.getByText(/Brak zapisanego auta dla tego modelu/).waitFor();
+  assert.equal(calls.filter(call => call.path === "/api/ovoko/create-car").length, beforeAutomatic, "Opening page does not create a car despite automatic mode");
+  await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).dblclick();
+  await page.getByRole("status").filter({ hasText: "Utworzono nowy rekord auta ID 301" }).waitFor();
+  assert.equal(calls.filter(call => call.path === "/api/ovoko/create-car").length, beforeAutomatic + 1, "One click flow uses inferred year, no manual year confirmation, no duplicate on double click");
+  assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "301");
+  await page.screenshot({ path: fileURLToPath(new URL("../outputs/ovoko-preparation-preview/mercedes-automatic-car-mobile.png", import.meta.url)), fullPage: true });
   carCreationFailure = true;
   await page.getByLabel("Model auta Ovoko").selectOption("163");
+  await page.getByText("Dodaj brakujacy rekord auta do Ovoko", { exact: true }).click();
   await page.getByLabel("Rok nowego rekordu auta", { exact: true }).fill("2001");
   await page.getByLabel("Potwierdzam model i podany rok nowego rekordu auta.").check();
   await createCarButton.click(); await page.getByRole("status").filter({ hasText: "Niepewny wynik tworzenia auta" }).waitFor();

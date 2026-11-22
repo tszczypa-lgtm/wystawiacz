@@ -4,6 +4,21 @@ import ts from "typescript";
 const compiled = ts.transpileModule(readFileSync(new URL("../lib/ovoko-suggestions.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
 const { suggestPartNumbers, suggestOvokoCategories, suggestionSearchMatches, suggestOvokoBrands, suggestOvokoModels, vehicleSuggestionText, ovokoAutomaticFields, automaticOvokoBrand, automaticOvokoModel } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
 const numbers = (title, parameters) => suggestPartNumbers(title, parameters).map(item => item.number);
+const carCode = ts.transpileModule(readFileSync(new URL("../lib/ovoko-car-selection.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
+const { ovokoCarYear, preferredOvokoCar } = await import(`data:text/javascript;base64,${Buffer.from(carCode).toString("base64")}`);
+const carSource = (title = "", description = "", parameters = []) => ({ title, description, parameters });
+const carModel = { id: "164", name: "M-Class (W164)", years: "2005 - 2011" };
+assert.equal(ovokoCarYear(carSource("MERCEDES ML W164 2009 A1649020300"), carModel).year, "2009");
+assert.equal(ovokoCarYear(carSource("ML W164", "Rok produkcji: 2008"), carModel).year, "2008");
+assert.equal(ovokoCarYear(carSource("", "", [{ name: "Rok produkcji", values: ["2010"] }]), carModel).year, "2010");
+for (const [title, description] of [["ML W164 A2009123456", ""], ["ML W164 2005-2011", ""], ["ML W164 2005/11", ""], ["ML W164 2009.00 PLN", ""], ["ML W164", "Copyright 2009; telefon 200912345; cena 2010 PLN"], ["", "Rok produkcji 2008-2011"], ["ML W164 2009 2010", ""]]) {
+  const result = ovokoCarYear(carSource(title, description), carModel);
+  assert.equal(result.year, "2005", title + description); assert.equal(result.technical, true);
+}
+assert.equal(ovokoCarYear(carSource("A2009123456"), { id: "1", name: "unknown" }).year, "");
+assert.equal(ovokoCarYear(carSource("W164 2020"), carModel).technical, true, "Ignore out-of-generation years");
+assert.equal(preferredOvokoCar([{ id: "2", years: "2008" }, { id: "10", years: "2009" }], "2009").id, "10");
+assert.equal(preferredOvokoCar([{ id: "10" }, { id: "2" }], "").id, "2");
 for (const suffix of ["E", "EA", "ABCD", "e", "1"]) {
   const code = `5Q0959593${suffix}`;
   assert.deepEqual(numbers(`AUDI S3 SPORTBACK 8VA/8VF 2012 - 2020 STEROWNIK ZAMKA ${code}`), [code.toUpperCase()]);

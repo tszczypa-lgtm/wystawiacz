@@ -6,6 +6,7 @@ import { allegroRequest } from "@/lib/allegro-client";
 import { createSupabaseBrowserClient } from "@/lib/supabase";
 import { initialOvokoDraft, offerDescriptionText, ovokoPreparationIssues, ovokoPublicationBlockers, ovokoSourcePreview, additionalOvokoCodes, type OvokoPreparationDraft, type OvokoSourcePreview } from "@/lib/ovoko-preparation";
 import type { OvokoReadResult, OvokoReadRow } from "@/lib/ovoko-read";
+import { ovokoCarYear, preferredOvokoCar } from "@/lib/ovoko-car-selection";
 import { suggestPartNumbers, suggestOvokoCategories, suggestionSearchMatches, suggestOvokoBrands, suggestOvokoModels, vehicleSuggestionText, ovokoAutomaticFields, automaticOvokoBrand, automaticOvokoModel } from "@/lib/ovoko-suggestions";
 
 const button = "rounded-lg border border-white/20 px-3 py-2 text-sm font-bold disabled:opacity-40";
@@ -22,6 +23,8 @@ export function OvokoPreparationPanel() {
   const [carsBusy, setCarsBusy] = useState(false), [carsError, setCarsError] = useState(""), [carsRefresh, setCarsRefresh] = useState(0);
   const [carYear, setCarYear] = useState(""), [carConfirmed, setCarConfirmed] = useState(false), [creatingCar, setCreatingCar] = useState(false), [carAttempted, setCarAttempted] = useState(false), [carMessage, setCarMessage] = useState("");
   const lastCarModel = useRef("");
+  const carWriteLocks = useRef(new Set<string>());
+  const [automaticCar, setAutomaticCar] = useState(true);
   const [review, setReview] = useState(false), [donorConfirmed, setDonorConfirmed] = useState(false), [shippingConfirmed, setShippingConfirmed] = useState(false);
   const [publishing, setPublishing] = useState(false), [attempted, setAttempted] = useState(false), [publicationMessage, setPublicationMessage] = useState(""), [partId, setPartId] = useState("");
   const vehicleText = source ? vehicleSuggestionText(source.title, source.parameters) : "";
@@ -29,6 +32,7 @@ export function OvokoPreparationPanel() {
   const modelSuggestions = useMemo(() => suggestOvokoModels(vehicleText, dictionaries.models || []), [vehicleText, dictionaries.models]);
   const numberSuggestions = useMemo(() => source ? suggestPartNumbers(source.title, source.parameters) : [], [source]);
   const categorySuggestions = useMemo(() => source ? suggestOvokoCategories(source.title, dictionaries.categories || []) : [], [source, dictionaries.categories]);
+  const yearSuggestion = useMemo(() => source ? ovokoCarYear(source, dictionaries.models?.find(row => row.id === modelId)) : { year: "", reason: "", technical: false }, [source, modelId, dictionaries.models]);
   const active = useRef<AbortController | null>(null);
   const publicationPanel = useRef<HTMLElement | null>(null);
   const touched = useRef(new Set<string>());
@@ -133,12 +137,13 @@ export function OvokoPreparationPanel() {
     void readOvoko("cars", controller.signal, modelId).then(rows => {
       if (controller.signal.aborted) return;
       setDictionaries(previous => ({ ...previous, cars: rows }));
-      if (rows.length) setDraft(previous => previous && !previous.donorId ? { ...previous, donorId: rows[0].id } : previous);
+      const preferred = preferredOvokoCar(rows, yearSuggestion.year);
+      if (preferred) setDraft(previous => previous && !previous.donorId ? { ...previous, donorId: preferred.id } : previous);
     }).catch(error => { if (!controller.signal.aborted) setCarsError(error instanceof Error ? error.message : "Nie udalo sie odczytac aut Ovoko."); })
       .finally(() => { if (!controller.signal.aborted) setCarsBusy(false); });
     return () => controller.abort();
-  }, [modelId, carsRefresh]);
-  useEffect(() => { setCarYear(""); setCarConfirmed(false); setCarAttempted(false); setCarMessage(""); }, [modelId]);
+  }, [modelId, carsRefresh, yearSuggestion.year]);
+  useEffect(() => { setCarYear(yearSuggestion.year); setCarConfirmed(false); setCarAttempted(false); setCarMessage(""); }, [modelId, yearSuggestion.year]);
   useEffect(() => { setReview(false); setDonorConfirmed(false); setShippingConfirmed(false); }, [brandId, modelId]);
   function change(name: keyof OvokoPreparationDraft, value: string) {
     setReview(false); setDonorConfirmed(false); setShippingConfirmed(false);
@@ -170,8 +175,10 @@ export function OvokoPreparationPanel() {
   ] : [];
   const canPublish = Boolean(source && draft && !publicationBlockers.length);
   const otherCodes = draft ? additionalOvokoCodes(draft.additionalCodes, draft.manufacturerCode) : [];
-  async function createCar() {
-    if (!brandId || !modelId || !/^\d{4}$/.test(carYear) || !carConfirmed || creatingCar || carAttempted || carsBusy || modelsBusy || dictionaryBusy) return;
+  async function createCar(automatic = false): Promise<boolean> {
+    const attemptKey = `${modelId}:${carYear}`;
+    if (!brandId || !modelId || !/^\d{4}$/.test(carYear) || (!carConfirmed && !automatic) || creatingCar || carWriteLocks.current.has(attemptKey) || carAttempted || carsBusy || carsError || modelsBusy || dictionaryBusy) return false;
+    carWriteLocks.current.add(attemptKey);
     setCreatingCar(true); setCarAttempted(true); setCarMessage(""); setReview(false);
     setDraft(previous => previous ? { ...previous, donorId: "" } : previous);
     try {
@@ -180,17 +187,24 @@ export function OvokoPreparationPanel() {
       const response = await fetch("/api/ovoko/create-car", { method: "POST", cache: "no-store", headers: { Authorization: `Bearer ${data.session.access_token}`, "Content-Type": "application/json" }, body: JSON.stringify({ brandId, modelId, year: carYear, confirmCreate: true }) });
       const result = await response.json() as { ok?: boolean; carId?: string; modelId?: string; year?: string; reused?: boolean; message?: string };
       if (!response.ok || !result.ok || !result.carId || !/^[1-9]\d{0,11}$/.test(result.carId) || result.modelId !== modelId || result.year !== carYear) {
-        if (!response.ok && response.status !== 409) setCarAttempted(false);
+        if (!response.ok && response.status !== 409) { setCarAttempted(false); carWriteLocks.current.delete(attemptKey); }
         throw new Error(result.message || "Niepewny wynik tworzenia auta. Sprawdz Ovoko, nie ponawiaj automatycznie.");
       }
       setDraft(previous => previous ? { ...previous, donorId: result.carId! } : previous);
       setCarMessage(`${result.reused ? "Wykorzystano istniejacy" : "Utworzono nowy"} rekord auta ID ${result.carId}. ID uzupelniono automatycznie. Nie wyslano jeszcze czesci.`);
       setCarsRefresh(value => value + 1);
+      return true;
     } catch (error) { setCarMessage(error instanceof Error ? error.message : "Niepewny wynik. Sprawdz Moje samochody Ovoko."); }
     finally { setCreatingCar(false); }
+    return false;
   }
-  function openPublicationReview() {
-    if (!source || publishing || attempted || creatingCar) return;
+  async function openPublicationReview(prepareCar = true) {
+    if (!source || publishing || attempted || creatingCar || carsBusy || modelsBusy || dictionaryBusy) return;
+    const eligibleSource = source.status === "ACTIVE" && source.stock === 1 && !source.bundle && source.images.length > 0 && source.rejectedImages === 0;
+    if (prepareCar && eligibleSource && !draft?.donorId && automaticCar && !(await createCar(true))) {
+      setCarMessage(previous => previous || carsError || "Nie przygotowano auta. Sprawdz model i rok ponizej; nie wyslano czesci.");
+      return;
+    }
     setReview(true); setDonorConfirmed(false); setShippingConfirmed(false);
     publicationPanel.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -210,8 +224,8 @@ export function OvokoPreparationPanel() {
     } finally { setPublishing(false); }
   }
   return <section className="space-y-5">
-    <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-3xl font-black">Przygotuj do Ovoko</h1><button type="button" className={`${button} bg-orange-600`} disabled={!source || busy || dictionaryBusy || modelsBusy || publishing || attempted || creatingCar} onClick={openPublicationReview}>Wystaw 1 czesc w Ovoko</button></div>
-    <p className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm leading-6"><strong>Przygotowanie jednej oferty.</strong> Sam podglad niczego nie wysyla. Utworzenie nowego auta oraz wysylka czesci wymagaja osobnych potwierdzen. Nie zmieniamy Allegro. Formularz pozostaje w pamieci strony; rejestry prob zapisu sa przechowywane na serwerze.</p>
+    <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-3xl font-black">Przygotuj do Ovoko</h1><button type="button" className={`${button} bg-orange-600`} disabled={!source || busy || dictionaryBusy || modelsBusy || carsBusy || publishing || attempted || creatingCar} onClick={() => void openPublicationReview()}>Wystaw 1 czesc w Ovoko</button></div>
+    <p className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm leading-6"><strong>Przygotowanie jednej oferty.</strong> Sam podglad niczego nie wysyla. Przy wlaczonym automatycznym aucie klikniecie Wystaw najpierw wykorzysta zapisane auto albo utworzy brakujacy rekord z widocznym ponizej modelem i rokiem. Wysylke czesci potwierdzasz osobno. Nie zmieniamy Allegro; rejestry prob zapisu sa przechowywane na serwerze.</p>
     <a href="/panel/inventory" className="inline-block text-sm underline">Wroc do ofert Allegro</a>
     {busy && <p role="status">Sprawdzam uprawnienia i pobieram oferte z polaczonego konta Allegro...</p>}
     {error && <p role="alert" className="rounded-xl border border-amber-400/30 p-4">{error} Nie utworzono podgladu i nie zmieniono ofert.</p>}
@@ -261,16 +275,17 @@ export function OvokoPreparationPanel() {
             <p className="text-xs text-white/60">Podpowiedz z tytulu, nie potwierdzenie zgodnosci po numerze OE. Model to nie konkretne auto-dawca. Przy kilku generacjach wybierz wlasciwa.</p>{modelError && <p role="alert" className="text-sm text-amber-200">{modelError}</p>}
           </div>
           <div className="space-y-2 rounded-xl border border-white/10 p-3"><label className="block text-sm">Moje samochody Ovoko<select aria-label="Moje samochody Ovoko" className={field} value={draft.donorId} disabled={!modelId || carsBusy} onChange={event => change("donorId", event.target.value)}><option value="">{carsBusy ? "Odczytuje zapisane auta..." : "Wybierz zapisane auto"}</option>{draft.donorId && !(dictionaries.cars || []).some(row => row.id === draft.donorId) && <option value={draft.donorId}>ID {draft.donorId} - poza odczytana lista, do sprawdzenia</option>}{(dictionaries.cars || []).map(row => <option key={row.id} value={row.id}>ID {row.id}; rok: {row.years && row.years !== "0" ? row.years : "niepodany"}{row.engineCode ? `; silnik: ${row.engineCode}` : ""}</option>)}</select></label>
-            {modelId && !carsBusy && !carsError && !(dictionaries.cars || []).length && <p className="text-xs text-amber-200">Nie znaleziono zapisanego auta dla tego modelu. Rozwin Dodaj brakujacy rekord auta ponizej, podaj i potwierdz rok. Mozesz tez dodac auto w Ovoko przez Nowy samochod / Sugerowane i odswiezyc liste.</p>}
-            {modelId && !carsBusy && (dictionaries.cars || []).length > 0 && <p className="text-xs text-emerald-200">ID uzupelniamy pierwszym odczytanym rekordem wybranego modelu, chyba ze wybrales lub wpisales inne. Sprawdz rok i przypisanie.</p>}
+            {modelId && !carsBusy && !carsError && !(dictionaries.cars || []).length && <p className="text-xs text-amber-200">Brak zapisanego auta dla tego modelu. Przy wlaczonym automatycznym aucie przycisk Wystaw przygotuje brakujacy rekord; ponizej widzisz model i rok.</p>}
+            {modelId && !carsBusy && (dictionaries.cars || []).length > 0 && <p className="text-xs text-emerald-200">Wykorzystujemy zapisane auto tego modelu, najpierw z pasujacym rokiem; nie tworzymy kolejnego. Sprawdz przypisanie. Reczny wybor pozostaje bez zmian.</p>}
             {modelId && <button type="button" className={button} disabled={carsBusy} onClick={() => setCarsRefresh(value => value + 1)}>Odswiez moje samochody</button>}{carsError && <p role="alert" className="text-xs text-amber-200">{carsError}</p>}
           </div>
+          {modelId && <div className="space-y-2 rounded-xl border border-violet-400/30 p-3"><label className="flex gap-2 text-sm"><input type="checkbox" checked={automaticCar} onChange={event => setAutomaticCar(event.target.checked)} />Automatyczne auto przy kliknieciu Wystaw: uzyj istniejacego lub utworz brakujace.</label><p className="text-sm">Model: {dictionaries.models?.find(row => row.id === modelId)?.name}; rok nowego rekordu: {carYear || "do uzupelnienia"}.</p><p className="text-xs text-amber-200">{carYear === yearSuggestion.year ? yearSuggestion.reason : "Rok wpisany recznie."} Nie dopisujemy VIN-u ani danych zakupu.</p></div>}
           {modelId && <details className="space-y-3 rounded-xl border border-violet-400/30 p-3"><summary className="cursor-pointer text-sm font-bold">Dodaj brakujacy rekord auta do Ovoko</summary><p className="text-sm">Model: {dictionaries.models?.find(row => row.id === modelId)?.name}. Powstanie rekord katalogowy, bez VIN-u, silnika i danych zakupu. Nie tworzymy go przy samym wyborze modelu.</p>
             <label className="block text-sm">Rok nowego rekordu auta<input className={field} value={carYear} maxLength={4} inputMode="numeric" disabled={carAttempted} onChange={event => { setCarYear(event.target.value); setCarConfirmed(false); }} /></label>
             <label className="flex gap-2 text-sm"><input type="checkbox" checked={carConfirmed} disabled={carAttempted} onChange={event => setCarConfirmed(event.target.checked)} />Potwierdzam model i podany rok nowego rekordu auta.</label>
             <button type="button" className={button} disabled={!/^\d{4}$/.test(carYear) || !carConfirmed || carAttempted || creatingCar || modelsBusy || carsBusy || dictionaryBusy} onClick={() => void createCar()}>Utworz rekord auta i uzupelnij ID</button>
-            {carMessage && <p role="status" className="text-sm text-amber-200">{carMessage}</p>}
           </details>}
+          {carMessage && <p role="status" className="text-sm text-amber-200">{carMessage}</p>}
           <label className="block text-sm">ID rekordu auta w Ovoko (car_id)<input className={field} value={draft.donorId} maxLength={12} inputMode="numeric" onChange={event => change("donorId", event.target.value)} /></label><p className="text-xs text-white/60">To techniczny car_id rekordu auta Ovoko, uzupelniany z listy powyzej (do 20 rekordow wybranego modelu). Nie jest to ID modelu ani miejsca skladowania. Sam ten numer nie oznacza, ze musisz znac VIN lub recznie zakladac fizycznego dawce. Przypisanie zostanie ponownie sprawdzone przed wysylka.</p>
           <label className="block text-sm">Plan wysylki do sprawdzenia<textarea className={field} value={draft.shippingPlan} maxLength={2000} rows={3} onChange={event => change("shippingPlan", event.target.value)} /></label><p className="text-xs text-white/60">Cennik Allegro jest tylko informacja zrodlowa. Nie przypisano wysylki Ovoko.</p>
           <label className="block text-sm">Opis / uwagi robocze<textarea className={field} value={draft.notes} maxLength={40000} rows={8} onChange={event => change("notes", event.target.value)} /></label><p className="text-xs text-white/60">Tekst bez formatowania HTML i ilustracji w opisie, do 40000 znakow. Sprawdz kompletnosc przed dalszym przygotowaniem.</p>
@@ -279,7 +294,7 @@ export function OvokoPreparationPanel() {
       {dictionaryError && <p role="alert" className="rounded-xl border border-amber-400/30 p-4">{dictionaryError} Dane robocze pozostaly bez zmian.</p>}
       <section ref={publicationPanel} className="scroll-mt-5 rounded-xl border border-amber-400/30 p-4"><h2 className="font-bold">Pierwsza pojedyncza wysylka do Ovoko</h2><ul className="mt-3 list-disc space-y-2 pl-5 text-sm" aria-label="Braki przygotowania">{ovokoPreparationIssues(source, draft).map(issue => <li key={issue}>{issue}</li>)}</ul>
         <p className="my-3 text-sm">Tylko aktywna oferta z jedna sztuka, bez zestawu i brakujacych zdjec. Wybierz zapisany rekord z Moich samochodow Ovoko; jego ID wypelni sie samo. Opony i felgi nie sa jeszcze obslugiwane. Brak automatu konczacego ofert po sprzedazy: podczas proby pilnuj dostepnosci na obu portalach.</p>
-        <button type="button" className={button} disabled={publishing || attempted || creatingCar} onClick={openPublicationReview}>Sprawdz pojedyncza wysylke</button>
+        <button type="button" className={button} disabled={publishing || attempted || creatingCar} onClick={() => void openPublicationReview(false)}>Sprawdz pojedyncza wysylke</button>
         {publicationBlockers.length > 0 && <div className="mt-3 rounded-lg border border-amber-400/30 p-3 text-sm text-amber-200"><p className="font-bold">Co blokuje wystawienie:</p><ul className="mt-2 list-disc space-y-1 pl-5" aria-label="Blokady wystawienia">{publicationBlockers.map(issue => <li key={issue}>{issue}</li>)}</ul></div>}
         {review && <div className="mt-4 space-y-3 rounded-xl border border-orange-400/40 p-4"><h3 className="font-bold">Potwierdzenie: jedna czesc</h3><p>{source.title}</p><p>Numer: {draft.manufacturerCode}; cena: {draft.price} {draft.currency}</p><p>Numery dodatkowe: {otherCodes?.join(", ") || "brak"}</p><p className="font-bold">Przenoszone zdjecia: {source.images.length} (cala galeria z Allegro)</p><p>Kategoria: {dictionaries.categories?.find(row => row.id === draft.categoryId)?.name}; stan: {dictionaries.qualities?.find(row => row.id === draft.qualityId)?.name}; dostepnosc: {dictionaries.statuses?.find(row => row.id === draft.statusId)?.name}</p><p>Auto: {dictionaries.brands?.find(row => row.id === brandId)?.name} {dictionaries.models?.find(row => row.id === modelId)?.name}; rekord auta ID: {draft.donorId}</p>
           <label className="flex gap-2 text-sm"><input type="checkbox" checked={donorConfirmed} disabled={attempted} onChange={event => setDonorConfirmed(event.target.checked)} />Potwierdzam poprawne przypisanie czesci do wskazanego auta w Ovoko.</label>
