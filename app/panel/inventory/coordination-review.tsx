@@ -10,15 +10,16 @@ const button = "rounded border border-white/20 px-2 py-1 text-xs disabled:opacit
 export function CoordinationReview({ offerIds }: { offerIds: string[] }) {
   const [open, setOpen] = useState(false), [busy, setBusy] = useState(false), [data, setData] = useState<Review>(), [error, setError] = useState("");
   const lock = useRef(false);
+  const [errorCode, setErrorCode] = useState("");
   async function review() {
     if (lock.current || !offerIds.length || offerIds.length > 5) return;
-    lock.current = true; setBusy(true); setOpen(true); setError(""); setData(undefined);
+    lock.current = true; setBusy(true); setOpen(true); setError(""); setErrorCode(""); setData(undefined);
     try {
       const { data } = await createSupabaseBrowserClient().auth.getSession();
       if (!data.session) throw new Error("Zaloguj sie ponownie.");
       const response = await fetch("/api/ovoko/coordination-review", { method: "POST", cache: "no-store", headers: { Authorization: `Bearer ${data.session.access_token}`, "Content-Type": "application/json" }, body: JSON.stringify({ offerIds }) });
-      const result = await response.json() as Partial<Review> & { message?: string };
-      if (!response.ok) throw new Error(result.message || "Nie potwierdzono odczytu. Niczego nie zmieniono.");
+      const result = await response.json() as Partial<Review> & { message?: string; code?: string };
+      if (!response.ok) { setErrorCode(typeof result.code === "string" ? result.code : ""); throw new Error(result.message || "Nie potwierdzono odczytu. Niczego nie zmieniono."); }
       if (result.readOnly !== true || result.automatic !== false || !Array.isArray(result.rows)) throw new Error("Nieprawidlowy wynik kontroli.");
       setData(result as Review);
     } catch (error) { setError(error instanceof Error ? error.message : "Nie udalo sie sprawdzic danych."); }
@@ -31,7 +32,7 @@ export function CoordinationReview({ offerIds }: { offerIds: string[] }) {
         <div className="flex items-center justify-between gap-4"><h2 id="coordination-title" className="font-bold">Koordynacja sprzedazy: tryb kontrolny</h2><button className={button} disabled={busy} onClick={() => setOpen(false)}>Zamknij</button></div>
         <p className="rounded border border-amber-300/25 bg-amber-300/5 p-2 text-xs text-amber-100">Automatyczne wycofywanie NIE jest wlaczone. Ten podglad niczego nie konczy, nie usuwa i nie zmienia stanow. Nie zapewnia jeszcze ochrony przed podwojna sprzedaza.</p>
         {busy && <p role="status">Sprawdzam aktualne konta, powiazania, statusy i zdarzenia sprzedazy...</p>}
-        {error && <div role="alert" className="space-y-2 text-amber-200"><p>{error}</p><a href="/panel/allegro" className="inline-block rounded border border-white/20 px-3 py-1.5 text-xs underline">Polaczenie Allegro: ponowna autoryzacja</a></div>}
+        {error && <div role="alert" className="space-y-2 text-amber-200"><p>{error}</p>{errorCode && <p className="text-xs">Kod diagnostyczny: <code>{errorCode}</code></p>}<button className={button} disabled={busy} onClick={() => void review()}>Ponow odczyt</button>{/^coordination_(?:(?:seller|offers|events)_http_(?:401|403)|token_(?:400|401|409))$/.test(errorCode) && <a href="/panel/allegro" className="ml-2 inline-block rounded border border-white/20 px-3 py-1.5 text-xs underline">Polaczenie Allegro: ponowna autoryzacja</a>}</div>}
         {data && <><p className="text-xs text-white/60">{data.scope} Odczytano zdarzen: {data.eventsRead}. {data.partial && "Osiagnieto limit odczytu; historia jest niepelna."}</p>
           {data.rows.map(row => <div key={row.offerId} className="space-y-2 rounded border border-white/15 p-2">
             <div className="font-semibold">{row.name || `Allegro ${row.offerId}`}</div>

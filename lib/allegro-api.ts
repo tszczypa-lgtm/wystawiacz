@@ -37,7 +37,7 @@ type RemotePayload = {
   [key: string]: unknown;
 };
 class ApiError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  constructor(public status: number, message: string, public code?: string) { super(message); }
 }
 type Title = { title: string; url: string };
 type TitleGroup = { source: string; titles: Title[]; message?: string; errorCode?: string };
@@ -306,6 +306,8 @@ export async function openConnection<T = Connection>(value: string, key: CryptoK
 
 export async function handleAllegroApi(request: Request, env: Env): Promise<Response> {
   if (new URL(request.url).pathname === "/api/allegro/auth/callback" && request.method === "GET") return completeOAuth(request, env);
+  const coordination = new URL(request.url).pathname === "/api/allegro/coordination-snapshot";
+  let coordinationStage = "session";
   try {
     const authorization = request.headers.get("Authorization");
     if (!authorization?.startsWith("Bearer ")) throw new ApiError(401, "Zaloguj się do Wystawiacza.");
@@ -318,6 +320,7 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
     if (!userResponse.ok) throw new ApiError(401, "Sesja wygasła. Zaloguj się ponownie.");
     const user = await userResponse.json() as { id: string };
     if (!user.id) throw new ApiError(401, "Nieprawidłowa sesja.");
+    coordinationStage = "connection";
     const key = await encryptionKey(env);
     const table = `${supabaseUrl}/rest/v1/allegro_connections`;
     const dbHeaders = { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" };
@@ -389,24 +392,37 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
       if (path === "/coordination-snapshot") {
         const ids = (url.searchParams.get("offerIds") || "").split(",");
         if (ids.length > 5 || new Set(ids).size !== ids.length || ids.some(id => !/^\d{1,30}$/.test(id)) || [...url.searchParams.keys()].some(key => key !== "offerIds") || url.searchParams.getAll("offerIds").length !== 1) throw new ApiError(400, "Wybierz od 1 do 5 ofert do kontroli koordynacji.");
-        const seller = await remote("/me", { signal: AbortSignal.timeout(15000) });
+        coordinationStage = "token";
+        const token = await accessToken();
+        async function coordinationRead(route: string, stage: string) {
+          coordinationStage = stage;
+          const response = await fetch(apiBase + route, { headers: { Authorization: `Bearer ${token}`, Accept: accept, "Accept-Language": "pl-PL" }, signal: AbortSignal.timeout(15000) });
+          if (!response.ok) {
+            await response.body?.cancel();
+            const hint = response.status === 403 ? " Allegro odmowilo dostepu. Sprawdz uprawnienia aplikacji do tego odczytu." : response.status === 401 ? " Allegro odrzucilo token. Odnow autoryzacje." : response.status === 429 ? " Limit Allegro; odczekaj przed ponowieniem kontroli." : " Ponow kontrole pozniej.";
+            throw new ApiError(response.status >= 500 ? 502 : response.status, `Kontrola Allegro: ${stage === "seller" ? "konto sprzedawcy" : stage === "offers" ? "lista ofert" : "zdarzenia zamowien"}, HTTP ${response.status}.${hint} Niczego nie wycofano.`, `coordination_${stage}_http_${response.status}`);
+          }
+          try {
+            const payload = await response.json();
+            if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error();
+            return payload as Record<string, unknown>;
+          } catch { throw new ApiError(502, "Nieprawidlowy format odpowiedzi Allegro. Niczego nie wycofano.", `coordination_${stage}_json`); }
+        }
+        const seller = await coordinationRead("/me", "seller");
         if (typeof seller.id !== "string" || !/^\d{1,30}$/.test(seller.id)) throw new ApiError(502, "Nie potwierdzono sprzedawcy Allegro.");
         const offers: { id: string; name: string; status: string; stock: number | null }[] = [];
         for (const id of ids) {
-          const owned = await remote(`/sale/offers?offer.id=${id}&limit=1`, { signal: AbortSignal.timeout(15000) });
-          if (!Array.isArray(owned.offers) || owned.offers.length !== 1 || owned.offers[0].id !== id) throw new ApiError(409, "Nie potwierdzono wlasnosci jednej z ofert.");
+          const owned = await coordinationRead(`/sale/offers?offer.id=${id}&limit=1`, "offers");
+          if (!Array.isArray(owned.offers)) throw new ApiError(502, "Nieprawidlowy format listy ofert Allegro. Niczego nie wycofano.", "coordination_offers_format");
+          if (owned.offers.length !== 1 || owned.offers[0]?.id !== id) throw new ApiError(409, `Oferta ${id} nie zostala odnaleziona na aktualnie polaczonym koncie Allegro. Odswiez liste i sprawdz konto sprzedawcy. Niczego nie wycofano.`, "coordination_offer_ownership");
           const row = owned.offers[0];
           offers.push({ id, name: typeof row.name === "string" ? row.name : "", status: typeof row.publication?.status === "string" ? row.publication.status : "UNKNOWN", stock: Number.isSafeInteger(row.stock?.available) && row.stock.available >= 0 ? row.stock.available : null });
         }
-        const eventResponse = await fetch(apiBase + "/order/events?limit=1000", { headers: { Authorization: `Bearer ${await accessToken()}`, Accept: accept }, signal: AbortSignal.timeout(15000) });
-        if (!eventResponse.ok) {
-          await eventResponse.body?.cancel();
-          throw new ApiError(eventResponse.status >= 500 ? 502 : eventResponse.status, `Odczyt zamowien Allegro: HTTP ${eventResponse.status}.${eventResponse.status === 403 ? " Sprawdz scope allegro:api:orders:read w aplikacji Allegro i polacz konto ponownie, bez rozlaczania ofert." : eventResponse.status === 401 ? " Odnow autoryzacje Allegro." : " Sprobuj pozniej; nie potwierdzono danych sprzedazy."}`);
-        }
-        const events = await readRemote(eventResponse);
+        const events = await coordinationRead("/order/events?limit=1000", "events");
+        coordinationStage = "events_format";
         const { allegroSaleEvidence } = await import("./sales-coordination");
         let evidence;
-        try { evidence = allegroSaleEvidence(events, seller.id); } catch { throw new ApiError(502, "Nie potwierdzono danych zdarzen sprzedazy Allegro."); }
+        try { evidence = allegroSaleEvidence(events, seller.id); } catch { throw new ApiError(502, "Odczyt zdarzen Allegro powiodl sie, ale ich format lub konto sprzedawcy nie przeszly weryfikacji. Ponowne logowanie nie naprawia bledu formatu. Niczego nie wycofano.", "coordination_events_format"); }
         return json({ sellerId: seller.id, offers, evidence: evidence.filter(item => ids.includes(item.listingId)), eventsRead: Array.isArray(events.events) ? events.events.length : 0, partial: Array.isArray(events.events) && events.events.length === 1000 });
       }
       if (path.startsWith("/ovoko-fitment/")) {
@@ -602,6 +618,13 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
     }
     return json({ message: "Nieznana trasa API." }, 404);
   } catch (error) {
+    if (coordination) {
+      const status = error instanceof ApiError ? error.status : 503;
+      const code = error instanceof ApiError && error.code ? error.code : `coordination_${coordinationStage}_${status}`;
+      const labels: Record<string, string> = { session: "sesja Wystawiacza", connection: "odczyt polaczenia Allegro", token: "odnowienie tokenu Allegro", seller: "konto sprzedawcy", offers: "lista ofert", events: "zdarzenia zamowien", events_format: "weryfikacja zdarzen zamowien" };
+      const message = error instanceof ApiError && error.code ? error.message : `Nie zakonczono kontroli Allegro: ${labels[coordinationStage] || "odczyt danych"} (HTTP ${status}). ${coordinationStage === "session" && status === 401 ? "Zaloguj sie do Wystawiacza." : coordinationStage === "token" && [400, 401, 409].includes(status) ? "Sprawdz polaczenie Allegro i odnow autoryzacje." : "Ponow sam odczyt; nie rozlaczaj konta ani ofert."} Niczego nie wycofano.`;
+      return json({ message, code }, status);
+    }
     return json({ message: error instanceof ApiError ? error.message : "Błąd obsługi Allegro. Sprawdź konfigurację serwera i spróbuj ponownie." }, error instanceof ApiError ? error.status : 500);
   }
 }

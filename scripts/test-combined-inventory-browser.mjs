@@ -11,7 +11,7 @@ const bundle = await build({ stdin: { contents: 'import React from "react";impor
 const browser = await chromium.launch({ headless: true, channel: "chrome" });
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-  let admin = true, ovokoFail = false, identityReads = 0, changedAccount = false;
+  let admin = true, ovokoFail = false, identityReads = 0, changedAccount = false, reviewFailure;
   const errors = [], operations = [], withdrawalCalls = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.route("https://combined.test/**", async route => {
@@ -32,6 +32,7 @@ try {
     if (url.pathname === "/api/ovoko/status") { assert.ok(admin); return route.fulfill({ json: { allowed: true, connected: true, verifiedAt: "fixture-binding" } }); }
     if (url.pathname === "/api/ovoko/coordination-review") {
       assert.deepEqual(req.postDataJSON(), { offerIds: ["1"] });
+      if (reviewFailure) return route.fulfill({ status: reviewFailure.status, json: reviewFailure });
       return route.fulfill({ json: { readOnly: true, automatic: false, eventsRead: 1, partial: false, scope: "Zakres kontrolny", rows: [{ offerId: "1", partId: "10", name: "Radio ABC123456", allegroStatus: "ACTIVE", stock: 1, ovokoStatus: "stock", decision: { status: "idle", action: null, reason: "Brak potwierdzonej sprzedazy." }, withdrawal: { allegro: true, ovoko: true, both: true } }] } });
     }
     if (url.pathname === "/api/ovoko/read") {
@@ -62,6 +63,18 @@ try {
   await review.getByRole("button", { name: "Tylko Ovoko", exact: true }).click();
   await review.getByText(/Plan: Ovoko: ustaw Wycofany/).waitFor();
   assert.ok(await review.getByText(/niczego nie wykonano/).isVisible());
+  await review.getByRole("button", { name: "Zamknij", exact: true }).click();
+  reviewFailure = { status: 502, code: "coordination_events_format", message: "Nieprawidlowy format zdarzen." };
+  await page.getByRole("button", { name: "Koordynacja: sprawdz (1-5)" }).click();
+  await review.getByText("coordination_events_format", { exact: true }).waitFor();
+  assert.equal(await review.getByRole("link", { name: /ponowna autoryzacja/ }).count(), 0, "A schema failure never asks for another authorization");
+  reviewFailure = { status: 403, code: "coordination_events_http_403", message: "Brak zgody na odczyt zamowien." };
+  await review.getByRole("button", { name: "Ponow odczyt", exact: true }).click();
+  await review.getByRole("link", { name: /ponowna autoryzacja/ }).waitFor();
+  reviewFailure = undefined;
+  await review.getByRole("button", { name: "Ponow odczyt", exact: true }).click();
+  await review.getByText("Brak potwierdzonej sprzedazy.", { exact: false }).waitFor();
+  assert.equal(await review.getByRole("alert").count(), 0, "A successful retry clears stale diagnostics");
   await review.getByRole("button", { name: "Zamknij", exact: true }).click();
   await table.locator('[data-part-key="a:1"]').getByRole("button", { name: "Wycofaj", exact: true }).click();
   const withdraw = page.getByRole("dialog", { name: "Wycofaj ze sprzedazy" });

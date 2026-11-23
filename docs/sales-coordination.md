@@ -18,6 +18,13 @@
 4. Returns/cancellations never automatically relist. A human must confirm physical availability and resolve payment/reservation state.
 5. No listing absent from a partial response is classified as sold/deleted. Ending an offer manually is not evidence of sale.
 
+## Read diagnostics (2026-11-24)
+
+- Review preserves safe, locally authored `coordination_*` diagnostics from the Allegro adapter. Provider error bodies, tokens and buyer data are not forwarded.
+- `seller`, `offers`, and `events` identify the failed read; `_http_NNN` preserves the actual provider HTTP status. `_json` and `events_format` mean invalid response data, not missing consent. `offer_ownership` means a selected offer was not found on the current seller account.
+- The modal offers read-only retry. Reauthorization is suggested only for provider 401/403 or token renewal failure, not schema errors or outages. This does not change the fail-closed sale policy or enable automatic withdrawals.
+- Live account failure is not considered resolved until the deployed diagnostic or a successful review confirms the outcome. No speculative parser relaxation is applied.
+
 ## Required before enabling writes
 
 Automatic sale synchronization does not yet include an active scheduler, persistent event cursors or Ovoko order ingestion. Do not label the review as automatic synchronization. The manual withdrawal executor below is a separate opt-in feature, not a background sale monitor.

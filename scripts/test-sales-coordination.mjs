@@ -36,7 +36,7 @@ assert.throws(() => withdrawalPlan("both", { allegro: true, ovoko: false, confli
 assert.throws(() => withdrawalPlan("allegro", { allegro: true, ovoko: true, conflict: true }));
 // Exercise the real read adapter with mocked seller identity, journal and Ovoko responses.
 const read = load("ovoko-read");
-let journalState = "created", duplicate = false, foreign = false, failed = false, reads = [];
+let journalState = "created", duplicate = false, foreign = false, failed = false, reads = [], snapshotFailure;
 const remote = async path => {
   reads.push(path); assert.ok(path.startsWith("/get/") || path.startsWith("/v2/get/"), "Review has no provider mutation path");
   if (failed) throw new Error("read failed");
@@ -45,7 +45,7 @@ const remote = async path => {
   return { status_code: "R200", data: [{ id: "20", external_id: foreign ? "tymo:666:10" : "tymo:555:10", status: "0" }, ...(duplicate ? [{ id: "21", external_id: "tymo:555:10", status: "0" }] : [])], pagination: { page: 1, limit: 2, total_count: duplicate ? 2 : 1 } };
 };
 const { reviewCoordination } = load("coordination-review", name => {
-  if (name === "./allegro-api") return { handleAllegroApi: async () => Response.json({ sellerId: "555", offers: [{ id: "10", name: "Part", status: "ENDED", stock: 0 }], evidence: [sale], eventsRead: 1, partial: false }) };
+  if (name === "./allegro-api") return { handleAllegroApi: async () => snapshotFailure ? Response.json(snapshotFailure, { status: 502 }) : Response.json({ sellerId: "555", offers: [{ id: "10", name: "Part", status: "ENDED", stock: 0 }], evidence: [sale], eventsRead: 1, partial: false }) };
   if (name === "./ovoko-connection") return { loadOvokoConnection: async () => ({ username: "fixture" }), ovokoConnectionKey: async () => ({}) };
   if (name === "./ovoko-write-client") return { ovokoWriteClient: () => remote, ovokoWriteDigest: async () => "a".repeat(64) };
   if (name === "./ovoko-read") return read;
@@ -61,15 +61,28 @@ for (const failure of ["uncertain", "duplicate", "foreign"]) {
   const checked = await reviewCoordination(request, {}, context, { offerIds: ["10"] }); assert.equal(checked.rows[0].linked, false); assert.equal(checked.rows[0].decision.action, null);
 }
 failed = true; await assert.rejects(reviewCoordination(request, {}, context, { offerIds: ["10"] }));
+for (const code of ["coordination_events_format", "coordination_offers_http_403", "coordination_offer_ownership"]) {
+  snapshotFailure = { code, message: "Safe local diagnostic" };
+  await assert.rejects(reviewCoordination(request, {}, context, { offerIds: ["10"] }), error => error.code === code && error.message === snapshotFailure.message);
+}
+snapshotFailure = { message: "private provider data" };
+await assert.rejects(reviewCoordination(request, {}, context, { offerIds: ["10"] }), error => error.code === "coordination_source_unavailable" && !error.message.includes("private"));
+snapshotFailure = undefined;
 for (const input of [{ offerIds: [] }, { offerIds: ["10", "10"] }, { offerIds: ["../10"] }, { offerIds: ["10"], action: "delete" }]) await assert.rejects(reviewCoordination(request, {}, context, input));
 const actual = load("allegro-api", name => { assert.equal(name, "./sales-coordination"); return policy; });
 const rawKey = new Uint8Array(32).fill(7), key = await crypto.subtle.importKey("raw", rawKey, "AES-GCM", false, ["encrypt", "decrypt"]);
 const sealed = await actual.sealConnection({ accessToken: "fixture", expiresAt: Date.now() + 3600000 }, key, "owner");
 const originalFetch = globalThis.fetch;
-let eventSeller = "555", ownerMatch = true;
+let eventSeller = "555", ownerMatch = true, fault;
 try {
   globalThis.fetch = async (input, options = {}) => {
     const url = new URL(input); assert.equal(options.method || "GET", "GET", "Observation never mutates Allegro");
+    if (fault?.path === url.pathname) {
+      if (fault.type === "timeout") throw new DOMException("private transport details", "TimeoutError");
+      if (fault.type === "json") return new Response("private invalid body");
+      if (fault.type === "shape") return Response.json({ unexpected: "private" });
+      return Response.json({ error_description: "private provider details" }, { status: fault.status });
+    }
     if (url.pathname === "/auth/v1/user") return Response.json({ id: "owner" });
     if (url.pathname === "/rest/v1/allegro_connections") return Response.json([{ sealed }]);
     assert.equal(url.origin, "https://api.allegro.pl");
@@ -81,8 +94,22 @@ try {
   const env = { SUPABASE_SERVICE_ROLE_KEY: "fixture", ALLEGRO_ENCRYPTION_KEY: Buffer.from(rawKey).toString("base64") };
   const req = suffix => new Request(`https://fixture.test/api/allegro/coordination-snapshot?offerIds=${suffix}`, { headers: { Authorization: "Bearer session" } });
   const success = await actual.handleAllegroApi(req("10"), env); assert.equal(success.status, 200); const body = await success.text(); assert.doesNotMatch(body, /private|buyer|accessToken/);
-  eventSeller = "666"; assert.equal((await actual.handleAllegroApi(req("10"), env)).status, 502);
-  eventSeller = "555"; ownerMatch = false; assert.equal((await actual.handleAllegroApi(req("10"), env)).status, 409);
+  eventSeller = "666"; let failure = await actual.handleAllegroApi(req("10"), env); assert.equal(failure.status, 502); assert.equal((await failure.json()).code, "coordination_events_format");
+  eventSeller = "555"; ownerMatch = false; failure = await actual.handleAllegroApi(req("10"), env); assert.equal(failure.status, 409); assert.equal((await failure.json()).code, "coordination_offer_ownership");
+  ownerMatch = true;
+  for (const [path, stage] of [["/me", "seller"], ["/sale/offers", "offers"], ["/order/events", "events"]]) {
+    for (const status of [401, 403, 429, 503]) {
+      fault = { path, status }; failure = await actual.handleAllegroApi(req("10"), env);
+      assert.equal(failure.status, status >= 500 ? 502 : status);
+      const detail = await failure.json(); assert.equal(detail.code, `coordination_${stage}_http_${status}`); assert.match(detail.message, new RegExp(`HTTP ${status}`)); assert.doesNotMatch(JSON.stringify(detail), /private/);
+    }
+    for (const type of ["json", "timeout"]) {
+      fault = { path, type }; failure = await actual.handleAllegroApi(req("10"), env);
+      const detail = await failure.json(); assert.equal(detail.code, `coordination_${stage}_${type === "json" ? "json" : "503"}`); assert.doesNotMatch(JSON.stringify(detail), /private/);
+    }
+  }
+  fault = { path: "/sale/offers", type: "shape" }; assert.equal((await (await actual.handleAllegroApi(req("10"), env)).json()).code, "coordination_offers_format");
+  fault = undefined;
   for (const ids of ["10,10", "../10", "1,2,3,4,5,6"]) assert.equal((await actual.handleAllegroApi(req(ids), env)).status, 400);
 } finally { globalThis.fetch = originalFetch; }
 console.log("Sales coordination: evidence dedupe/cancellation, exact links, last-unit guards, double-sale alerts, scoped withdrawal plans and read-only provider review passed. No automatic writes enabled.");
