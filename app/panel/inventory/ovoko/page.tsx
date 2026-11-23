@@ -1,7 +1,6 @@
 import { AccountShell } from "../../account-shell";
-import { InventoryViews } from "../inventory-views";
-import { OvokoInventoryPanel } from "./ovoko-inventory-panel";
+import { CombinedInventoryPanel } from "../combined-panel";
 
 export default function OvokoInventoryPage() {
-  return <AccountShell active="/panel/inventory"><InventoryViews active="ovoko" /><OvokoInventoryPanel /></AccountShell>;
+  return <AccountShell active="/panel/inventory"><CombinedInventoryPanel portal="ovoko" /></AccountShell>;
 }

@@ -1,7 +1,6 @@
 import { AccountShell } from "../account-shell";
-import { InventoryPanel } from "./inventory-panel";
-import { InventoryViews } from "./inventory-views";
+import { CombinedInventoryPanel } from "./combined-panel";
 
 export default function InventoryPage() {
-  return <AccountShell active="/panel/inventory"><InventoryViews active="allegro" /><InventoryPanel /></AccountShell>;
+  return <AccountShell active="/panel/inventory"><CombinedInventoryPanel /></AccountShell>;
 }
