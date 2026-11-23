@@ -3,7 +3,7 @@ import { handleAllegroApi } from "./allegro-api";
 import { loadOvokoConnection, ovokoConnectionKey, type OvokoKeyEnv } from "./ovoko-connection";
 import { ovokoSourcePreview, additionalOvokoCodes } from "./ovoko-preparation";
 import { OvokoError, parseOvokoRead, ovokoPageData } from "./ovoko-read";
-import { ovokoWriteClient, ovokoWriteDigest as digest } from "./ovoko-write-client";
+import { ovokoWriteClient, ovokoWriteDigest as digest, ovokoRemoteDiagnosis } from "./ovoko-write-client";
 import { sameOvokoMoney } from "./ovoko-bulk-price";
 import { createdPublication, ovokoPublicationPresent, publicationCas, type CreatedPublication } from "./ovoko-publication-presence";
 
@@ -92,17 +92,25 @@ export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, c
       ? await db(`?${selector}&owner_id=eq.${context.user.id}${publicationCas(retransfer)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ state: "sending", part_id: null, request_hash: requestHash, updated_at: new Date().toISOString() }) })
       : await db("?on_conflict=ovoko_account,allegro_seller_id,allegro_offer_id", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=representation" }, body: JSON.stringify({ ovoko_account: account, allegro_seller_id: seller, allegro_offer_id: offerId, owner_id: context.user.id, request_hash: requestHash, state: "sending" }) });
     if (!Array.isArray(reserved) || reserved.length !== 1 || reserved[0]?.owner_id !== context.user.id || reserved[0].request_hash !== requestHash || (retransfer && (reserved[0].state !== "sending" || reserved[0].part_id !== null || reserved[0].ovoko_account !== account || reserved[0].allegro_seller_id !== seller || reserved[0].allegro_offer_id !== offerId))) throw new OvokoError(409, "Wysylka jest juz zablokowana lub nie potwierdzono rezerwacji. Sprawdz Ovoko przed kolejna proba.");
+    let stage = "importPart", acceptedPartId = "";
     try {
       // Exactly one mutation, only after the durable unique lock. Never retry a provider write.
       const result = await remote("/crm/importPart", form);
+      stage = "odczyt part_id";
       if (!/^[1-9]\d{0,11}$/.test(String(result.part_id))) throw new Error("missing part id");
       const partId = String(result.part_id);
-      const saved = await db(`?${selector}&owner_id=eq.${context.user.id}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ state: "created", part_id: partId, updated_at: new Date().toISOString() }) });
-      if (!Array.isArray(saved) || saved.length !== 1 || saved[0].part_id !== partId) throw new Error("unconfirmed log");
+      acceptedPartId = partId; stage = "zapis potwierdzenia";
+      const saved = await db(`?${selector}&owner_id=eq.${context.user.id}&state=eq.sending&request_hash=eq.${requestHash}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ state: "created", part_id: partId, updated_at: new Date().toISOString() }) });
+      if (!Array.isArray(saved) || saved.length !== 1 || saved[0]?.state !== "created" || saved[0].part_id !== partId || saved[0].request_hash !== requestHash) throw new Error("unconfirmed log");
       return { ok: true, partId, alreadyCreated: false, visibilityConfirmed: false };
-    } catch {
-      try { await db(`?${selector}&owner_id=eq.${context.user.id}&state=eq.sending`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ state: "uncertain", updated_at: new Date().toISOString() }) }); } catch { /* The sending lock still prevents another write. */ }
-      throw new OvokoError(409, `Wynik wysylki jest niepewny. Czesc mogla powstac w Ovoko. Nie ponawiaj: sprawdz konto Ovoko po ID aukcji Allegro ${offerId} lub ID zewnetrznym ${externalId}. Blokada duplikatu pozostaje aktywna.`);
+    } catch (error) {
+      if (acceptedPartId) try {
+        const checked = await db(`?${selector}&owner_id=eq.${context.user.id}&select=state,part_id,request_hash`);
+        if (Array.isArray(checked) && checked.length === 1 && checked[0]?.state === "created" && checked[0].part_id === acceptedPartId && checked[0].request_hash === requestHash) return { ok: true, partId: acceptedPartId, alreadyCreated: false, visibilityConfirmed: false };
+      } catch { /* Readback never retries the provider mutation. */ }
+      try { await db(`?${selector}&owner_id=eq.${context.user.id}&state=eq.sending&request_hash=eq.${requestHash}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ state: "uncertain", ...(acceptedPartId ? { part_id: acceptedPartId } : {}), updated_at: new Date().toISOString() }) }); } catch { /* The sending lock still prevents another write. */ }
+      const diagnosis = stage === "importPart" ? ovokoRemoteDiagnosis(error) : stage === "odczyt part_id" ? "Odpowiedz R200 nie zawiera poprawnego part_id." : `Ovoko potwierdzilo ID ${acceptedPartId}, ale nie potwierdzono zapisu w naszej bazie.`;
+      throw new OvokoError(409, `Wynik wysylki jest niepewny (etap: ${stage}). ${diagnosis} Czesc mogla powstac w Ovoko. Nie ponawiaj: sprawdz konto Ovoko po ID aukcji Allegro ${offerId} lub ID zewnetrznym ${externalId}. Blokada duplikatu pozostaje aktywna.`);
     }
   } catch (error) {
     if (error instanceof OvokoError) throw error;

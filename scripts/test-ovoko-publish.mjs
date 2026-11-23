@@ -65,6 +65,9 @@ globalThis.fetch = async (input, options = {}) => {
     }
     if (!row || row.owner_id !== owner() || [...url.searchParams].some(([field, filter]) => filter.startsWith("eq.") && String(row[field]) !== filter.slice(3))) return Response.json([]);
     Object.assign(row, patch);
+    if (patch.state === "created" && mode === "confirmation-empty") return new Response(null, { status: 204 });
+    if (patch.state === "created" && mode === "confirmation-lost") throw new Error("private-db-error");
+    if (patch.state === "created" && mode === "confirmation-wrong-hash") { row.state = "uncertain"; row.request_hash = "f".repeat(64); throw new Error("private-db-error"); }
     if (patch.state === "sending" && mode === "cas-no-representation") return new Response(null, { status: 204 });
     return Response.json([row]);
   }
@@ -129,6 +132,10 @@ globalThis.fetch = async (input, options = {}) => {
   if (mode === "timeout") throw new DOMException("private-provider-error", "TimeoutError");
   if (mode === "redirect") return new Response("private-provider-error", { status: 302, headers: { Location: "https://evil.test" } });
   if (mode === "bad") return Response.json({ status_code: "R400", msg: "private-provider-error" });
+  if (mode === "http-error") return Response.json({ status_code: "R500", msg: "private-provider-error" }, { status: 503 });
+  if (mode === "bad-json") return new Response("private-provider-error");
+  if (mode === "transport") throw new Error("private-provider-error");
+  if (mode === "unsafe-code") return Response.json({ status_code: "private-token", msg: "private-provider-error" });
   if (mode === "missing-id") return Response.json({ status_code: "R200" });
   providerPresent = true;
   return Response.json({ status_code: "R200", part_id: 77 });
@@ -198,10 +205,21 @@ try {
     reset(); assert.equal((await handleOvokoApi(req({ ...payload(), additionalCodes }), env)).status, 400); assert.equal(writes, 0);
   }
   reset(); const simultaneous = await Promise.all([handleOvokoApi(req(), env), handleOvokoApi(req(), env)]); assert.equal(writes, 1); assert.ok(simultaneous.some(response => response.status === 200));
-  for (const failure of ["timeout", "redirect", "bad", "missing-id", "log-failure"]) {
+  for (const failure of ["timeout", "transport", "redirect", "bad", "http-error", "bad-json", "unsafe-code", "missing-id", "log-failure", "confirmation-wrong-hash"]) {
     reset(); mode = failure; if (failure === "log-failure") failDb = "PATCH";
-    const response = await handleOvokoApi(req(), env); assert.equal(response.status, 409); assert.ok(!(await response.text()).includes("private-")); assert.equal(writes, 1);
+    const response = await handleOvokoApi(req(), env); assert.equal(response.status, 409);
+    const message = await response.text(); assert.doesNotMatch(message, /private-/); assert.equal(writes, 1);
+    const expected = { timeout: /Timeout/, transport: /Blad polaczenia/, redirect: /przekierowanie/, bad: /Kod R400/, "http-error": /HTTP 503.*Kod R500/, "bad-json": /JSON/, "unsafe-code": /kodem R200/, "missing-id": /odczyt part_id/, "log-failure": /zapis potwierdzenia.*ID 77/, "confirmation-wrong-hash": /zapis potwierdzenia/ };
+    assert.match(message, expected[failure]);
     const retry = await handleOvokoApi(req(), env); assert.equal(retry.status, 409); assert.equal(writes, 1, "Never retry uncertain writes, including an unrecorded success");
+  }
+  for (const confirmation of ["confirmation-empty", "confirmation-lost"]) {
+    reset(); mode = confirmation;
+    const response = await handleOvokoApi(req(), env);
+    assert.equal(response.status, 200, await response.clone().text()); assert.equal((await response.json()).partId, "77");
+    assert.equal(writes, 1, "Lost confirmation response is recovered only by reading the durable journal");
+    assert.equal([...records.values()][0].state, "created");
+    assert.equal((await handleOvokoApi(req(), env)).status, 200); assert.equal(writes, 1);
   }
   const bulkReq = body => new Request("https://publish.test/api/ovoko/bulk", { method: "POST", headers: { Authorization: "Bearer fixture", Origin: "https://publish.test", "Content-Type": "application/json" }, body: JSON.stringify(body) });
   async function bulkPlan(adjustment) {
