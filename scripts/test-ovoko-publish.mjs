@@ -261,7 +261,20 @@ try {
   reset(); bulk = true; categoryName = "Felgi"; const wheels = await bulkPlan({ mode: "none", value: "0" }); assert.equal((await bulkSend(wheels)).status, 400); assert.equal(writes, 0);
   reset(); bulk = true; const uncertain = await bulkPlan({ mode: "none", value: "0" }); mode = "timeout";
   assert.equal((await bulkSend(uncertain)).status, 409); assert.equal(writes, 1);
-  assert.equal((await bulkSend(uncertain)).status, 409); assert.equal(writes, 1);
+  const lockedPublication = await bulkSend(uncertain);
+  assert.equal(lockedPublication.status, 409); assert.equal((await lockedPublication.json()).code, "publication_locked"); assert.equal(writes, 1);
+  const lockedRow = [...records.values()][0];
+  for (const state of ["sending", "uncertain"]) {
+    lockedRow.state = state;
+    const oldLock = JSON.stringify(lockedRow);
+    const result = await bulkSend(uncertain);
+    assert.equal(result.status, 409); assert.equal((await result.json()).code, "publication_locked");
+    assert.equal(JSON.stringify(lockedRow), oldLock, "Continuing other jobs never clears or changes the locked journal row");
+    assert.equal(writes, 1);
+  }
+  lockedRow.state = "broken";
+  const invalidJournal = await bulkSend(uncertain);
+  assert.equal(invalidJournal.status, 503); assert.equal((await invalidJournal.json()).code, undefined, "Malformed journal states must not be treated as a safe row-level lock"); assert.equal(writes, 1);
   reset(); bulk = true; const parallelItem = await bulkPlan({ mode: "none", value: "0" }); await Promise.all([bulkSend(parallelItem, false), bulkSend(parallelItem, false)]); assert.equal(writes, 1);
   for (const rotate of [3, 5]) {
     reset(); bulk = true; const item = await bulkPlan({ mode: "none", value: "0" }); rotateAt = rotate;

@@ -49,7 +49,8 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
   catch { throw new OvokoError(503, "Nie potwierdzono rejestru przeniesien. Partie zatrzymano."); }
   if (!Array.isArray(existing) || existing.length > 1) throw new OvokoError(503, "Nieprawidlowy rejestr przeniesien.");
   if (existing.length) {
-    if (existing[0]?.state !== "created") throw new OvokoError(409, "Wysylka tej oferty jest rozpoczeta lub niepewna. Sprawdz Ovoko; nie ponawiamy.");
+    if (["sending", "uncertain"].includes(existing[0]?.state)) throw new OvokoError(409, "Do sprawdzenia w Ovoko: poprzednia wysylka tej oferty jest rozpoczeta lub niepewna. Nie ponawiamy tej czesci; pozostale pozycje moga isc dalej.", "publication_locked");
+    if (existing[0]?.state !== "created") throw new OvokoError(503, "Nieprawidlowy stan rejestru publikacji. Nie wyslano czesci.");
     const row = createdPublication(existing[0], context.user.id);
     if (await ovokoPublicationPresent(ovokoWriteClient(credentials), row.part_id, `tymo:${owned.sellerId}:${source.id}`)) return { ok: true, alreadyCreated: true, partId: row.part_id };
     // Preparation never releases a journal entry. publishOvokoPart rechecks and atomically reserves it.
