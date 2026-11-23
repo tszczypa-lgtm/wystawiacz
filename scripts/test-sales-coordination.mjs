@@ -6,7 +6,8 @@ function load(name, require = () => { throw new Error("Unexpected dependency"); 
   const source = ts.transpileModule(text, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const module = { exports: {} }; new Function("require", "module", "exports", source)(require, module, module.exports); return module.exports;
 }
-const policy = load("sales-coordination"), { decideSalesCoordination: decide, allegroSaleEvidence: parse, withdrawalPlan } = policy;
+const policy = load("sales-coordination"), { decideSalesCoordination: decide, withdrawalPlan } = policy;
+const parser = load("allegro-sale-evidence"), { allegroSaleEvidence: parse } = parser;
 const at = "2026-11-23T12:00:00Z", sale = { source: "allegro", itemId: "item-1", eventId: "1", listingId: "10", at, quantity: 1, kind: "purchase" };
 const pair = { offerId: "10", partId: "20", linked: true, allegroStatus: "ENDED", stock: 0, ovokoStatus: "stock" };
 assert.equal(decide(pair, [sale]).action, "sold_ovoko");
@@ -69,7 +70,8 @@ snapshotFailure = { message: "private provider data" };
 await assert.rejects(reviewCoordination(request, {}, context, { offerIds: ["10"] }), error => error.code === "coordination_source_unavailable" && !error.message.includes("private"));
 snapshotFailure = undefined;
 for (const input of [{ offerIds: [] }, { offerIds: ["10", "10"] }, { offerIds: ["../10"] }, { offerIds: ["10"], action: "delete" }]) await assert.rejects(reviewCoordination(request, {}, context, input));
-const actual = load("allegro-api", name => { assert.equal(name, "./sales-coordination"); return policy; });
+let parserAvailable = true;
+const actual = load("allegro-api", name => { assert.equal(name, "./allegro-sale-evidence"); return parserAvailable ? parser : {}; });
 const rawKey = new Uint8Array(32).fill(7), key = await crypto.subtle.importKey("raw", rawKey, "AES-GCM", false, ["encrypt", "decrypt"]);
 const sealed = await actual.sealConnection({ accessToken: "fixture", expiresAt: Date.now() + 3600000 }, key, "owner");
 const originalFetch = globalThis.fetch;
@@ -94,6 +96,7 @@ try {
   const env = { SUPABASE_SERVICE_ROLE_KEY: "fixture", ALLEGRO_ENCRYPTION_KEY: Buffer.from(rawKey).toString("base64") };
   const req = suffix => new Request(`https://fixture.test/api/allegro/coordination-snapshot?offerIds=${suffix}`, { headers: { Authorization: "Bearer session" } });
   const success = await actual.handleAllegroApi(req("10"), env); assert.equal(success.status, 200); const body = await success.text(); assert.doesNotMatch(body, /private|buyer|accessToken/);
+  parserAvailable = false; const unavailable = await actual.handleAllegroApi(req("10"), env); assert.equal(unavailable.status, 503); assert.equal((await unavailable.json()).code, "coordination_parser_unavailable"); parserAvailable = true;
   eventSeller = "666"; let failure = await actual.handleAllegroApi(req("10"), env); assert.equal(failure.status, 502); assert.equal((await failure.json()).code, "coordination_events_format");
   eventSeller = "555"; ownerMatch = false; failure = await actual.handleAllegroApi(req("10"), env); assert.equal(failure.status, 409); assert.equal((await failure.json()).code, "coordination_offer_ownership");
   ownerMatch = true;

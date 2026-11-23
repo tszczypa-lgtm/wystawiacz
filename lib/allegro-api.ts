@@ -419,8 +419,10 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
           offers.push({ id, name: typeof row.name === "string" ? row.name : "", status: typeof row.publication?.status === "string" ? row.publication.status : "UNKNOWN", stock: Number.isSafeInteger(row.stock?.available) && row.stock.available >= 0 ? row.stock.available : null });
         }
         const events = await coordinationRead("/order/events?limit=1000", "events");
+        coordinationStage = "parser";
+        const { allegroSaleEvidence } = await import("./allegro-sale-evidence");
+        if (typeof allegroSaleEvidence !== "function") throw new ApiError(503, "Parser zdarzen Allegro nie jest dostepny w pakiecie serwera. To blad aplikacji, nie uprawnien konta. Niczego nie wycofano.", "coordination_parser_unavailable");
         coordinationStage = "events_format";
-        const { allegroSaleEvidence } = await import("./sales-coordination");
         let evidence;
         try { evidence = allegroSaleEvidence(events, seller.id); } catch { throw new ApiError(502, "Odczyt zdarzen Allegro powiodl sie, ale ich format lub konto sprzedawcy nie przeszly weryfikacji. Ponowne logowanie nie naprawia bledu formatu. Niczego nie wycofano.", "coordination_events_format"); }
         return json({ sellerId: seller.id, offers, evidence: evidence.filter(item => ids.includes(item.listingId)), eventsRead: Array.isArray(events.events) ? events.events.length : 0, partial: Array.isArray(events.events) && events.events.length === 1000 });
@@ -621,7 +623,7 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
     if (coordination) {
       const status = error instanceof ApiError ? error.status : 503;
       const code = error instanceof ApiError && error.code ? error.code : `coordination_${coordinationStage}_${status}`;
-      const labels: Record<string, string> = { session: "sesja Wystawiacza", connection: "odczyt polaczenia Allegro", token: "odnowienie tokenu Allegro", seller: "konto sprzedawcy", offers: "lista ofert", events: "zdarzenia zamowien", events_format: "weryfikacja zdarzen zamowien" };
+      const labels: Record<string, string> = { session: "sesja Wystawiacza", connection: "odczyt polaczenia Allegro", token: "odnowienie tokenu Allegro", seller: "konto sprzedawcy", offers: "lista ofert", events: "zdarzenia zamowien", parser: "zaladowanie parsera aplikacji", events_format: "weryfikacja zdarzen zamowien" };
       const message = error instanceof ApiError && error.code ? error.message : `Nie zakonczono kontroli Allegro: ${labels[coordinationStage] || "odczyt danych"} (HTTP ${status}). ${coordinationStage === "session" && status === 401 ? "Zaloguj sie do Wystawiacza." : coordinationStage === "token" && [400, 401, 409].includes(status) ? "Sprawdz polaczenie Allegro i odnow autoryzacje." : "Ponow sam odczyt; nie rozlaczaj konta ani ofert."} Niczego nie wycofano.`;
       return json({ message, code }, status);
     }

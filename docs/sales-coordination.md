@@ -25,6 +25,12 @@
 - The modal offers read-only retry. Reauthorization is suggested only for provider 401/403 or token renewal failure, not schema errors or outages. This does not change the fail-closed sale policy or enable automatic withdrawals.
 - Live account failure is not considered resolved until the deployed diagnostic or a successful review confirms the outcome. No speculative parser relaxation is applied.
 
+### Production parser fix
+
+The production Vinext bundle rewrote the dynamic import of the client-shared policy module to `../../index.js`, which did not export `allegroSaleEvidence`. Calling the missing export was incorrectly classified as an event format failure. The parser now lives in a dedicated server module with only a type import of `SaleEvidence`; the validation rules are unchanged. A missing parser export has its own diagnostic and is not reported as malformed provider data.
+
+After the production build, run `node scripts/test-sales-coordination-build.mjs`. This follows the built adapter's actual import target, loads that compiled parser, and checks valid/empty events, seller isolation and buyer-data removal. Source-level mocks alone did not catch the original packaging regression.
+
 ## Required before enabling writes
 
 Automatic sale synchronization does not yet include an active scheduler, persistent event cursors or Ovoko order ingestion. Do not label the review as automatic synchronization. The manual withdrawal executor below is a separate opt-in feature, not a background sale monitor.
