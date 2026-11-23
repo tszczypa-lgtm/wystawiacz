@@ -58,13 +58,14 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
     if (!sameOvokoMoney(source.price, offer.price?.amount) || source.currency !== offer.price?.currency) throw new OvokoBulkClientError(`Cena Allegro zmienila sie od zaznaczenia (${offer.price?.amount} ${offer.price?.currency} -> ${source.price} ${source.currency}). Odswiez oferte.`, 400);
     if (stop.current) { update(offer.id, { state: "waiting", message: "Nie wyslano" }); return false; }
     const item = { offerId: offer.id, binding: session, adjustment: rule, notes: source.description, expectedSource: { title: source.title, price: source.price, currency: source.currency, stock: source.stock, status: source.status, condition: source.condition, images: source.images } };
-    const preparation = await ovokoBulkRequest<Outcome & { vehicle?: { brand: string; model: string; usedFallback: boolean; evidence?: string } }>({ ...item, operation: "prepare", allowTechnicalModel: useTechnical, ...(fallback ? { fallbackVehicle: fallback } : {}), ...(overrides ? { overrides } : {}) });
+    const preparation = await ovokoBulkRequest<Outcome & { category?: { id: string; name: string }; vehicle?: { brand: string; model: string; usedFallback: boolean; evidence?: string } }>({ ...item, operation: "prepare", allowTechnicalModel: useTechnical, ...(fallback ? { fallbackVehicle: fallback } : {}), ...(overrides ? { overrides } : {}) });
     if (!preparation.alreadyCreated && stop.current) { update(offer.id, { state: "waiting", message: "Auto przygotowane. Czesc nie zostala wyslana." }); return false; }
     // Never cancel, repeat or unlock an uncertain write.
     const result = preparation.alreadyCreated ? preparation : await ovokoBulkRequest<Outcome>({ ...item, operation: "item", prepared: preparation.prepared });
     if (!result.ok || !/^[1-9]\d{0,11}$/.test(String(result.partId))) throw new Error("Niepewny wynik wysylki. Sprawdz Ovoko; nie ponawiaj.");
     const vehicle = preparation.vehicle ? ` Auto: ${preparation.vehicle.brand} ${preparation.vehicle.model}${preparation.vehicle.usedFallback ? " (model pomocniczy)" : ""}.${preparation.vehicle.evidence ? ` Zrodlo: ${preparation.vehicle.evidence}.` : ""}` : "";
-    update(offer.id, { state: result.alreadyCreated ? "skipped" : "done", retryable: false, message: `${result.alreadyCreated ? "Juz przeniesiona, pominieto" : "Przeniesiono"}. Ovoko ID: ${result.partId}.${vehicle}`, ...(result.price ? { price: result.price, currency: result.currency || source.currency } : {}) });
+    const category = !result.alreadyCreated && preparation.category ? ` Kategoria: ${preparation.category.name} (ID ${preparation.category.id}).` : "";
+    update(offer.id, { state: result.alreadyCreated ? "skipped" : "done", retryable: false, message: `${result.alreadyCreated ? "Juz przeniesiona, pominieto" : "Przeniesiono"}. Ovoko ID: ${result.partId}.${category}${vehicle}`, ...(result.price ? { price: result.price, currency: result.currency || source.currency } : {}) });
     return true;
   }
   function failure(id: string, error: unknown) {

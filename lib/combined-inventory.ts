@@ -36,7 +36,7 @@ export function combineInventory(snapshot: CombinedSnapshot): CombinedPart[] {
 export function ovokoInStock(row: OvokoReadRow | undefined, statuses: Record<string, string>) {
   return !!row && ["na stanie", "in stock"].includes((statuses[row.status || ""] || "").trim().toLowerCase());
 }
-export type CombinedFilter = { allegro: boolean; ovoko: boolean; coverage: string; query: string; priceFrom: string; priceTo: string; allStatuses: boolean; transfer?: string };
+export type CombinedFilter = { allegro: boolean; ovoko: boolean; coverage: string; query: string; priceFrom: string; priceTo: string; allStatuses: boolean; transfer?: string; lifecycle?: "available" | "all" | "ovoko_withdrawn" | "allegro_ended" | "ovoko_sold" | "ovoko_reserved" };
 export const inventoryChannels = {
   all: { allegro: true, ovoko: true, coverage: "all" },
   allegro: { allegro: true, ovoko: false, coverage: "all" },
@@ -58,9 +58,16 @@ export function filterCombinedInventory(rows: CombinedPart[], filter: CombinedFi
   const from = bound(filter.priceFrom), to = bound(filter.priceTo);
   if (Number.isNaN(from) || Number.isNaN(to) || from !== null && to !== null && from > to) throw new Error("Sprawdz zakres cen.");
   return rows.filter(row => {
+    const lifecycle = filter.lifecycle || (filter.allStatuses ? "all" : "available");
+    const showInactive = lifecycle !== "available";
+    const oStatus = (snapshot.statuses[row.ovoko?.status || ""] || "").trim().toLowerCase();
+    if (lifecycle === "ovoko_withdrawn" && !["wycofany", "written off"].includes(oStatus)) return false;
+    if (lifecycle === "ovoko_sold" && !["sprzedano", "sold out"].includes(oStatus)) return false;
+    if (lifecycle === "ovoko_reserved" && !["zarezerwowano", "reserved"].includes(oStatus)) return false;
+    if (lifecycle === "allegro_ended" && row.allegro?.status !== "ENDED") return false;
     if (filter.transfer && filter.transfer !== "all" && row.transfer?.state !== filter.transfer) return false;
-    const a = !!row.allegro && (filter.allStatuses || row.allegro.status === "ACTIVE");
-    const o = !!row.ovoko && (filter.allStatuses || ovokoInStock(row.ovoko, snapshot.statuses));
+    const a = !!row.allegro && (showInactive || row.allegro.status === "ACTIVE");
+    const o = !!row.ovoko && (showInactive || ovokoInStock(row.ovoko, snapshot.statuses));
     const aKnown = !row.allegro || ["ACTIVE", "ENDED", "INACTIVE", "ACTIVATING"].includes(row.allegro.status);
     const oKnown = !row.ovoko || !!snapshot.statuses[row.ovoko.status || ""];
     if ((filter.allegro || filter.ovoko) && !(filter.allegro && a || filter.ovoko && o)) return false;

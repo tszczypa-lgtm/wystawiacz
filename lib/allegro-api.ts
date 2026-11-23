@@ -218,7 +218,7 @@ async function activeAllegroAdmin(owner: string, env: Env) {
 function callbackPage(origin: string, ok: boolean, code = "") {
   const nonce = crypto.randomUUID();
   const message = ok ? "Konto Allegro połączone. Możesz wrócić do Wystawiacza." : code === "seller_not_allowed" ? "To konto Allegro nie jest dozwolone dla tej firmy. Administrator musi zatwierdzic drugie konto lub zmiane. Dotychczasowe polaczenie pozostalo bez zmian." : `Nie potwierdzono polaczenia konta Allegro. Kod diagnostyczny: ${code}. Odswiez status polaczenia. Nie zmieniono ofert.`;
-  return new Response(`<!doctype html><html lang="pl"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Połączenie Allegro</title><body><h1>${message}</h1><a href="/panel">Wróć do Wystawiacza</a><script nonce="${nonce}">if(window.opener){window.opener.postMessage({type:"wystawiacz-allegro-complete",ok:${ok},code:${JSON.stringify(code)}},${JSON.stringify(origin)});}window.close();</script></body></html>`, { status: ok ? 200 : 400, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "Set-Cookie": cookie("", 0), "Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'` } });
+  return new Response(`<!doctype html><html lang="pl"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Połączenie Allegro</title><body><h1>${message}</h1><a href="/panel/allegro">Wróć do połączenia Allegro</a><script nonce="${nonce}">history.replaceState(null,"","/api/allegro/auth/callback");if(window.opener){window.opener.postMessage({type:"wystawiacz-allegro-complete",ok:${ok},code:${JSON.stringify(code)}},${JSON.stringify(origin)});}${ok ? "window.close();" : ""}</script></body></html>`, { status: ok ? 200 : 400, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "Set-Cookie": cookie("", 0), "Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'` } });
 }
 
 async function completeOAuth(request: Request, env: Env) {
@@ -237,7 +237,11 @@ async function completeOAuth(request: Request, env: Env) {
     const pending = await openConnection<OAuthCookie>(decodeURIComponent(encoded), key, "allegro-oauth");
     failureCode = "oauth_session_invalid";
     if (!pending.owner || pending.expiresAt <= Date.now() || pending.state !== url.searchParams.get("state") || pending.clientId !== config.clientId || pending.redirectUri !== config.redirectUri) throw new Error("Invalid OAuth state");
-    if (url.searchParams.has("error")) { failureCode = "oauth_denied"; throw new Error("Authorization denied"); }
+    if (url.searchParams.has("error")) {
+      const authorizationErrors: Record<string, string> = { access_denied: "oauth_access_denied", invalid_scope: "oauth_invalid_scope", invalid_request: "oauth_authorize_invalid_request", unauthorized_client: "oauth_authorize_unauthorized_client", unsupported_response_type: "oauth_unsupported_response_type", server_error: "oauth_authorize_server_error", temporarily_unavailable: "oauth_authorize_unavailable" };
+      failureCode = authorizationErrors[url.searchParams.get("error") || ""] || "oauth_denied";
+      throw new Error("Authorization not granted");
+    }
     failureCode = "oauth_code_missing";
     const code = url.searchParams.get("code");
     if (!code) throw new Error("Missing authorization code");
@@ -394,7 +398,12 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
           const row = owned.offers[0];
           offers.push({ id, name: typeof row.name === "string" ? row.name : "", status: typeof row.publication?.status === "string" ? row.publication.status : "UNKNOWN", stock: Number.isSafeInteger(row.stock?.available) && row.stock.available >= 0 ? row.stock.available : null });
         }
-        const events = await remote("/order/events?limit=1000", { signal: AbortSignal.timeout(15000) });
+        const eventResponse = await fetch(apiBase + "/order/events?limit=1000", { headers: { Authorization: `Bearer ${await accessToken()}`, Accept: accept }, signal: AbortSignal.timeout(15000) });
+        if (!eventResponse.ok) {
+          await eventResponse.body?.cancel();
+          throw new ApiError(eventResponse.status >= 500 ? 502 : eventResponse.status, `Odczyt zamowien Allegro: HTTP ${eventResponse.status}.${eventResponse.status === 403 ? " Sprawdz scope allegro:api:orders:read w aplikacji Allegro i polacz konto ponownie, bez rozlaczania ofert." : eventResponse.status === 401 ? " Odnow autoryzacje Allegro." : " Sprobuj pozniej; nie potwierdzono danych sprzedazy."}`);
+        }
+        const events = await readRemote(eventResponse);
         const { allegroSaleEvidence } = await import("./sales-coordination");
         let evidence;
         try { evidence = allegroSaleEvidence(events, seller.id); } catch { throw new ApiError(502, "Nie potwierdzono danych zdarzen sprzedazy Allegro."); }

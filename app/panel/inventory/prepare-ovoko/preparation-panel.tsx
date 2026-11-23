@@ -8,6 +8,7 @@ import { initialOvokoDraft, offerDescriptionText, ovokoPreparationIssues, ovokoP
 import type { OvokoReadResult, OvokoReadRow } from "@/lib/ovoko-read";
 import { ovokoCarYear, preferredOvokoCar } from "@/lib/ovoko-car-selection";
 import { suggestPartNumbers, suggestOvokoCategories, suggestionSearchMatches, suggestOvokoBrands, suggestOvokoModels, vehicleSuggestionText, ovokoAutomaticFields, automaticOvokoBrand, automaticOvokoModel } from "@/lib/ovoko-suggestions";
+import { PublicationRecovery } from "../publication-recovery";
 
 const button = "rounded-lg border border-white/20 px-3 py-2 text-sm font-bold disabled:opacity-40";
 const field = "mt-1 w-full rounded-lg border border-white/20 bg-[#0d1117] px-3 py-2 text-white";
@@ -245,6 +246,7 @@ export function OvokoPreparationPanel() {
   return <section className="space-y-5">
     <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-3xl font-black">Przygotuj do Ovoko</h1><button type="button" className={`${button} bg-orange-600`} disabled={!source || busy || dictionaryBusy || modelsBusy || carsBusy || publishing || attempted || creatingCar} onClick={() => void publishSingle()}>{publishing ? "Wystawiam..." : "Wystaw 1 czesc w Ovoko"}</button></div>
     {publicationMessage && <p ref={feedbackPanel} role={partId || publishing ? "status" : "alert"} className={`rounded-lg border p-3 ${partId ? "border-emerald-400/40 text-emerald-200" : "border-amber-400/40 text-amber-200"}`}>{publicationMessage}</p>}
+    {source && !publishing && <PublicationRecovery offerId={source.id} />}
     <p className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm leading-6"><strong>Jedno klikniecie Wystaw.</strong> Automat sprawdza dane, wykorzystuje zapisane auto albo tworzy brakujace i wysyla czesc ze zdjeciami. Bez dodatkowych checkboxow. Sam podglad niczego nie wysyla. Cennika wysylki Allegro nie przenosimy; obowiazuja ustawienia Ovoko. Nie zmieniamy Allegro. Niepewnych zapisow nie ponawiamy.</p>
     <a href="/panel/inventory" className="inline-block text-sm underline">Wroc do ofert Allegro</a>
     {busy && <p role="status">Sprawdzam uprawnienia i pobieram oferte z polaczonego konta Allegro...</p>}

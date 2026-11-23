@@ -9,7 +9,11 @@ import type { OvokoPublishEnv } from "./ovoko-publish";
 export async function reviewCoordination(request: Request, env: OvokoPublishEnv, context: Awaited<ReturnType<typeof accountContext>>, input: Record<string, unknown>) {
   if (Object.keys(input).some(key => key !== "offerIds") || !Array.isArray(input.offerIds) || !input.offerIds.length || input.offerIds.length > 5 || new Set(input.offerIds).size !== input.offerIds.length || input.offerIds.some(id => typeof id !== "string" || !/^\d{1,30}$/.test(id))) throw new OvokoError(400, "Kontrola obejmuje od 1 do 5 zaznaczonych ofert.");
   const source = await handleAllegroApi(new Request(`${new URL(request.url).origin}/api/allegro/coordination-snapshot?offerIds=${input.offerIds.join(",")}`, { headers: { Authorization: request.headers.get("Authorization")! } }), env);
-  if (!source.ok) throw new OvokoError(source.status, [400, 403].includes(source.status) ? "Allegro odrzucilo odczyt. Sprawdz zgode na odczyt zamowien; starsze polaczenie wymaga ponownej autoryzacji w Polaczeniu Allegro. Nie rozlaczaj ani nie usuwaj ofert." : "Nie potwierdzono ofert lub zdarzen Allegro. Sprawdz sesje i ponow odczyt pozniej. Niczego nie wycofano.");
+  if (!source.ok) {
+    const failure = await source.json().catch(() => null) as { message?: unknown } | null;
+    const message = typeof failure?.message === "string" && failure.message.startsWith("Odczyt zamowien Allegro: HTTP ") ? failure.message : "Nie potwierdzono ofert lub zdarzen Allegro. Sprawdz sesje i ponow odczyt pozniej. Niczego nie wycofano.";
+    throw new OvokoError(source.status, message);
+  }
   const snapshot = await source.json() as { sellerId: string; offers: { id: string; name: string; status: string; stock: number | null }[]; evidence: SaleEvidence[]; partial: boolean; eventsRead: number };
   const credentials = await loadOvokoConnection(context, await ovokoConnectionKey(env)), remote = ovokoWriteClient(credentials);
   const account = await ovokoWriteDigest(credentials.username.trim().toLowerCase());

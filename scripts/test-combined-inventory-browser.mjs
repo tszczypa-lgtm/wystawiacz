@@ -36,9 +36,9 @@ try {
     }
     if (url.pathname === "/api/ovoko/read") {
       assert.ok(admin); assert.equal(req.method(), "POST"); const body = req.postDataJSON(); assert.equal(body.useSaved, true);
-      if (body.operation === "statuses") return route.fulfill({ json: { ok: true, readOnly: true, rows: [{ id: "0", name: "Na stanie" }, { id: "1", name: "Sprzedano" }] } });
+      if (body.operation === "statuses") return route.fulfill({ json: { ok: true, readOnly: true, rows: [{ id: "0", name: "Na stanie" }, { id: "1", name: "Sprzedano" }, { id: "4", name: "Wycofany" }] } });
       assert.equal(body.operation, "inventory"); if (ovokoFail) return route.fulfill({ status: 503, json: { message: "Awaria odczytu fixture" } });
-      return route.fulfill({ json: { ok: true, readOnly: true, rows: [{ id: "10", name: "Radio", externalId: "tymo:555:1", manufacturerCode: "ABC123456", status: "0", price: "100.00" }, { id: "11", name: "Samodzielna czesc Ovoko", externalId: "", manufacturerCode: "ABC123456", status: "0", price: "100.00" }, { id: "12", name: "Sprzedana czesc Ovoko", status: "1" }], pagination: { page: body.page, limit: 100, total: 3 } } });
+      return route.fulfill({ json: { ok: true, readOnly: true, rows: [{ id: "10", name: "Radio", externalId: "tymo:555:1", manufacturerCode: "ABC123456", status: "0", price: "100.00" }, { id: "11", name: "Samodzielna czesc Ovoko", externalId: "", manufacturerCode: "ABC123456", status: "0", price: "100.00" }, { id: "12", name: "Sprzedana czesc Ovoko", status: "1" }, { id: "13", name: "Wycofana czesc Ovoko", status: "4" }], pagination: { page: body.page, limit: 100, total: 4 } } });
     }
     throw new Error(`Unexpected endpoint ${url.pathname}`);
   });
@@ -53,6 +53,8 @@ try {
     await channel.selectOption(value); assert.equal(await table.locator("tbody tr").count(), count);
   }
   assert.equal(await page.getByRole("checkbox", { name: "Allegro", exact: true }).count(), 0, "No duplicate channel controls");
+  await page.getByLabel("Status sprzedazy").selectOption("ovoko_withdrawn"); assert.equal(await table.locator("tbody tr").count(), 1); assert.ok(await table.locator('[data-part-key="o:13"]').isVisible());
+  await page.getByRole("button", { name: "Wyczysc", exact: true }).click(); assert.equal(await table.locator("tbody tr").count(), 45, "Clear also resets lifecycle status");
   await table.locator('[data-part-key="a:1"]').getByRole("checkbox").check();
   await page.getByRole("button", { name: "Koordynacja: sprawdz (1-5)" }).click();
   const review = page.getByRole("dialog", { name: "Koordynacja sprzedazy: tryb kontrolny" });

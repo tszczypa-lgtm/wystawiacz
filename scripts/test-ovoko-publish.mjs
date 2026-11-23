@@ -234,6 +234,7 @@ try {
     const data = await preparation.clone().json();
     preparedVehicle = data.vehicle;
     if (!preparation.ok || data.alreadyCreated) return preparation;
+    assert.equal(data.category.id, data.prepared.categoryId); assert.ok(data.category.name, "Preparation returns the live category path for the success log");
     const ready = calls.length, result = await handleOvokoApi(bulkReq({ ...item, prepared: data.prepared }), env);
     if (checkBounds) assert.ok(calls.length - ready < 50, "Publication uses a bounded separate Worker request");
     return result;

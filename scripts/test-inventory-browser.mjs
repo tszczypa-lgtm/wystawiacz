@@ -44,7 +44,7 @@ try {
         if (bulkMode === "publication-locked" && !input.offerId.endsWith("2")) return route.fulfill({ status: 409, json: { code: "publication_locked", message: "Poprzednia wysylka do sprawdzenia. Tej czesci nie ponawiamy." } });
         assert.equal(input.allowTechnicalModel, true, "The panel explicitly requests technical fallback; the API does not infer permission");
         if (bulkMode === "repair" && !input.offerId.endsWith("2") && !input.fallbackVehicle) return route.fulfill({ status: 400, json: { message: "Wybierz model auta Ovoko i kategorie." } });
-        return route.fulfill({ json: input.offerId.endsWith("2") && bulkMode !== "publication-locked" ? { ok: true, alreadyCreated: true, partId: "77" } : { ok: true, prepared: { donorId: "13" }, vehicle: { brand: "Citroen", model: "C5 Aircross", usedFallback: !!input.fallbackVehicle, evidence: input.fallbackVehicle ? "Wybor reczny" : "Katalog Allegro - pelny MPN" } } });
+        return route.fulfill({ json: input.offerId.endsWith("2") && bulkMode !== "publication-locked" ? { ok: true, alreadyCreated: true, partId: "77" } : { ok: true, category: { id: "3", name: "Elektryka / Sterowniki / Modul" }, prepared: { donorId: "13" }, vehicle: { brand: "Citroen", model: "C5 Aircross", usedFallback: !!input.fallbackVehicle, evidence: input.fallbackVehicle ? "Wybor reczny" : "Katalog Allegro - pelny MPN" } } });
       }
       assert.equal(input.operation, "item");
       if (bulkMode === "uncertain") return route.fulfill({ status: 409, json: { code: "publication_locked", message: "Niepewny wynik wysylki. Nie ponawiaj." } });
@@ -165,6 +165,7 @@ try {
   assert.ok(bulkCalls.filter(call => call.operation === "prepare").every(call => call.fallbackVehicle?.brandId === "1" && call.fallbackVehicle.modelId === "11"), "The chosen fallback is frozen into the preparation batch");
   assert.ok(bulkCalls.filter(call => call.operation === "item").every(call => !call.fallbackVehicle), "Publication still uses only the server-prepared vehicle");
   assert.ok(await transfer.getByText(/Auto: Citroen C5 Aircross \(model pomocniczy\)/).isVisible());
+  assert.ok(await transfer.getByText(/Kategoria: Elektryka \/ Sterowniki \/ Modul \(ID 3\)/).isVisible(), "The success log includes the server-selected category and ID");
   assert.ok(await transfer.getByText(/Juz przeniesiona, pominieto/).isVisible());
   await transfer.screenshot({ path: fileURLToPath(new URL("../outputs/inventory-preview/bulk.png", import.meta.url)), fullPage: true });
   await transfer.close();

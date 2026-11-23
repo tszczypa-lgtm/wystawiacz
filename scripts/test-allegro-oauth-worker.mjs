@@ -51,6 +51,12 @@ try {
     if (mode !== "ok") { assert.ok(html.includes(`code:"${code}"`)); assert.equal(saved, previous); }
   }
   const before = calls.length;
+  for (const [provider, expected] of [["invalid_scope", "oauth_invalid_scope"], ["access_denied", "oauth_access_denied"], ["invalid_request", "oauth_authorize_invalid_request"], ["unauthorized_client", "oauth_authorize_unauthorized_client"], ["unsupported_response_type", "oauth_unsupported_response_type"], ["server_error", "oauth_authorize_server_error"], ["temporarily_unavailable", "oauth_authorize_unavailable"], ["private-provider-text", "oauth_denied"]]) {
+    const previous = saved;
+    const response = await mf.dispatchFetch(`${pending.redirectUri}?error=${provider}&error_description=private-provider-text&state=${pending.state}`, { headers: { Cookie: cookie } });
+    const html = await response.text(); assert.equal(response.status, 400); assert.ok(html.includes(`code:"${expected}"`));
+    assert.doesNotMatch(html, /private-provider-text|window\.close\(\)/); assert.ok(html.includes("history.replaceState")); assert.equal(saved, previous); assert.equal(calls.length, before, "Authorization rejection never contacts token, binding or offer APIs");
+  }
   const missing = await mf.dispatchFetch(`${pending.redirectUri}?code=private-auth-code&state=${pending.state}`);
   assert.ok((await missing.text()).includes('code:"oauth_cookie_missing"')); assert.equal(calls.length, before);
   administrative = true; mode = "audit"; const previous = saved;

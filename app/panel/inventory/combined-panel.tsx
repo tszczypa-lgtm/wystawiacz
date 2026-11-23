@@ -8,7 +8,7 @@ import { OvokoBulkLauncher } from "./ovoko-bulk-launcher";
 import { CoordinationReview } from "./coordination-review";
 import { ManualWithdrawal } from "./manual-withdrawal";
 
-const initial: CombinedFilter = { allegro: true, ovoko: true, coverage: "all", query: "", priceFrom: "", priceTo: "", allStatuses: false, transfer: "all" };
+const initial: CombinedFilter = { allegro: true, ovoko: true, coverage: "all", query: "", priceFrom: "", priceTo: "", allStatuses: false, transfer: "all", lifecycle: "available" };
 const field = "h-7 min-w-0 rounded border border-white/15 bg-[#0d1117] px-2 text-xs";
 const button = "rounded border border-white/15 px-2 py-1 text-xs hover:bg-white/10 disabled:opacity-40";
 export function CombinedInventoryPanel({ portal }: { portal?: "ovoko" }) {
@@ -49,15 +49,15 @@ export function CombinedInventoryPanel({ portal }: { portal?: "ovoko" }) {
       <strong className="mr-1 text-sm">Moje czesci</strong>
       <select aria-label="Kanal sprzedazy" className={`${field} w-44`} value={inventoryChannel(filter)} onChange={event => change(inventoryChannels[event.target.value as InventoryChannel])}><option value="all">Wszystkie kanaly</option><option value="allegro">Allegro (takze na obu)</option><option value="ovoko">Ovoko (takze na obu)</option><option value="both">Na obu portalach</option><option value="only_allegro">Tylko Allegro</option><option value="only_ovoko">Tylko Ovoko</option></select>
       <input aria-label="Szukaj czesci" className={`${field} w-40 grow`} value={filter.query} onChange={event => change({ query: event.target.value })} placeholder="Tytul, numer czesci, ID..." maxLength={100} />
+      <select aria-label="Status sprzedazy" className={`${field} w-36`} value={filter.lifecycle || (filter.allStatuses ? "all" : "available")} onChange={event => change({ lifecycle: event.target.value as CombinedFilter["lifecycle"], allStatuses: event.target.value !== "available" })}><option value="available">Dostepne</option><option value="all">Wszystkie statusy</option><option value="ovoko_withdrawn">Wycofane Ovoko</option><option value="allegro_ended">Zakonczone Allegro</option><option value="ovoko_sold">Sprzedane Ovoko</option><option value="ovoko_reserved">Rezerwacje Ovoko</option></select>
       <input aria-label="Cena Allegro od" title="Cena Allegro od (waluta oferty)" className={`${field} w-20`} inputMode="decimal" value={filter.priceFrom} onChange={event => change({ priceFrom: event.target.value })} placeholder="Cena A od" />
       <input aria-label="Cena Allegro do" title="Cena Allegro do (waluta oferty)" className={`${field} w-20`} inputMode="decimal" value={filter.priceTo} onChange={event => change({ priceTo: event.target.value })} placeholder="Cena A do" />
-      <select aria-label="Sortowanie czesci" className={field} value={sort} onChange={event => { setSort(event.target.value); setPage(1); setSelected(new Set()); }}><option value="source">Kolejnosc API</option><option value="price">Cena A rosnaco</option><option value="-price">Cena A malejaco</option></select>
       <select aria-label="Czesci na stronie" className={field} value={limit} onChange={event => { setLimit(Number(event.target.value)); setPage(1); setSelected(new Set()); }}>{[20, 50, 100, 200].map(value => <option key={value} value={value}>{value} / str.</option>)}</select>
       <button className={button} disabled={busy} onClick={refresh}>Odswiez</button>
       <button className={button} onClick={() => change(initial)}>Wyczysc</button>
       <details className="relative"><summary className={`${button} cursor-pointer`}>Wiecej</summary>
         <div className="absolute right-0 z-20 mt-1 w-72 space-y-2 rounded border border-white/20 bg-[#11161d] p-3">
-          <label className="flex gap-2"><input type="checkbox" checked={filter.allStatuses} onChange={event => change({ allStatuses: event.target.checked })} />Takze wycofane / inne statusy</label>
+          <label className="block">Sortowanie<select aria-label="Sortowanie czesci" className={`${field} mt-1 w-full`} value={sort} onChange={event => { setSort(event.target.value); setPage(1); setSelected(new Set()); }}><option value="source">Kolejnosc API</option><option value="price">Cena A rosnaco</option><option value="-price">Cena A malejaco</option></select></label>
           {snapshot.admin && <label className="block">Historia przeniesienia do Ovoko<select aria-label="Historia przeniesienia do Ovoko" className={`${field} mt-1 w-full`} value={filter.transfer} onChange={event => change({ transfer: event.target.value })}><option value="all">Wszystkie</option><option value="not_transferred">Nieprzeniesione</option><option value="transferred">Przeniesione</option><option value="sending">W trakcie</option><option value="uncertain">Blad / do sprawdzenia</option></select></label>}
           <p>Oba portale = suma, nie tylko wspolne czesci. Zakres i sortowanie cen dotycza Allegro, bez przewalutowania.</p>
           <p>Ovoko: status Na stanie z API nie potwierdza widocznosci w sklepie. Historia przeniesienia nie jest dowodem obecnosci.</p>
