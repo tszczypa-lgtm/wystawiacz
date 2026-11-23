@@ -37,6 +37,21 @@ export function ovokoInStock(row: OvokoReadRow | undefined, statuses: Record<str
   return !!row && ["na stanie", "in stock"].includes((statuses[row.status || ""] || "").trim().toLowerCase());
 }
 export type CombinedFilter = { allegro: boolean; ovoko: boolean; coverage: string; query: string; priceFrom: string; priceTo: string; allStatuses: boolean; transfer?: string };
+export const inventoryChannels = {
+  all: { allegro: true, ovoko: true, coverage: "all" },
+  allegro: { allegro: true, ovoko: false, coverage: "all" },
+  ovoko: { allegro: false, ovoko: true, coverage: "all" },
+  both: { allegro: true, ovoko: true, coverage: "both" },
+  only_allegro: { allegro: true, ovoko: true, coverage: "allegro" },
+  only_ovoko: { allegro: true, ovoko: true, coverage: "ovoko" },
+} satisfies Record<string, Pick<CombinedFilter, "allegro" | "ovoko" | "coverage">>;
+export type InventoryChannel = keyof typeof inventoryChannels;
+export function inventoryChannel(filter: CombinedFilter): InventoryChannel {
+  return (Object.keys(inventoryChannels) as InventoryChannel[]).find(key => {
+    const value = inventoryChannels[key];
+    return value.allegro === filter.allegro && value.ovoko === filter.ovoko && value.coverage === filter.coverage;
+  }) || "all";
+}
 const folded = (value: string) => value.toLowerCase().replace(/ł/g, "l").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 export function filterCombinedInventory(rows: CombinedPart[], filter: CombinedFilter, snapshot: CombinedSnapshot) {
   const bound = (value: string) => !value.trim() ? null : /^\d+(?:[.,]\d{1,2})?$/.test(value.trim()) ? Number(value.replace(",", ".")) : NaN;

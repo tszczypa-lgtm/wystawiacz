@@ -176,7 +176,7 @@ export async function readOvokoFitment(offer: Record<string, any>, number: strin
 }
 const oauthBase = "https://allegro.pl/auth/oauth";
 const accept = "application/vnd.allegro.public.v1+json";
-const scopes = "allegro:api:profile:read allegro:api:sale:offers:read allegro:api:sale:offers:write allegro:api:sale:settings:read allegro:api:sale:settings:write";
+const scopes = "allegro:api:profile:read allegro:api:sale:offers:read allegro:api:sale:offers:write allegro:api:sale:settings:read allegro:api:sale:settings:write allegro:api:orders:read";
 const utf8 = new TextEncoder();
 function base64(bytes: Uint8Array) { return btoa(Array.from(bytes, byte => String.fromCharCode(byte)).join("")); }
 function bytes(value: string) { return Uint8Array.from(atob(value), character => character.charCodeAt(0)); }
@@ -380,6 +380,24 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
     if (path === "/inventory" && request.method !== "GET") return json({ message: "Lista ofert jest tylko do odczytu." }, 405);
     if (path.startsWith("/ovoko-fitment/") && request.method !== "GET") return json({ message: "Dopasowanie jest tylko do odczytu." }, 405);
     if (request.method === "GET") {
+      if (path === "/coordination-snapshot") {
+        const ids = (url.searchParams.get("offerIds") || "").split(",");
+        if (ids.length > 5 || new Set(ids).size !== ids.length || ids.some(id => !/^\d{1,30}$/.test(id)) || [...url.searchParams.keys()].some(key => key !== "offerIds") || url.searchParams.getAll("offerIds").length !== 1) throw new ApiError(400, "Wybierz od 1 do 5 ofert do kontroli koordynacji.");
+        const seller = await remote("/me", { signal: AbortSignal.timeout(15000) });
+        if (typeof seller.id !== "string" || !/^\d{1,30}$/.test(seller.id)) throw new ApiError(502, "Nie potwierdzono sprzedawcy Allegro.");
+        const offers: { id: string; name: string; status: string; stock: number | null }[] = [];
+        for (const id of ids) {
+          const owned = await remote(`/sale/offers?offer.id=${id}&limit=1`, { signal: AbortSignal.timeout(15000) });
+          if (!Array.isArray(owned.offers) || owned.offers.length !== 1 || owned.offers[0].id !== id) throw new ApiError(409, "Nie potwierdzono wlasnosci jednej z ofert.");
+          const row = owned.offers[0];
+          offers.push({ id, name: typeof row.name === "string" ? row.name : "", status: typeof row.publication?.status === "string" ? row.publication.status : "UNKNOWN", stock: Number.isSafeInteger(row.stock?.available) && row.stock.available >= 0 ? row.stock.available : null });
+        }
+        const events = await remote("/order/events?limit=1000", { signal: AbortSignal.timeout(15000) });
+        const { allegroSaleEvidence } = await import("./sales-coordination");
+        let evidence;
+        try { evidence = allegroSaleEvidence(events, seller.id); } catch { throw new ApiError(502, "Nie potwierdzono danych zdarzen sprzedazy Allegro."); }
+        return json({ sellerId: seller.id, offers, evidence: evidence.filter(item => ids.includes(item.listingId)), eventsRead: Array.isArray(events.events) ? events.events.length : 0, partial: Array.isArray(events.events) && events.events.length === 1000 });
+      }
       if (path.startsWith("/ovoko-fitment/")) {
         const id = path.slice("/ovoko-fitment/".length), number = url.searchParams.get("number") || "";
         if (!/^\d{1,30}$/.test(id) || (url.searchParams.has("number") && (!/^[A-Z0-9]{6,32}$/.test(number) || !/\d/.test(number))) || [...url.searchParams.keys()].some(key => !["number", "expand"].includes(key)) || url.searchParams.getAll("number").length > 1 || url.searchParams.getAll("expand").length > 1 || (url.searchParams.has("expand") && url.searchParams.get("expand") !== "1")) throw new ApiError(400, "Nieprawidlowy numer oferty lub pelny numer czesci.");

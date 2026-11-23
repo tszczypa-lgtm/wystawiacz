@@ -23,6 +23,10 @@ try {
     if (url.pathname === "/api/allegro/inventory") return route.fulfill({ json: { offers: Array.from({ length: 44 }, (_, i) => ({ id: String(i + 1), name: `Radio ABC123456 egzemplarz ${i + 1}`, image: "", externalId: "", status: "ACTIVE", stock: 1, price: { amount: "50.00", currency: "PLN" } })), totalCount: 44 } });
     if (url.pathname === "/api/ovoko/transfer-inventory") { assert.ok(admin); assert.equal(req.postDataJSON().operation, "statuses"); return route.fulfill({ json: { ok: true, statuses: { "2": { state: "transferred", partId: "999" } } } }); }
     if (url.pathname === "/api/ovoko/status") { assert.ok(admin); return route.fulfill({ json: { allowed: true, connected: true, verifiedAt: "fixture-binding" } }); }
+    if (url.pathname === "/api/ovoko/coordination-review") {
+      assert.deepEqual(req.postDataJSON(), { offerIds: ["1"] });
+      return route.fulfill({ json: { readOnly: true, automatic: false, eventsRead: 1, partial: false, scope: "Zakres kontrolny", rows: [{ offerId: "1", partId: "10", name: "Radio ABC123456", allegroStatus: "ACTIVE", stock: 1, ovokoStatus: "stock", decision: { status: "idle", action: null, reason: "Brak potwierdzonej sprzedazy." }, withdrawal: { allegro: true, ovoko: true, both: true } }] } });
+    }
     if (url.pathname === "/api/ovoko/read") {
       assert.ok(admin); assert.equal(req.method(), "POST"); const body = req.postDataJSON(); assert.equal(body.useSaved, true);
       if (body.operation === "statuses") return route.fulfill({ json: { ok: true, readOnly: true, rows: [{ id: "0", name: "Na stanie" }, { id: "1", name: "Sprzedano" }] } });
@@ -37,12 +41,19 @@ try {
   assert.equal(await table.locator("tbody tr").count(), 45, "44 Allegro plus one Ovoko-only, linked part appears once");
   assert.equal(await table.locator('[data-part-key="a:1"]').getByLabel("Ovoko: na stanie", { exact: true }).count(), 1);
   assert.equal(await table.locator('[data-part-key="a:2"]').getByLabel("Ovoko: brak", { exact: true }).count(), 1, "Deleted journal target is not an active Ovoko badge");
-  await page.getByLabel("Obecnosc na portalach").selectOption("both"); assert.equal(await table.locator("tbody tr").count(), 1);
-  await page.getByLabel("Obecnosc na portalach").selectOption("ovoko"); assert.equal(await table.locator("tbody tr").count(), 1);
-  await page.getByLabel("Obecnosc na portalach").selectOption("all");
-  await page.getByRole("checkbox", { name: "Allegro", exact: true }).uncheck(); assert.equal(await table.locator("tbody tr").count(), 2);
-  await page.getByRole("checkbox", { name: "Allegro", exact: true }).check(); await page.getByRole("checkbox", { name: "Ovoko", exact: true }).uncheck(); assert.equal(await table.locator("tbody tr").count(), 44);
-  await page.getByRole("checkbox", { name: "Ovoko", exact: true }).check();
+  const channel = page.getByLabel("Kanal sprzedazy");
+  for (const [value, count] of [["both", 1], ["only_ovoko", 1], ["only_allegro", 43], ["ovoko", 2], ["allegro", 44], ["all", 45]]) {
+    await channel.selectOption(value); assert.equal(await table.locator("tbody tr").count(), count);
+  }
+  assert.equal(await page.getByRole("checkbox", { name: "Allegro", exact: true }).count(), 0, "No duplicate channel controls");
+  await table.locator('[data-part-key="a:1"]').getByRole("checkbox").check();
+  await page.getByRole("button", { name: "Koordynacja: sprawdz (1-5)" }).click();
+  const review = page.getByRole("dialog", { name: "Koordynacja sprzedazy: tryb kontrolny" });
+  await review.getByText("Brak potwierdzonej sprzedazy.", { exact: false }).waitFor();
+  await review.getByRole("button", { name: "Tylko Ovoko", exact: true }).click();
+  await review.getByText(/Plan: Ovoko: ustaw Wycofany/).waitFor();
+  assert.ok(await review.getByText(/niczego nie wykonano/).isVisible());
+  await review.getByRole("button", { name: "Zamknij", exact: true }).click();
   await page.getByLabel("Cena Allegro od").fill("48"); await page.getByLabel("Cena Allegro do").fill("52"); assert.equal(await table.locator("tbody tr").count(), 44);
   await page.getByRole("button", { name: "Wyczysc", exact: true }).click(); await page.getByLabel("Czesci na stronie").selectOption("20"); assert.equal(await table.locator("tbody tr").count(), 20);
   await page.getByRole("button", { name: "Nastepna", exact: true }).click(); await page.getByText("Strona 2 / 3", { exact: true }).waitFor();
@@ -55,7 +66,7 @@ try {
   assert.ok(operations.every(path => !/publish|bulk|create-car|disconnect|connect$/.test(path)), "Opening/filtering the list never changes provider data");
   ovokoFail = true; await page.getByRole("button", { name: "Odswiez", exact: true }).click(); await page.getByText(/Awaria odczytu fixture/).waitFor();
   assert.equal(await table.locator('[data-part-key="a:1"]').getByLabel("Ovoko: nieustalone", { exact: true }).count(), 1);
-  await page.getByLabel("Obecnosc na portalach").selectOption("allegro"); assert.equal(await table.locator("tbody tr").count(), 0, "Provider failure does not prove Allegro-only");
+  await page.getByLabel("Kanal sprzedazy").selectOption("only_allegro"); assert.equal(await table.locator("tbody tr").count(), 0, "Provider failure does not prove Allegro-only");
   assert.deepEqual(errors, []);
   console.log("Combined browser: one dense list, union portal filters, live badges, separate prices, source range, 200/page, partial-error safety, responsive layout and read-only operations passed.");
 } finally { await browser.close(); }

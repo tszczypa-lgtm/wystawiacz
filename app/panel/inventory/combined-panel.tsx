@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { combineInventory, emptyCombinedSnapshot, filterCombinedInventory, ovokoInStock, type CombinedFilter, type CombinedPart, type CombinedSnapshot } from "@/lib/combined-inventory";
+import { combineInventory, emptyCombinedSnapshot, filterCombinedInventory, inventoryChannel, inventoryChannels, ovokoInStock, type InventoryChannel, type CombinedFilter, type CombinedPart, type CombinedSnapshot } from "@/lib/combined-inventory";
 import { loadCombinedInventory } from "@/lib/combined-inventory-client";
 import { suggestPartNumbers } from "@/lib/ovoko-suggestions";
 import { OvokoBulkLauncher } from "./ovoko-bulk-launcher";
+import { CoordinationReview } from "./coordination-review";
 
 const initial: CombinedFilter = { allegro: true, ovoko: true, coverage: "all", query: "", priceFrom: "", priceTo: "", allStatuses: false, transfer: "all" };
 const field = "h-7 min-w-0 rounded border border-white/15 bg-[#0d1117] px-2 text-xs";
@@ -45,10 +46,8 @@ export function CombinedInventoryPanel({ portal }: { portal?: "ovoko" }) {
   return <section className="space-y-2" aria-label="Wspolna lista czesci">
     <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1.5 rounded border border-white/15 bg-[#11161d] p-2 text-xs" aria-label="Filtry czesci">
       <strong className="mr-1 text-sm">Moje czesci</strong>
-      <label className="flex items-center gap-1 rounded border border-orange-500/40 px-2 py-1"><input type="checkbox" checked={filter.allegro} onChange={event => change({ allegro: event.target.checked })} />Allegro</label>
-      <label className="flex items-center gap-1 rounded border border-cyan-500/40 px-2 py-1"><input type="checkbox" checked={filter.ovoko} onChange={event => change({ ovoko: event.target.checked })} />Ovoko</label>
+      <select aria-label="Kanal sprzedazy" className={`${field} w-44`} value={inventoryChannel(filter)} onChange={event => change(inventoryChannels[event.target.value as InventoryChannel])}><option value="all">Wszystkie kanaly</option><option value="allegro">Allegro (takze na obu)</option><option value="ovoko">Ovoko (takze na obu)</option><option value="both">Na obu portalach</option><option value="only_allegro">Tylko Allegro</option><option value="only_ovoko">Tylko Ovoko</option></select>
       <input aria-label="Szukaj czesci" className={`${field} w-40 grow`} value={filter.query} onChange={event => change({ query: event.target.value })} placeholder="Tytul, numer czesci, ID..." maxLength={100} />
-      <select aria-label="Obecnosc na portalach" className={field} value={filter.coverage} onChange={event => change({ coverage: event.target.value })}><option value="all">Wszystkie</option><option value="both">Na obu</option><option value="allegro">Tylko Allegro</option><option value="ovoko">Tylko Ovoko</option></select>
       <input aria-label="Cena Allegro od" title="Cena Allegro od (waluta oferty)" className={`${field} w-20`} inputMode="decimal" value={filter.priceFrom} onChange={event => change({ priceFrom: event.target.value })} placeholder="Cena A od" />
       <input aria-label="Cena Allegro do" title="Cena Allegro do (waluta oferty)" className={`${field} w-20`} inputMode="decimal" value={filter.priceTo} onChange={event => change({ priceTo: event.target.value })} placeholder="Cena A do" />
       <select aria-label="Sortowanie czesci" className={field} value={sort} onChange={event => { setSort(event.target.value); setPage(1); setSelected(new Set()); }}><option value="source">Kolejnosc API</option><option value="price">Cena A rosnaco</option><option value="-price">Cena A malejaco</option></select>
@@ -66,7 +65,7 @@ export function CombinedInventoryPanel({ portal }: { portal?: "ovoko" }) {
         </div>
       </details>
     </div>
-    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-white/65"><span>Widoczne: <b>{rows.length}</b> / wczytane: {parts.length}. Allegro {snapshot.allegro.length}/{snapshot.allegroTotal}, Ovoko {snapshot.ovoko.length}/{snapshot.ovokoTotal}. Zaznaczono: {selected.size}. {!complete && <span className="text-amber-200">Odczyt niepelny; brak rekordu nie oznacza nieobecnosci.</span>}</span>{snapshot.admin && <div className="[&_button]:!px-2 [&_button]:!py-1 [&_button]:!text-xs"><OvokoBulkLauncher offers={selectedOffers} onFinished={refresh} /></div>}</div>
+    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-white/65"><span>Widoczne: <b>{rows.length}</b> / wczytane: {parts.length}. Allegro {snapshot.allegro.length}/{snapshot.allegroTotal}, Ovoko {snapshot.ovoko.length}/{snapshot.ovokoTotal}. Zaznaczono: {selected.size}. {!complete && <span className="text-amber-200">Odczyt niepelny; brak rekordu nie oznacza nieobecnosci.</span>}</span>{snapshot.admin && <div className="flex flex-wrap items-center gap-2 [&_button]:!px-2 [&_button]:!py-1 [&_button]:!text-xs"><CoordinationReview offerIds={selectedOffers.map(offer => offer.id)} /><OvokoBulkLauncher offers={selectedOffers} onFinished={refresh} /></div>}</div>
     {busy && <p role="status" className="text-xs text-white/65">{progress} Wczytywanie tylko do podgladu, bez zmian na portalach.</p>}
     {(error || filterError) && <p role="alert" className="text-xs text-amber-200">{error || filterError}</p>}
     {snapshot.errors.map(message => <p role="status" className="text-xs text-amber-200" key={message}>{message} Nie uznajemy bledu za pusta liste.</p>)}
