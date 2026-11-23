@@ -12,7 +12,7 @@ const browser = await chromium.launch({ headless: true, channel: "chrome" });
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   let admin = true, ovokoFail = false, identityReads = 0, changedAccount = false;
-  const errors = [], operations = [];
+  const errors = [], operations = [], withdrawalCalls = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.route("https://combined.test/**", async route => {
     const req = route.request(), url = new URL(req.url());
@@ -20,6 +20,13 @@ try {
     operations.push(url.pathname);
     if (url.pathname === "/api/account/me") return route.fulfill({ json: { isAdmin: admin, account: { email: "fixture@test", suspended: false } } });
     if (url.pathname === "/api/allegro/seller-identity") { identityReads++; return route.fulfill({ json: { sellerId: changedAccount && identityReads > 1 ? "666" : "555" } }); }
+    if (url.pathname === "/api/allegro/inventory-withdrawal") {
+      const input = req.postDataJSON(); withdrawalCalls.push(input);
+      const job = { id: "11111111-1111-4111-8111-111111111111", offerId: "1", partId: "10", scope: "both", state: "prepared", allegro: "pending", ovoko: "pending" };
+      if (input.operation === "prepare") assert.deepEqual(input, { operation: "prepare", offerId: "1", partId: "10", scope: "both" });
+      else { assert.equal(input.jobId, job.id); job.state = "settled"; job.allegro = input.operation === "status" ? "done" : "submitted"; job.ovoko = "uncertain"; if (input.operation === "execute") assert.equal(input.confirm, true); else assert.equal(input.operation, "status"); }
+      return route.fulfill({ json: job });
+    }
     if (url.pathname === "/api/allegro/inventory") return route.fulfill({ json: { offers: Array.from({ length: 44 }, (_, i) => ({ id: String(i + 1), name: `Radio ABC123456 egzemplarz ${i + 1}`, image: "", externalId: "", status: "ACTIVE", stock: 1, price: { amount: "50.00", currency: "PLN" } })), totalCount: 44 } });
     if (url.pathname === "/api/ovoko/transfer-inventory") { assert.ok(admin); assert.equal(req.postDataJSON().operation, "statuses"); return route.fulfill({ json: { ok: true, statuses: { "2": { state: "transferred", partId: "999" } } } }); }
     if (url.pathname === "/api/ovoko/status") { assert.ok(admin); return route.fulfill({ json: { allowed: true, connected: true, verifiedAt: "fixture-binding" } }); }
@@ -54,6 +61,20 @@ try {
   await review.getByText(/Plan: Ovoko: ustaw Wycofany/).waitFor();
   assert.ok(await review.getByText(/niczego nie wykonano/).isVisible());
   await review.getByRole("button", { name: "Zamknij", exact: true }).click();
+  await table.locator('[data-part-key="a:1"]').getByRole("button", { name: "Wycofaj", exact: true }).click();
+  const withdraw = page.getByRole("dialog", { name: "Wycofaj ze sprzedazy" });
+  await withdraw.getByLabel("Zakres wycofania").selectOption("both");
+  assert.equal(withdrawalCalls.length, 0, "Opening/scope selection never changes anything");
+  await withdraw.getByRole("button", { name: "Sprawdz i przygotuj", exact: true }).click();
+  await withdraw.getByRole("button", { name: "Potwierdz wycofanie: oba portale", exact: true }).waitFor();
+  assert.deepEqual(withdrawalCalls.map(call => call.operation), ["prepare"], "Preparation needs a second explicit confirmation");
+  await withdraw.getByRole("button", { name: "Potwierdz wycofanie: oba portale", exact: true }).click();
+  await withdraw.getByText(/Niepewny wynik: sprawdz portal/).waitFor();
+  assert.equal(await withdraw.getByRole("button", { name: /Potwierdz wycofanie/ }).count(), 0, "Never expose a retry after an uncertain write");
+  await withdraw.getByRole("button", { name: "Sprawdz wynik (bez ponawiania)", exact: true }).click();
+  await withdraw.getByText(/Allegro: Potwierdzone wycofanie/).waitFor();
+  assert.deepEqual(withdrawalCalls.map(call => call.operation), ["prepare", "execute", "status"]);
+  await withdraw.getByRole("button", { name: "Zamknij", exact: true }).click();
   await page.getByLabel("Cena Allegro od").fill("48"); await page.getByLabel("Cena Allegro do").fill("52"); assert.equal(await table.locator("tbody tr").count(), 44);
   await page.getByRole("button", { name: "Wyczysc", exact: true }).click(); await page.getByLabel("Czesci na stronie").selectOption("20"); assert.equal(await table.locator("tbody tr").count(), 20);
   await page.getByRole("button", { name: "Nastepna", exact: true }).click(); await page.getByText("Strona 2 / 3", { exact: true }).waitFor();
@@ -68,5 +89,5 @@ try {
   assert.equal(await table.locator('[data-part-key="a:1"]').getByLabel("Ovoko: nieustalone", { exact: true }).count(), 1);
   await page.getByLabel("Kanal sprzedazy").selectOption("only_allegro"); assert.equal(await table.locator("tbody tr").count(), 0, "Provider failure does not prove Allegro-only");
   assert.deepEqual(errors, []);
-  console.log("Combined browser: one dense list, union portal filters, live badges, separate prices, source range, 200/page, partial-error safety, responsive layout and read-only operations passed.");
+  console.log("Combined browser: dense filters, live badges, 200/page, read-only review, two-step scoped withdrawal, independent results/no retry, partial-error safety and responsive layout passed. All services mocked.");
 } finally { await browser.close(); }

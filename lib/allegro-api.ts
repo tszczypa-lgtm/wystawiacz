@@ -8,6 +8,8 @@ type Env = {
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?: string;
   ALLEGRO_PAIRING_ENFORCED?: string;
   PUBLICATION_DEDUP_ENABLED?: string;
+  OVOKO_ENCRYPTION_KEY?: string;
+  INVENTORY_WITHDRAW_ENABLED?: string;
 };
 type Connection = {
   clientId: string;
@@ -503,6 +505,17 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
       }
     }
     if (request.method === "POST") {
+      if (path === "/inventory-withdrawal") {
+        if (request.headers.get("Origin") !== url.origin || request.headers.get("Content-Type")?.split(";")[0].trim() !== "application/json") throw new ApiError(403, "Nieprawidlowe zrodlo lub format wycofania.");
+        if (!await activeAllegroAdmin(user.id, env)) throw new ApiError(403, "Wycofywanie jest obecnie dostepne tylko dla aktywnego administratora.");
+        if (Number(request.headers.get("Content-Length")) > 8192) throw new ApiError(413, "Zbyt duzy formularz.");
+        const raw = await request.text(); if (utf8.encode(raw).length > 8192) throw new ApiError(413, "Zbyt duzy formularz.");
+        let input: unknown; try { input = JSON.parse(raw); } catch { throw new ApiError(400, "Nieprawidlowy formularz wycofania."); }
+        if (!input || typeof input !== "object" || Array.isArray(input)) throw new ApiError(400, "Nieprawidlowy formularz wycofania.");
+        const { manageWithdrawal, WithdrawalError } = await import("./inventory-withdrawal");
+        try { return json(await manageWithdrawal(input as Record<string, unknown>, user.id, env, workspaceDb, remote)); }
+        catch (error) { if (error instanceof WithdrawalError) throw new ApiError(error.status, error.message); throw new ApiError(503, "Nie potwierdzono wycofania. Sprawdz portale; nie ponawiaj niepewnej operacji."); }
+      }
       if (path === "/auth/logout") {
         await db(`?owner_id=eq.${encodeURIComponent(user.id)}`, { method: "DELETE" });
         return json({ connected: false });

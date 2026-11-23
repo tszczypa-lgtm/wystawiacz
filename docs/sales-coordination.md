@@ -20,7 +20,7 @@
 
 ## Required before enabling writes
 
-This stage does not include an active scheduler, persistent event cursors, Ovoko order ingestion or an execution queue. Do not label it synchronization or enable a live-write feature flag.
+Automatic sale synchronization does not yet include an active scheduler, persistent event cursors or Ovoko order ingestion. Do not label the review as automatic synchronization. The manual withdrawal executor below is a separate opt-in feature, not a background sale monitor.
 
 - Verify Ovoko V2 order shapes, actual NEW/paid/cancelled/returned transitions, order_source and date timezone against an authorized read-only account. Status Sold alone is insufficient. The policy supports normalized Ovoko evidence, but the current review intentionally does not fabricate it.
 - Start at an explicit enable boundary with a durable Allegro event cursor. Page chronologically without skipping, retain cursor on errors, detect retention gaps, and overlap Ovoko order polling. Never replay old historical sales against a newer publication generation.
@@ -30,6 +30,18 @@ This stage does not include an active scheduler, persistent event cursors, Ovoko
 - Use a deterministic Allegro command ID; confirm command completion and read target state. Ovoko writes need a durable reservation and readback; uncertain attempts are never automatically repeated. One failed target must not undo another successful withdrawal.
 - Keep a kill switch, visible last-check/error status, bounded provider calls/backoff, retryable-read vs uncertain-write separation, and no auto-reactivation. A scheduler cannot guarantee instantaneous protection from simultaneous purchases.
 - Run a dry-run pilot on real order evidence before turning on mutation. Test end-to-end with an explicitly selected test part; do not test by withdrawing unrelated stock.
+
+## Manual withdrawals (2026-11-23)
+
+- Apply `supabase/014_inventory_withdrawals.sql`, then set `INVENTORY_WITHDRAW_ENABLED=true` in Cloudflare. No automatic sale monitoring is enabled by this flag. No live offers were changed during development.
+- The row action "Wycofaj" opens scope selection. "Sprawdz i przygotuj" checks ownership and prepares a 15-minute plan but does not mutate portals. A second explicit confirmation executes it.
+- Only an active administrator can use `/api/allegro/inventory-withdrawal`. It requires bearer auth, same origin, JSON and bounded input. The journal is service-only with RLS, no browser policies.
+- Targets are server-derived and bound to owner/seller. Ovoko also requires the exact external reference, confirmed publication ID/generation, live status dictionary and stored credential fingerprint. Uncertain publication mappings cannot be withdrawn automatically.
+- Allegro uses END with a deterministic command UUID; Ovoko uses changePartStatus to the live Written off status. No permanent-delete endpoint is used. Both targets have independent journal outcomes, not an atomic success claim.
+- A durable prepared -> running CAS precedes provider changes. Duplicate confirmation never repeats writes. Submitted is not success; "Sprawdz wynik" reads current statuses without replaying writes. Provider timeout stays uncertain until a matching readback confirms the target.
+- If persisting an intermediate result fails, the running lock stays closed. There is no blind unlock/retry. Provider/account/generation changes or sold/reserved Ovoko parts stop the operation before writes.
+- Current scope: seller-owned Allegro rows; Ovoko-only/both withdrawal requires a linked Ovoko record. Standalone Ovoko parts without an Allegro mapping are not managed by this executor.
+- "Only one portal" describes this application's writes. Independently configured native/third-party integrations may propagate a portal status change; disable or reconcile competing integrations before enabling automatic coordination.
 
 ## Verified primary documentation (2026-11-23)
 
