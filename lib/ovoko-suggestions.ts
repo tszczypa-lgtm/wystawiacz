@@ -5,7 +5,11 @@ export function ovokoAutomaticFields(source: OvokoSourcePreview, dictionaries: R
   const fields: Partial<OvokoPreparationDraft> = {};
   const numbers = suggestPartNumbers(source.title, source.parameters).filter(candidate => candidate.number.length !== 17);
   if (numbers.length) fields.manufacturerCode = numbers[0].number;
-  if (numbers.length > 1) fields.additionalCodes = numbers.slice(1).map(candidate => candidate.number).join("\n");
+  const additional = numbers.flatMap((candidate, index) => [
+    ...(index ? [candidate.number] : []),
+    ...candidate.evidence.map(item => item.raw.toUpperCase().replace(/[ .]/g, "")).filter(raw => /^[A-Z0-9]+(?:-[A-Z0-9]+)+$/.test(raw) && normalizeNumber(raw) === candidate.number),
+  ]);
+  if (additional.length) fields.additionalCodes = [...new Set(additional)].join("\n");
   const categories = suggestOvokoCategories(source.title, dictionaries.categories || []);
   if (categories.length) fields.categoryId = categories[0].id;
   const qualityNames: Record<string, string[]> = { used: ["uzywany", "used"], new: ["nowy", "new"], damaged: ["uszkodzony", "with defects"], restored: ["regenerowany", "restored"] };
@@ -86,16 +90,20 @@ export function vehicleSuggestionText(title: string, parameters: { name: string;
 export function suggestOvokoBrands(title: string, brands: OvokoReadRow[]) {
   const text = ` ${fold(title).replace(/[^a-z0-9]+/g, " ")} `;
   const matches = brands.filter(row => {
-    const names = [row.name, ...(fold(row.name) === "volkswagen" ? ["VW"] : [])];
+    if (fold(row.name).trim() === "rover" && text.includes(" range rover ")) return false;
+    const names = brandNames(row);
     return names.some(name => text.includes(` ${fold(name).replace(/[^a-z0-9]+/g, " ").trim()} `));
   });
   // Compound makes are more specific than their contained make names (Land Rover vs Rover).
   return matches.filter(row => !matches.some(other => other !== row && fold(other.name).length > fold(row.name).length && ` ${fold(other.name)} `.includes(` ${fold(row.name)} `)));
 }
+function brandNames(row: OvokoReadRow) {
+  return [row.name, ...(fold(row.name).trim() === "volkswagen" ? ["VW"] : []), ...(fold(row.name).trim() === "land rover" ? ["Range Rover"] : [])];
+}
 export function automaticOvokoBrand(title: string, parameters: { name: string; values: string[] }[], brands: OvokoReadRow[]): string {
   const firstMentioned = (text: string, rows: OvokoReadRow[]) => {
     const normalized = ` ${fold(text).replace(/[^a-z0-9]+/g, " ")} `;
-    const position = (row: OvokoReadRow) => Math.min(...[row.name, ...(fold(row.name) === "volkswagen" ? ["VW"] : [])].map(name => {
+    const position = (row: OvokoReadRow) => Math.min(...brandNames(row).map(name => {
       const index = normalized.indexOf(` ${fold(name).replace(/[^a-z0-9]+/g, " ").trim()} `);
       return index < 0 ? Infinity : index;
     }));

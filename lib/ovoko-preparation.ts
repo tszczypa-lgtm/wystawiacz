@@ -63,8 +63,8 @@ export function ovokoSourcePreview(input: unknown, expectedId: string, toText: (
 export type OvokoPreparationDraft = { title: string; notes: string; manufacturerCode: string; additionalCodes: string; price: string; currency: string; categoryId: string; donorId: string; qualityId: string; statusId: string; shippingPlan: string };
 export function additionalOvokoCodes(value: string, primary: string): string[] | null {
   if (value.length > 4000) return null;
-  const codes = [...new Set(value.split(/[\r\n,;]+/).map(code => code.trim().toUpperCase().replace(/[ .-]/g, "")).filter(Boolean))].filter(code => code !== primary);
-  return codes.length <= 20 && codes.every(code => /^[A-Z0-9]{6,32}$/.test(code)) ? codes : null;
+  const codes = [...new Set(value.split(/[\r\n,;]+/).map(code => code.trim().toUpperCase().replace(/[ .]/g, "")).filter(Boolean))].filter(code => code !== primary);
+  return codes.length <= 20 && codes.every(code => /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(code) && /^[A-Z0-9]{6,32}$/.test(code.replace(/-/g, ""))) ? codes : null;
 }
 export function initialOvokoDraft(source: OvokoSourcePreview): OvokoPreparationDraft {
   const supported = ["PLN", "EUR"].includes(source.currency);
@@ -84,7 +84,7 @@ export function ovokoPublicationBlockers(source: OvokoSourcePreview, draft: Ovok
   if (!/^\d{1,12}$/.test(draft.qualityId)) issues.push("Wybierz stan czesci Ovoko.");
   if (!/^\d{1,12}$/.test(draft.statusId)) issues.push("Wybierz dostepnosc czesci Ovoko (Na stanie).");
   if (draft.manufacturerCode && !/^[A-Z0-9]{6,32}$/.test(draft.manufacturerCode)) issues.push("Podany numer czesci musi byc pelny (6-32 litery lub cyfry); gdy go nie znasz, zostaw pole puste.");
-  if (additionalOvokoCodes(draft.additionalCodes, draft.manufacturerCode) === null) issues.push("Sprawdz numery dodatkowe: maksymalnie 20, po jednym w wierszu, 6-32 litery lub cyfry kazdy.");
+  if (additionalOvokoCodes(draft.additionalCodes, draft.manufacturerCode) === null) issues.push("Sprawdz numery dodatkowe: maksymalnie 20, po jednym w wierszu, 6-32 litery lub cyfry kazdy; dozwolone myslniki wewnatrz numeru.");
   if (!/^\d{1,10}(\.\d{1,2})?$/.test(draft.price) || Number(draft.price) <= 0 || !["PLN", "EUR"].includes(draft.currency)) issues.push("Uzupelnij dodatnia cene i walute PLN lub EUR.");
   return issues;
 }

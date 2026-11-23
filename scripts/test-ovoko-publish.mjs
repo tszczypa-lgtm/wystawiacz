@@ -127,7 +127,7 @@ globalThis.fetch = async (input, options = {}) => {
   assert.equal(form.get("photo"), form.get("photos[0]")); assert.equal(form.get("original_currency"), "PLN"); assert.equal(form.get("price"), expectedPrice);
   assert.deepEqual([...form.entries()].filter(([name]) => /^photos\[\d+\]$/.test(name)).map(([, url]) => url), snapshot.images, "Transfer the complete gallery in source order, not just the thumbnail");
   assert.equal(form.get("notes"), "Opis & uwagi + numer"); assert.equal(form.get("place"), null); assert.equal(form.get("storage_id"), null);
-  const expectedCodes = extraCodes ? ["A1649020300", "A1649004200BA"] : [];
+  const expectedCodes = extraCodes.includes("JPLA-") ? ["JPLA14D617BA", "JPLA-14D617-BA"] : extraCodes ? ["A1649020300", "A1649004200BA"] : [];
   assert.deepEqual([...form.entries()].filter(([name]) => /^optional_codes\[\d+\]$/.test(name)).map(([, value]) => value), expectedCodes, "Additional numbers occupy separate fields, retaining suffixes and not duplicating the main number");
   if (mode === "timeout") throw new DOMException("private-provider-error", "TimeoutError");
   if (mode === "redirect") return new Response("private-provider-error", { status: 302, headers: { Location: "https://evil.test" } });
@@ -201,6 +201,7 @@ try {
   reset(); mode = "price-format"; assert.equal((await handleOvokoApi(req(), env)).status, 200); assert.equal(writes, 1, "The last source recheck also compares monetary value, not decimal spelling");
   reset(); mode = "price-change"; assert.equal((await handleOvokoApi(req(), env)).status, 409); assert.equal(writes, 0, "A true price change during recheck still blocks publication");
   reset(); extraCodes = "A1649020300\nA1649004200BA\nA1649020300\n0281010038"; assert.equal((await handleOvokoApi(req(), env)).status, 200); assert.equal(writes, 1);
+  reset(); extraCodes = "JPLA14D617BA\nJPLA-14D617-BA\nJPLA-14D617-BA"; assert.equal((await handleOvokoApi(req(), env)).status, 200); assert.equal(writes, 1, "Both exact formatting variants reach separate optional_codes fields without losing the BA suffix");
   for (const additionalCodes of [["A1649020300"], "<script>", Array.from({ length: 21 }, (_, index) => `CODE${100000 + index}`).join("\n")]) {
     reset(); assert.equal((await handleOvokoApi(req({ ...payload(), additionalCodes }), env)).status, 400); assert.equal(writes, 0);
   }

@@ -13,7 +13,9 @@ assert.equal(preview.suggestedCode, "ABC123"); assert.equal(preview.shippingRate
 assert.equal(preview.description, "Text");
 const draft = initialOvokoDraft(preview); assert.equal(draft.price, "123.45"); assert.equal(draft.currency, "PLN");
 assert.equal(preview.condition, "");
-assert.deepEqual(additionalOvokoCodes("A1649020300\na164-900-4200\nA1649020300\nA1645457716", "A1645457716"), ["A1649020300", "A1649004200"]);
+assert.deepEqual(additionalOvokoCodes("A1649020300\na164-900-4200\nA1649020300\nA1645457716", "A1645457716"), ["A1649020300", "A164-900-4200"]);
+assert.deepEqual(additionalOvokoCodes("JPLA-14D617-BA\nJPLA14D617BA", "JPLA14D617BA"), ["JPLA-14D617-BA"]);
+for (const invalid of ["-JPLA14D617BA", "JPLA14D617BA-", "JPLA--14D617-BA"]) assert.equal(additionalOvokoCodes(invalid, ""), null);
 assert.equal(additionalOvokoCodes("<script>", "A1645457716"), null);
 assert.equal(additionalOvokoCodes(Array.from({ length: 21 }, (_, index) => `CODE${100000 + index}`).join("\n"), "A1645457716"), null);
 for (const [name, expected] of [["Używany", "used"], ["Nowy", "new"], ["Uszkodzony", "damaged"], ["Regenerowany", "restored"], ["Powystawowy", ""]]) {

@@ -53,3 +53,7 @@ Kategorie: pierwsza pasujaca propozycja rankingu uzupelnia pole takze przy remis
 Nie wykonano migracji ani rzeczywistej publikacji automatycznie. Pierwsza proba konta nalezy do administratora po wdrozeniu.
 
 Dokumentacja dostawcy: https://api.rrr.lt/docs/import_part.php oraz https://api.rrr.lt/openapi/swagger.yaml (odczyt dawcy i czesci V2). Sprawdzone 2026-11-22.
+
+## Warianty numeru i Range Rover (2026-11-23)
+
+Numer glowny nadal jest pelnym oznaczeniem bez separatorow, uzywanym takze do wyszukiwania MPN. Oryginalny wariant z myslnikami z tytulu/parametru trafia do oddzielnego optional_codes. Np. JPLA14D617BA + JPLA-14D617-BA. Nie wymyslamy podzialu, gdy aukcja nie zawiera myslnikow, nie tracimy indeksu i nie scalalamy wariantow przy wysylce. Dotyczy pojedynczego oraz masowego przenoszenia. Alias Range Rover wybiera Land Rover w aktualnym slowniku, nie osobna marke Rover; samodzielne Rover 75 nadal jest rozpoznawane jako Rover.

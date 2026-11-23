@@ -86,6 +86,10 @@ const landRoverTitle = "MODUŁ STEROWNIK DRZWI LAND ROVER RANGE ROVER SPORT L494
 const expandedBrands = [...brands, { id: "3", name: "Land Rover" }, { id: "4", name: "Rover" }, { id: "5", name: "AC" }];
 assert.deepEqual(suggestOvokoBrands(landRoverTitle, expandedBrands).map(row => row.id), ["3"], "Full compound make wins over Rover in the reported title");
 assert.equal(automaticOvokoBrand(landRoverTitle, [], expandedBrands), "3");
+assert.deepEqual(suggestOvokoBrands("STEROWNIK RANGE ROVER SPORT L494", expandedBrands).map(row => row.id), ["3"]);
+assert.equal(automaticOvokoBrand("STEROWNIK RANGE ROVER SPORT L494", [], expandedBrands), "3");
+assert.equal(automaticOvokoBrand("STEROWNIK", [{ name: "Marka pojazdu", values: ["Range Rover"] }], expandedBrands), "3");
+assert.equal(automaticOvokoBrand("STEROWNIK RANGE ROVER", [], [{ id: "4", name: "Rover" }]), "", "Never substitute unrelated Rover when Land Rover is absent from the dictionary");
 assert.equal(automaticOvokoBrand("ROVER 75 STEROWNIK", [], expandedBrands), "4", "Standalone Rover remains a valid make");
 assert.equal(automaticOvokoBrand("AUDI A4 AC", [], expandedBrands), "1", "An incidental AC token does not defeat an explicit longer make");
 assert.equal(automaticOvokoBrand("AUDI VW", [], expandedBrands), "1");
@@ -108,6 +112,7 @@ assert.equal(automaticOvokoBrand("KANGOOL 259903137R", [], renaultBrands), "", "
 assert.equal(automaticOvokoBrand("MODUL", [{ name: "Model pojazdu", values: ["Kangoo III"] }], renaultBrands), "7");
 assert.equal(automaticOvokoModel(kangooTitle, [{ id: "70", name: "Kangoo II" }, { id: "71", name: "Kangoo III" }]), "71");
 assert.equal(ovokoAutomaticFields({ title: landRoverTitle, parameters: [], condition: "", status: "ACTIVE", stock: 1, bundle: false }, {}).manufacturerCode, "JPLA14D617BA");
+assert.equal(ovokoAutomaticFields({ title: landRoverTitle, parameters: [], condition: "", status: "ACTIVE", stock: 1, bundle: false }, {}).additionalCodes, "JPLA-14D617-BA");
 assert.equal(vehicleSuggestionText("Pompa", [{ name: "Producent", values: ["Bosch"] }, { name: "Marka pojazdu", values: ["Audi"] }]), "Pompa Audi");
 const models = [{ id: "10", name: "A4, S4 (B8)", years: "2008 - 2015" }, { id: "11", name: "A4, S4 (B9)", years: "2015 - " }];
 assert.equal(suggestOvokoModels("AUDI A4 B9", models)[0].id, "11");
