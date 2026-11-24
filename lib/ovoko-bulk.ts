@@ -39,7 +39,7 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
   }
   const owned = await allegro(`/ovoko-source/${input.offerId}`);
   const binding = input.binding as Record<string, unknown> | null;
-  if (!binding || binding.sellerId !== owned.sellerId || binding.fingerprint !== fingerprint) throw new OvokoError(409, "Polaczone konto zmienilo sie. Zatrzymano partie; rozpocznij ja ponownie po sprawdzeniu kont.");
+  if (!binding || binding.sellerId !== owned.sellerId || binding.fingerprint !== fingerprint) throw new OvokoError(409, "Polaczone konto zmienilo sie. Zatrzymano partie; rozpocznij ja ponownie po sprawdzeniu kont.", "account_changed");
   const source = ovokoSourcePreview(owned.offer, input.offerId as string, () => input.notes as string);
   const expected = input.expectedSource as Record<string, unknown> | null;
   if (!expected || !sameOvokoMoney(expected.price, source.price) || ["title", "currency", "stock", "status", "condition"].some(key => expected[key] !== source[key as keyof typeof source]) || JSON.stringify(expected.images) !== JSON.stringify(source.images)) throw new OvokoError(409, "Oferta Allegro zmienila sie. Sprawdz dane przed ponownym przeniesieniem.");

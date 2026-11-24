@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { allegroRequest } from "@/lib/allegro-client";
+import { allegroRequest, AllegroClientError } from "@/lib/allegro-client";
 import { ovokoBulkRequest, OvokoBulkClientError } from "@/lib/ovoko-bulk-client";
 import { adjustedOvokoPrice, sameOvokoMoney, type OvokoPriceAdjustment } from "@/lib/ovoko-bulk-price";
 import { offerDescriptionText, ovokoSourcePreview } from "@/lib/ovoko-preparation";
@@ -21,6 +21,9 @@ async function waitForTransferSlot(lastAttempt: { current: number }, stopped: { 
   if (stopped.current) return false;
   lastAttempt.current = Date.now();
   return true;
+}
+async function waitForRateLimit(stopped: { current: boolean }) {
+  for (let seconds = 0; seconds < 60 && !stopped.current; seconds++) await new Promise(resolve => setTimeout(resolve, 1000));
 }
 export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; onFinished: () => void }) {
   const [mode, setMode] = useState<OvokoPriceAdjustment["mode"]>("none"), [value, setValue] = useState("0");
@@ -56,7 +59,7 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
     try { adjustedOvokoPrice(offer.price?.amount || "", offer.price?.currency || "", rule); } catch (error) { throw new OvokoBulkClientError((error as Error).message, 400); }
     const owned = await allegroRequest<{ offer: unknown; sellerId: string }>(`/ovoko-source/${offer.id}`);
     const source = ovokoSourcePreview(owned.offer, offer.id, offerDescriptionText);
-    if (owned.sellerId !== session.sellerId) throw new Error("Konto Allegro zmienilo sie. Zatrzymano partie.");
+    if (owned.sellerId !== session.sellerId) throw new OvokoBulkClientError("Konto Allegro zmienilo sie. Zatrzymano partie.", 409, "account_changed");
     if (!sameOvokoMoney(source.price, offer.price?.amount) || source.currency !== offer.price?.currency) throw new OvokoBulkClientError(`Cena Allegro zmienila sie od zaznaczenia (${offer.price?.amount} ${offer.price?.currency} -> ${source.price} ${source.currency}). Odswiez oferte.`, 400);
     if (stop.current) { update(offer.id, { state: "waiting", message: "Nie wyslano" }); return false; }
     const item = { offerId: offer.id, binding: session, adjustment: rule, notes: source.description, expectedSource: { title: source.title, price: source.price, currency: source.currency, stock: source.stock, status: source.status, condition: source.condition, images: source.images } };
@@ -73,8 +76,8 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
   function failure(id: string, error: unknown) {
     const retryable = error instanceof OvokoBulkClientError && error.status === 400 && (!error.repair || error.repair.needsVehicle || error.repair.needsCategory);
     update(id, { state: "error", retryable, repair: error instanceof OvokoBulkClientError ? error.repair : undefined, message: error instanceof Error ? error.message : "Niepotwierdzony wynik." });
-    // Pre-existing reservations block only this item; preparation made no new part write.
-    return error instanceof OvokoBulkClientError && ![401, 403, 429].includes(error.status) && (error.status === 400 || [502, 504].includes(error.status) || error.code === "item_transport" || error.status === 409 && ["vehicle_creation_locked", "publication_locked"].includes(error.code || ""));
+    // Each item has its own durable write lock. Never replay it; continue independent rows.
+    return !((error instanceof OvokoBulkClientError || error instanceof AllegroClientError) && [401, 403].includes(error.status) || error instanceof OvokoBulkClientError && error.code === "account_changed");
   }
   function finish() { lock.current = false; if (mounted.current) { setJobs(previous => previous.map(job => job.state === "waiting" ? { ...job, message: "Nie wyslano w tej partii" } : job)); setRunning(false); onFinished(); } }
   async function start() {
@@ -84,14 +87,15 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
     setJobs(snapshot.map(offer => ({ id: offer.id, name: offer.name, price: price(offer, rule), currency: offer.price?.currency || "", state: "waiting", retryable: false, message: "Oczekuje", rule, technical })));
     try {
       const session = await begin(rule);
-      let transportFailures = 0;
       for (const offer of snapshot) {
         if (stop.current) break;
-        try { if (!await transfer(offer, rule, session, technical, fallback)) break; transportFailures = 0; }
+        try { if (!await transfer(offer, rule, session, technical, fallback)) break; }
         catch (error) {
           if (!failure(offer.id, error)) throw error;
-          transportFailures = error instanceof OvokoBulkClientError && (error.code === "item_transport" || [502, 504].includes(error.status)) ? transportFailures + 1 : 0;
-          if (transportFailures >= 3) throw new Error("Trzy kolejne bledy odpowiedzi serwera. Wstrzymano pozostale pozycje do czasu przywrocenia polaczenia.");
+          if ((error instanceof OvokoBulkClientError || error instanceof AllegroClientError) && error.status === 429) {
+            update(offer.id, { message: `${error.message} Pozostale pozycje rusza po 60 s przerwy.` });
+            await waitForRateLimit(stop);
+          }
         }
       }
       if (mounted.current) setMessage(stop.current ? "Zatrzymano. Pozostale pozycje nie zostaly wyslane." : "Partia zakonczona.");

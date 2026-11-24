@@ -8,7 +8,6 @@ import { initialOvokoDraft, offerDescriptionText, ovokoPreparationIssues, ovokoP
 import type { OvokoReadResult, OvokoReadRow } from "@/lib/ovoko-read";
 import { ovokoCarYear, preferredOvokoCar } from "@/lib/ovoko-car-selection";
 import { suggestPartNumbers, suggestOvokoCategories, suggestionSearchMatches, suggestOvokoBrands, suggestOvokoModels, vehicleSuggestionText, ovokoAutomaticFields, automaticOvokoBrand, automaticOvokoModel } from "@/lib/ovoko-suggestions";
-import { PublicationRecovery } from "../publication-recovery";
 import { ManualOvokoOverride } from "../manual-override";
 
 const button = "rounded-lg border border-white/20 px-3 py-2 text-sm font-bold disabled:opacity-40";
@@ -250,7 +249,6 @@ export function OvokoPreparationPanel({ popup=false }: { popup?:boolean }) {
   return <section className="space-y-5">
     <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-3xl font-black">Przygotuj do Ovoko</h1><div className="flex gap-2">{popup&&<button type="button" className={button} disabled={publishing||creatingCar} onClick={()=>window.close()}>Zamknij okno</button>}<button type="button" className={`${button} bg-orange-600`} disabled={!source || busy || dictionaryBusy || modelsBusy || carsBusy || publishing || attempted || creatingCar} onClick={() => void publishSingle()}>{publishing ? "Wystawiam..." : "Wystaw 1 czesc w Ovoko"}</button></div></div>
     {publicationMessage && <p ref={feedbackPanel} role={partId || publishing ? "status" : "alert"} className={`rounded-lg border p-3 ${partId ? "border-emerald-400/40 text-emerald-200" : "border-amber-400/40 text-amber-200"}`}>{publicationMessage}</p>}
-    {source && !publishing && !creatingCar && !overrideBusy && <PublicationRecovery offerId={source.id} />}
     {source && <ManualOvokoOverride key={`${source.id}:${brandId}:${modelId}:${carYear}`} offerId={source.id} brandId={brandId} modelId={modelId} year={carYear} disabled={publishing || creatingCar} onBusyChange={setOverrideBusy} onResolved={result => {
       setReview(false); setPublicationMessage(result.message);
       setAttempted(false); publicationSent.current = false; setPartId("");

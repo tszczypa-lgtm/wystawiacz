@@ -8,42 +8,40 @@ export function ManualOvokoOverride({ offerId, brandId, modelId, year, disabled,
   offerId: string; brandId: string; modelId: string; year: string; disabled: boolean;
   onBusyChange: (busy: boolean) => void; onResolved: (result: OverrideResult) => void;
 }) {
-  const [kind, setKind] = useState("part"), [busy, setBusy] = useState(false), [result, setResult] = useState<OverrideResult>();
-  const [checked, setChecked] = useState(false), [risk, setRisk] = useState(false), [typed, setTyped] = useState(""), [reason, setReason] = useState(""), [error, setError] = useState("");
+  const [busy, setBusy] = useState(false), [message, setMessage] = useState("");
   const lock = useRef(false);
-  async function run(operation: "check" | "confirm") {
+  async function run(kind: "part" | "vehicle") {
     if (disabled || lock.current) return;
-    lock.current = true; setBusy(true); onBusyChange(true); setError("");
-    if (operation === "check") { setResult(undefined); setChecked(false); setRisk(false); setTyped(""); }
+    if (!window.confirm(`Recznie odblokowac ${kind === "part" ? "te oferte" : "wybrane auto"}? Akceptujesz ryzyko duplikatu po niepewnej wysylce. Jesli znajdziemy istniejacy rekord, wykorzystamy go zamiast tworzyc drugi. Potem osobno kliknij Wystaw.`)) return;
+    lock.current = true; setBusy(true); onBusyChange(true); setMessage("Sprawdzam i odblokowuje...");
     try {
       const { data } = await createSupabaseBrowserClient().auth.getSession();
       if (!data.session) throw new Error("Zaloguj sie ponownie.");
-      const response = await fetch("/api/ovoko/manual-override", { method: "POST", cache: "no-store", headers: { Authorization: `Bearer ${data.session.access_token}`, "Content-Type": "application/json" }, body: JSON.stringify(operation === "check" ? { operation, kind, offerId, brandId, modelId, year } : { operation, token: result?.token, brandId, checkedOvoko: checked, confirmRisk: risk, typedOfferId: typed, reason }) });
-      const current = await createSupabaseBrowserClient().auth.getSession();
-      if (current.data.session?.user.id !== data.session.user.id) throw new Error("Sesja zmienila sie. Sprawdz wynik po ponownym zalogowaniu.");
-      const payload = await response.json().catch(() => null) as OverrideResult | null;
-      if (!response.ok || !payload) throw new Error(payload?.message || "Nie potwierdzono decyzji. Niczego nie wyslano; sprawdz blokade ponownie.");
-      setResult(payload);
-      if (payload.resolved) onResolved(payload);
-    } catch (e) { setError(e instanceof Error ? e.message : "Nie potwierdzono wyniku. Nie ponowiono wysylki."); }
+      const session = data.session;
+      const request = async (body: unknown) => {
+        const current = await createSupabaseBrowserClient().auth.getSession();
+        if (current.data.session?.user.id !== session.user.id) throw new Error("Sesja zmienila sie. Otworz formularz ponownie.");
+        const response = await fetch("/api/ovoko/manual-override", { method: "POST", cache: "no-store", headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const after = await createSupabaseBrowserClient().auth.getSession();
+        if (after.data.session?.user.id !== session.user.id) throw new Error("Sesja zmienila sie. Sprawdz wynik po ponownym zalogowaniu.");
+        const result = await response.json().catch(() => null) as OverrideResult | null;
+        if (!response.ok || !result) throw new Error(result?.message || "Nie potwierdzono odblokowania. Nie wyslano czesci; sprawdz ponownie.");
+        return result;
+      };
+      const preview = await request({ operation: "check", kind, offerId, brandId, modelId, year });
+      const result = preview.resolved ? preview : preview.token ? await request({ operation: "confirm", token: preview.token, brandId, confirmManual: true }) : null;
+      if (!result?.resolved) throw new Error("Nie potwierdzono odblokowania. Nie ponowiono wysylki.");
+      setMessage(result.message); onResolved(result);
+    } catch (e) { setMessage(e instanceof Error ? e.message : "Nie potwierdzono wyniku. Nie ponowiono wysylki."); }
     finally { lock.current = false; setBusy(false); onBusyChange(false); }
   }
-  const button = "rounded border border-white/20 px-3 py-1.5 text-xs disabled:opacity-40";
-  const field = "rounded border border-white/20 bg-[#0d1117] px-2 py-1";
-  return <details className="rounded border border-red-300/30 p-3 text-sm"><summary className="cursor-pointer font-semibold">Reczne odblokowanie na moja odpowiedzialnosc</summary>
-    <fieldset disabled={disabled || busy} className="mt-2 space-y-2">
-      <p className="text-xs text-amber-200">Tylko stare proby (minimum 30 minut). Najpierw wylacz oba kierunki synchronizacji. To rozstrzygniecie rejestru, nie automatyczna wysylka. Nie omija uprawnien ani blokady innego aktywnego konta.</p>
-      <label className="block">Rodzaj blokady <select aria-label="Rodzaj blokady" className={field} value={kind} onChange={e => { setKind(e.target.value); setResult(undefined); }}><option value="part">Wysylka czesci</option><option value="vehicle">Tworzenie auta (wybrany model i rok)</option></select></label>
-      <button type="button" className={button} disabled={kind === "vehicle" && (!brandId || !modelId || !year)} onClick={() => void run("check")}>Sprawdz stara blokade</button>
-      {result && <p role="status">{result.message}</p>}
-      {result?.token && !result.resolved && <>
-        <label className="flex gap-2 text-xs"><input type="checkbox" checked={checked} onChange={e => setChecked(e.target.checked)} />Sprawdzilem recznie wszystkie statusy czesci / auta w Ovoko.</label>
-        <label className="flex gap-2 text-xs"><input type="checkbox" checked={risk} onChange={e => setRisk(e.target.checked)} />Akceptuje ryzyko duplikatu i zlecam rozstrzygniecie starej blokady na moja odpowiedzialnosc.</label>
-        <label className="block text-xs">Przepisz ID aukcji: {offerId} <input aria-label="Potwierdz ID aukcji" className={field} value={typed} onChange={e => setTyped(e.target.value)} /></label>
-        <label className="block text-xs">Powod (minimum 10 znakow) <input aria-label="Powod odblokowania" className={`${field} w-full`} value={reason} maxLength={1000} onChange={e => setReason(e.target.value)} /></label>
-        <button type="button" className={button} disabled={!checked || !risk || typed !== offerId || reason.trim().length < 10} onClick={() => void run("confirm")}>{result.foundId ? "Napraw rejestr istniejacego rekordu" : "Potwierdz reczne odblokowanie"}</button>
-      </>}
-      {error && <p role="alert" className="text-amber-200">{error}</p>}
-    </fieldset>
-  </details>;
+  const button = "rounded border border-orange-300/40 px-3 py-1.5 text-xs disabled:opacity-40";
+  return <div className="space-y-2 rounded border border-orange-300/25 p-3 text-sm">
+    <p className="text-xs text-white/65">Problem z poprzednia proba? Reczne odblokowanie na Twoja odpowiedzialnosc. Trwajacych wysylek nie przerywamy.</p>
+    <div className="flex flex-wrap gap-2">
+      <button type="button" className={button} disabled={disabled || busy} onClick={() => void run("part")}>{busy ? "Sprawdzam..." : "Odblokuj te oferte"}</button>
+      <button type="button" className={button} disabled={disabled || busy || !brandId || !modelId || !year} onClick={() => void run("vehicle")}>Odblokuj wybrane auto</button>
+    </div>
+    {message && <p role="status" className="text-xs text-amber-200">{message}</p>}
+  </div>;
 }
