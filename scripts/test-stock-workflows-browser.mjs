@@ -11,16 +11,17 @@ const bundle = await build({ stdin: { contents: 'import React from "react";impor
 const browser = await chromium.launch({ headless: true, channel: "chrome" });
 try {
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
-  const calls = [], jobs = new Map(), errors = []; let activeReservation, failedWithdraw = false, aEnabled = false, oEnabled = false, expired = false;
+  const calls = [], jobs = new Map(), errors = []; let activeReservation, failedWithdraw = false, aEnabled = false, oEnabled = false, expired = false, missingScope = false;
   page.on("pageerror", e => errors.push(e.message));
   await page.route("https://workflow.test/**", async route => {
     const req = route.request(), url = new URL(req.url());
     if (!url.pathname.startsWith("/api/")) return route.fulfill({ contentType: "text/html", body: '<html><body style="background:#0d1117;color:white;padding:20px"><main id="root"></main></body></html>' });
     const b = req.postDataJSON(); calls.push({ path: url.pathname, ...b });
     if (url.pathname.endsWith("sales-sync")) {
+      if(url.pathname.includes("reverse-")&&missingScope&&b.operation==="status")return route.fulfill({status:503,json:{message:"Wykonaj migracje 022"}});
       const reverse = url.pathname.includes("reverse-"); if (b.operation === "enable") { assert.equal(b.confirm, true); if (reverse) oEnabled = true; else aEnabled = true; }
       if (b.operation === "disable") { if (reverse) oEnabled = false; else aEnabled = false; }
-      return route.fulfill({ json: { configured: true, enabled: reverse ? oEnabled : aEnabled, direction: "allegro_to_ovoko", lastChecked: null, lastError: null, caughtUp: true, watched: 1, jobs: [] } });
+      return route.fulfill({ json: { configured: true, enabled: reverse ? oEnabled : aEnabled, direction: "allegro_to_ovoko", lastChecked: null, lastError: null, caughtUp: true, scope:"all_linked",linkedCount:40000,blockedCount:2,watched:40000,jobs: [] } });
     }
     assert.equal(url.pathname, "/api/ovoko/inventory-actions");
     if (b.operation === "list") return route.fulfill({ json: { rows: [...jobs.values()].filter(j => j.kind === "reserve" && !j.closed).map(j => ({ ...j, reservation: { ...j.reservation, ...(expired ? { until: "2000-01-01T00:00:00Z" } : {}) } })) } });
@@ -72,9 +73,11 @@ try {
   await restore.getByRole("button", { name: "Potwierdz dostepnosc i przywroc", exact: true }).click(); await page.getByText("Brak otwartych rezerwacji.").waitFor(); assert.equal(activeReservation.closed, true);
   await open("synchronization"); await page.getByRole("button", { name: "Wlacz Allegro → Ovoko od teraz", exact: true }).waitFor(); await page.getByRole("button", { name: "Wlacz Ovoko → Allegro od teraz", exact: true }).waitFor();
   assert.equal(aEnabled, false); assert.equal(oEnabled, false);
+  const reversePanel=page.getByRole("region",{name:"Synchronizacja Ovoko do Allegro"});assert.match(await reversePanel.innerText(),/wszystkie powiazane czesci/);assert.match(await reversePanel.innerText(),/40000/);assert.doesNotMatch(await reversePanel.innerText(),/Czesci objete stanem poczatkowym/);
   await page.getByRole("button", { name: "Wlacz Ovoko → Allegro od teraz", exact: true }).click(); await page.getByRole("button", { name: "Wylacz Ovoko → Allegro", exact: true }).waitFor(); assert.equal(aEnabled, false); assert.equal(oEnabled, true);
   await page.getByRole("button", { name: "Wlacz Allegro → Ovoko od teraz", exact: true }).click(); await page.getByRole("button", { name: "Wylacz Allegro → Ovoko", exact: true }).waitFor();
   await page.screenshot({ path: fileURLToPath(new URL("../outputs/stock-workflows/synchronization.png", import.meta.url)) });
+  missingScope=true;await open("synchronization");const unknown=page.getByRole("region",{name:"Synchronizacja Ovoko do Allegro"});await unknown.getByRole("alert").filter({hasText:"022"}).waitFor();assert.match(await unknown.getByRole("heading").innerText(),/niepotwierdzony/);await unknown.getByRole("button",{name:"Wylacz Ovoko → Allegro",exact:true}).click();await unknown.getByRole("button",{name:"Wlacz Ovoko → Allegro od teraz",exact:true}).waitFor();assert.equal(oEnabled,false,"Missing coverage migration never removes the safe disable action");
   assert.deepEqual(errors, []);
   console.log("Stock workflows browser: explicit batch confirmation, independent uncertain results/read-only recovery, private reservation fields, red expiry without auto-restore, escaped notes, manual restore confirmation and independent synchronization toggles passed. APIs mocked.");
 } finally { await browser.close(); }

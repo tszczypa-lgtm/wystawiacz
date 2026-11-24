@@ -17,7 +17,9 @@ const modules = production ? ["index.js", ...readdirSync("dist/server", { recurs
 const mf = new Miniflare({ port: 19877, modules, compatibilityDate: "2026-05-15", compatibilityFlags: ["nodejs_compat"], ...(!production ? { script: bundled.outputFiles[0].text } : {}),
   bindings: { BILLING_ENFORCED: "true", SUPABASE_SERVICE_ROLE_KEY: "fixture", NEXT_PUBLIC_SUPABASE_URL: "https://database.test", ALLEGRO_CLIENT_ID: "fixture-client", ALLEGRO_ENCRYPTION_KEY: Buffer.from(rawKey).toString("base64") },
   outboundService: request => {
-    const url = new URL(request.url); assert.equal(url.hostname, "database.test"); assert.equal(request.method, "GET");
+    const url = new URL(request.url); assert.equal(url.hostname, "database.test");
+    if(url.pathname==="/rest/v1/rpc/reverse_sales_sync_coverage"){assert.equal(request.method,"POST");return Response.json({scopeVersion:2,linked:40000,blocked:0});}
+    assert.equal(request.method, "GET");
     if (url.pathname === "/auth/v1/user") return Response.json({ id: owner, email_confirmed_at: "2026-01-01T00:00:00Z" });
     if (url.pathname === "/rest/v1/customer_accounts") return Response.json([{ owner_id: owner, suspended, access_mode: active ? "free" : "standard", free_until: null }]);
     if (url.pathname === "/rest/v1/account_admins") return Response.json(admin ? [{ owner_id: owner }] : []);

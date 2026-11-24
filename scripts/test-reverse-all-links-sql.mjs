@@ -1,0 +1,36 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
+const { PGlite }=await import(pathToFileURL(process.env.PGLITE_MODULE).href),db=new PGlite();
+const owner="00000000-0000-4000-8000-000000000001",other="00000000-0000-4000-8000-000000000002",account="a".repeat(64),hash="b".repeat(64);
+const epoch=crypto.randomUUID(),lease=crypto.randomUUID();
+try{
+ await db.exec("create schema auth;create table auth.users(id uuid primary key);create role anon;create role authenticated;create role service_role;");
+ for(const id of[owner,other])await db.query("insert into auth.users values($1)",[id]);
+ for(const file of["012_ovoko_single_publications.sql","016_sales_sync.sql","018_reverse_sales_sync.sql"])await db.exec(await readFile(new URL(`../supabase/${file}`,import.meta.url),"utf8"));
+ await db.query("insert into public.ovoko_single_publications(owner_id,ovoko_account,allegro_seller_id,allegro_offer_id,part_id,request_hash,state,updated_at) select $1,$2,'555',i::text,(10000+i)::text,$3,'created','2000-01-01' from generate_series(1,600) i",[owner,account,hash]);
+ const watch=Array.from({length:5},(_,i)=>({offerId:String(i+1),partId:String(10001+i),hash}));
+ await db.query("insert into public.sales_sync_reverse(owner_id,epoch,enabled,seller_id,ovoko_account,fingerprint,client_id,armed_at,baseline,watch,lease,lease_until) values($1,$2,true,'555',$3,'fp','client',now(),'[\"9000\"]',$4,$5,now()+interval '5 minutes')",[owner,epoch,account,JSON.stringify(watch),lease]);
+ const ingest=rows=>db.query("select public.ingest_reverse_sales_sync($1,$2,$3,$4)",[owner,epoch,lease,JSON.stringify(rows)]);
+ const jobs=async()=> (await db.query("select * from public.sales_sync_reverse_actions order by offer_id::int")).rows;
+ await ingest([{orderId:"9001",partId:"10006",status:"NEW"}]);assert.equal((await jobs()).length,0,"Old function excludes older mappings outside the initial five");
+ for(let repeat=0;repeat<2;repeat++)await db.exec(await readFile(new URL("../supabase/022_reverse_sync_all_links.sql",import.meta.url),"utf8"));
+ const coverage=async (who=owner)=>(await db.query("select public.reverse_sales_sync_coverage($1) as data",[who])).rows[0].data;
+ assert.deepEqual(await coverage(),{scopeVersion:2,linked:600,blocked:0});assert.equal((await coverage(other)).linked,0);
+ const add=async(offer,part,who=owner,state="created",acc=account,seller="555")=>db.query("insert into public.ovoko_single_publications(owner_id,ovoko_account,allegro_seller_id,allegro_offer_id,part_id,request_hash,state) values($1,$2,$3,$4,$5,$6,$7)",[who,acc,seller,offer,part,hash,state]);
+ await add("700","20001");await add("701","30001",owner,"uncertain");await add("702","30002",owner,"sending");await add("703","40001",other);await add("704","40002",owner,"created","c".repeat(64));await add("705","40003",owner,"created",account,"666");
+ await ingest([{orderId:"9000",partId:"10001",status:"NEW"},{orderId:"9001",partId:"10006",status:"NEW"},{orderId:"9002",partId:"10600",status:"NEW"},{orderId:"9003",partId:"20001",status:"NEW"},...["30001","30002","40001","40002","40003"].map(partId=>({orderId:"9010",partId,status:"NEW"}))]);
+ assert.deepEqual((await jobs()).map(j=>j.offer_id),["6","600","700"],"Old outside-watch, beyond 499 and newly added mappings all enqueue; foreign and uncertain ones do not");
+ await ingest([{orderId:"9001",partId:"10006",status:"NEW"}]);assert.equal((await jobs()).length,3,"No duplicate action on overlapping order windows");
+ await add("706","50001");await add("707","50001");await ingest([{orderId:"9011",partId:"50001",status:"NEW"}]);assert.equal((await jobs()).length,3,"Ambiguous multiple-offer mapping never chooses a target");
+ await ingest([{orderId:"9004",partId:"10006",status:"NEW"}]);assert.equal((await jobs())[0].state,"review","Conflicting orders remain manual review");
+ await ingest([{orderId:"9012",partId:"10007",status:"CANCELLED"}]);assert.equal((await jobs()).find(j=>j.offer_id==="7").state,"review");
+ assert.deepEqual(await coverage(),{scopeVersion:2,linked:603,blocked:2});
+ const stored=(await db.query("select baseline,watch,epoch from public.sales_sync_reverse")).rows[0];assert.equal(stored.epoch,epoch);assert.deepEqual(stored.baseline,["9000"]);assert.deepEqual(stored.watch,watch,"Migration does not reset consent, initial orders or history");
+  await db.query("insert into public.ovoko_single_publications(owner_id,ovoko_account,allegro_seller_id,allegro_offer_id,part_id,request_hash,state) select $1,$2,'555',i::text,(700000+i)::text,$3,'created' from generate_series(1000,40396) i",[owner,account,hash]);assert.equal((await coverage()).linked,40000,"Coverage is an aggregate over all 40,000 records, not a truncated REST page");
+  await ingest([{orderId:"9013",partId:"740396",status:"NEW"}]);assert.ok((await jobs()).some(j=>j.offer_id==="40396"));
+ await assert.rejects(db.query("select public.ingest_reverse_sales_sync($1,$2,$3,'[]')",[owner,epoch,crypto.randomUUID()]));
+ await db.query("update public.sales_sync_reverse set enabled=false");await assert.rejects(ingest([]));
+ await db.exec("set role anon");await assert.rejects(coverage());await assert.rejects(ingest([]));await db.exec("reset role;set role authenticated");await assert.rejects(coverage());await db.exec("reset role");
+ console.log("Local PostgreSQL: old five-part scope reproduced; migration/rerun covers old, 600th and new mappings, preserves baseline/consent/history and guards foreign/uncertain/ambiguous pairs, conflicts, leases, disabled state and browser roles. No provider writes.");
+}finally{await db.close();}

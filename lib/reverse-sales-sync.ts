@@ -23,6 +23,14 @@ async function orderWindow(c: Awaited<ReturnType<typeof syncConnections>>, since
   if (orders.some(o => o.date.slice(0, 10) < range.from || o.date.slice(0, 10) > range.to)) throw new OvokoError(502, "Ovoko nie potwierdzilo zakresu dat zamowien.");
   return orders;
 }
+async function coverage(db: SyncDb, owner: string) {
+  let result: unknown;
+  try { result = await db("rpc/reverse_sales_sync_coverage", syncJson({ p_owner: owner })); }
+  catch { throw new OvokoError(503, "Wykonaj migracje 022: synchronizacja wszystkich powiazanych czesci. Nie potwierdzono pelnego zakresu."); }
+  const row = obj(result);
+  if (row.scopeVersion !== 2 || !Number.isSafeInteger(row.linked) || Number(row.linked) < 0 || !Number.isSafeInteger(row.blocked) || Number(row.blocked) < 0) throw new OvokoError(503, "Nie potwierdzono zakresu synchronizacji wszystkich czesci (migracja 022).");
+  return { linked: Number(row.linked), blocked: Number(row.blocked) };
+}
 export async function reverseSyncControl(owner: string, env: SalesSyncEnv, input: Data) {
   if (!["status", "enable", "disable"].includes(String(input.operation)) || Object.keys(input).some(k => !["operation", "confirm"].includes(k))) throw new OvokoError(400, "Nieprawidlowa operacja synchronizacji Ovoko.");
   const db = reverseDb(env);
@@ -31,29 +39,11 @@ export async function reverseSyncControl(owner: string, env: SalesSyncEnv, input
   if (input.operation === "enable" && !existing?.enabled) {
     if (input.confirm !== true || env.SALES_SYNC_ENABLED !== "true") throw new OvokoError(400, "Potwierdz wlaczenie synchronizacji; wymagane SALES_SYNC_ENABLED=true i migracja 018.");
     if (existing?.lease_until && Date.parse(existing.lease_until) > Date.now()) throw new OvokoError(409, "Poprzednia kontrola jeszcze trwa.");
+    await coverage(db, owner);
     const c = await syncConnections(db, owner, env), start = new Date().toISOString();
     const baseline = (await orderWindow(c, start)).map(o => o.id);
-    const journal = syncRows<{ allegro_offer_id: string; part_id: string; request_hash: string }>(await db(`ovoko_single_publications?owner_id=eq.${owner}&ovoko_account=eq.${c.account}&allegro_seller_id=eq.${c.sellerId}&state=eq.created&select=allegro_offer_id,part_id,request_hash&limit=500`));
-    if (journal.length >= 500) throw new OvokoError(409, "Pierwsze wlaczenie obejmuje do 499 powiazanych czesci. Potrzebna rozszerzona kontrola zakresu.");
-    const active = new Map<string, Data>();
-    for (let offset = 0; offset < 2000; offset += 1000) {
-      const data = await c.allegro(`/sale/offers?publication.status=ACTIVE&limit=1000&offset=${offset}`);
-      if (!Array.isArray(data.offers) || data.offers.length > 1000 || !Number.isSafeInteger(data.totalCount) || Number(data.totalCount) > 2000) throw new OvokoError(502, "Niepelny zakres ofert Allegro podczas wlaczania synchronizacji.");
-      for (const raw of data.offers) { const a = obj(raw); if (typeof a.id !== "string" || active.has(a.id)) throw new OvokoError(502, "Niejednoznaczna lista Allegro."); active.set(a.id, a); }
-      if (offset + data.offers.length >= Number(data.totalCount)) break;
-      if (data.offers.length !== 1000) throw new OvokoError(502, "Niepelna strona Allegro.");
-    }
-    const parts = new Map<string, Data>();
-    for (let page = 1; page <= 20; page++) {
-      const data = ovokoPageData(await c.ovoko(`/v2/get/parts?page=${page}&limit=100&sort[id]=asc`), { page, limit: 100 }, "reverse.baseline");
-      if (data.pagination.total > 2000 || data.data.length !== Math.min(100, Math.max(0, data.pagination.total - (page - 1) * 100))) throw new OvokoError(502, "Niepelny zakres Ovoko podczas wlaczania synchronizacji.");
-      for (const p of data.data) { if (parts.has(String(p.id))) throw new OvokoError(502, "Powtorzona czesc Ovoko."); parts.set(String(p.id), p); }
-      if (parts.size >= data.pagination.total) break;
-    }
-    const statuses = parseOvokoRead("statuses", await c.ovoko("/get/part_status")).rows;
-    const stock = statuses.filter(s => ["na stanie", "in stock"].includes(s.name.trim().toLowerCase()));
-    if (stock.length !== 1) throw new OvokoError(502, "Nie potwierdzono statusu Na stanie.");
-    const watch = journal.filter(j => obj(active.get(j.allegro_offer_id)?.stock).available === 1 && String(parts.get(j.part_id)?.status) === stock[0].id && parts.get(j.part_id)?.external_id === `tymo:${c.sellerId}:${j.allegro_offer_id}`).map(j => ({ offerId: j.allegro_offer_id, partId: j.part_id, hash: j.request_hash }));
+    // Current exact mappings are selected in the DB for each order, not frozen at enable time.
+    const watch: Subscription["watch"] = [];
     const s = { owner_id: owner, epoch: crypto.randomUUID(), enabled: true, seller_id: c.sellerId, ovoko_account: c.account, fingerprint: c.fingerprint, client_id: c.clientId, armed_at: start, baseline, watch, lease: null, lease_until: null, last_attempt_at: null, last_checked_at: null, last_error: null };
     await syncAccountLock(db, owner, c.sellerId, c.account, "claim");
     const saved = existing ? await db(`sales_sync_reverse?owner_id=eq.${owner}&epoch=eq.${existing.epoch}&enabled=eq.false`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(s) }) : await db("sales_sync_reverse", { ...syncJson(s), headers: { Prefer: "return=representation" } });
@@ -61,7 +51,10 @@ export async function reverseSyncControl(owner: string, env: SalesSyncEnv, input
   }
   const s = syncRows<Subscription>(await db(`sales_sync_reverse?owner_id=eq.${owner}&select=*`))[0];
   const jobs = syncRows<Data>(await db(`sales_sync_reverse_actions?owner_id=eq.${owner}&select=id,offer_id,part_id,state,diagnostic&order=created_at.desc&limit=10`));
-  return { configured: env.SALES_SYNC_ENABLED === "true", enabled: s?.enabled === true, lastChecked: s?.last_checked_at || null, lastError: s?.last_error || null, watched: s?.watch.length || 0, jobs };
+  let count: { linked: number | null; blocked: number | null };
+  try { count = await coverage(db, owner); }
+  catch (e) { if (input.operation !== "disable") throw e; count = { linked: null, blocked: null }; }
+  return { configured: env.SALES_SYNC_ENABLED === "true", enabled: s?.enabled === true, lastChecked: s?.last_checked_at || null, lastError: s?.last_error || null, scope: count.linked === null ? "unverified" : "all_linked", linkedCount: count.linked, blockedCount: count.blocked, watched: count.linked ?? 0, jobs };
 }
 export async function runReverseSalesSync(env: SalesSyncEnv): Promise<boolean> {
   if (env.SALES_SYNC_ENABLED !== "true" || env.OVOKO_TEST_ENABLED === "false") return false;
@@ -81,6 +74,7 @@ export async function tickReverseSalesSync(s: Subscription, env: SalesSyncEnv, d
   const c = await syncConnections(db, s.owner_id, env);
   await syncAccountLock(db, s.owner_id, c.sellerId, c.account, "claim");
   if (c.sellerId !== s.seller_id || c.clientId !== s.client_id || c.account !== s.ovoko_account || c.fingerprint !== s.fingerprint) throw new OvokoError(409, "Konto lub polaczenie zmienily sie. Synchronizacja Ovoko wstrzymana.");
+  await coverage(db, s.owner_id);
   const orders = (await orderWindow(c, s.last_checked_at || s.armed_at)).filter(o => o.source === "ovoko" && !s.baseline.includes(o.id));
   const rows = orders.flatMap(o => o.parts.map(p => ({ orderId: o.id, partId: p.id, status: o.status })));
   if (rows.length > 5000) throw new OvokoError(502, "Przekroczony bezpieczny zakres zamowien Ovoko.");
