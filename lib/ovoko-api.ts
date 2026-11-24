@@ -10,6 +10,8 @@ import { bulkOvokoPart } from "./ovoko-bulk";
 import { reviewCoordination } from "./coordination-review";
 import { recoverOvokoPublication } from "./ovoko-publication-recovery";
 import { salesSyncControl } from "./sales-sync";
+import { inventoryOperations } from "./inventory-operations";
+import { reverseSyncControl } from "./reverse-sales-sync";
 
 type OvokoEnv = AccountEnv & OvokoKeyEnv & OvokoPublishEnv & { OVOKO_TEST_ENABLED?: string; SALES_SYNC_ENABLED?: string };
 const attempts = new Map<string, number[]>();
@@ -49,7 +51,7 @@ export async function handleOvokoApi(request: Request, env: OvokoEnv): Promise<R
       const status = storageReady ? await ovokoConnectionStatus(context) : { connected: false, verifiedAt: null };
       return reply({ allowed: true, readOnly: true, storageReady, credentialsStored: status.connected, ...status });
     }
-    if (!["/api/ovoko/test", "/api/ovoko/read", "/api/ovoko/connect", "/api/ovoko/disconnect", "/api/ovoko/publish", "/api/ovoko/create-car", "/api/ovoko/transfer-inventory", "/api/ovoko/bulk", "/api/ovoko/coordination-review", "/api/ovoko/publication-recovery", "/api/ovoko/sales-sync"].includes(url.pathname)) return reply({ message: "Nieznana operacja Ovoko." }, 404);
+    if (!["/api/ovoko/test", "/api/ovoko/read", "/api/ovoko/connect", "/api/ovoko/disconnect", "/api/ovoko/publish", "/api/ovoko/create-car", "/api/ovoko/transfer-inventory", "/api/ovoko/bulk", "/api/ovoko/coordination-review", "/api/ovoko/publication-recovery", "/api/ovoko/sales-sync", "/api/ovoko/reverse-sales-sync", "/api/ovoko/inventory-actions"].includes(url.pathname)) return reply({ message: "Nieznana operacja Ovoko." }, 404);
     if (request.method !== "POST") return reply({ message: "Nieprawidlowa metoda." }, 405);
     if (request.headers.get("Origin") !== url.origin || (env.APP_ORIGIN && env.APP_ORIGIN !== url.origin)) return reply({ message: "Nieprawidlowe zrodlo zadania." }, 403);
     if (request.headers.get("Content-Type")?.split(";")[0].trim() !== "application/json") return reply({ message: "Nieprawidlowy format formularza." }, 415);
@@ -57,12 +59,19 @@ export async function handleOvokoApi(request: Request, env: OvokoEnv): Promise<R
     try { input = JSON.parse(await boundedText(request, ["/api/ovoko/publish", "/api/ovoko/bulk"].includes(url.pathname) ? 200000 : 8192)); } catch (error) { if (error instanceof OvokoError) throw error; throw new OvokoError(400, "Nieprawidlowy formularz."); }
     if (!input || typeof input !== "object" || Array.isArray(input)) throw new OvokoError(400, "Nieprawidlowy formularz.");
     const values = input as Record<string, unknown>;
-    if (url.pathname === "/api/ovoko/sales-sync") {
-      const now = Date.now(), key = `${context.user.id}:sales-sync`, recent = (attempts.get(key) || []).filter(time => now - time < 60000);
+    if (url.pathname === "/api/ovoko/inventory-actions") {
+      const now = Date.now(), key = `${context.user.id}:inventory-actions`, recent = (attempts.get(key) || []).filter(time => now - time < 60000);
+      if (recent.length >= 30) throw new OvokoError(429, "Maksymalnie 30 operacji magazynowych na minute.");
+      if (attempts.size >= 1000 && !attempts.has(key)) attempts.delete(attempts.keys().next().value!);
+      attempts.set(key, [...recent, now]);
+      return reply(await inventoryOperations(context.user.id, env, values));
+    }
+    if (["/api/ovoko/sales-sync", "/api/ovoko/reverse-sales-sync"].includes(url.pathname)) {
+      const now = Date.now(), key = `${context.user.id}:${url.pathname}`, recent = (attempts.get(key) || []).filter(time => now - time < 60000);
       if (recent.length >= 6) throw new OvokoError(429, "Maksymalnie 6 zmian lub odczytow automatu na minute.");
       if (attempts.size >= 1000 && !attempts.has(key)) attempts.delete(attempts.keys().next().value!);
       attempts.set(key, [...recent, now]);
-      return reply(await salesSyncControl(context.user.id, env, values));
+      return reply(url.pathname === "/api/ovoko/sales-sync" ? await salesSyncControl(context.user.id, env, values) : await reverseSyncControl(context.user.id, env, values));
     }
     if (url.pathname === "/api/ovoko/publication-recovery") {
       const now = Date.now(), key = `${context.user.id}:publication-recovery`, recent = (attempts.get(key) || []).filter(time => now - time < 60000);

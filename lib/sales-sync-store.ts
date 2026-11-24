@@ -19,7 +19,7 @@ export function salesSyncDb(env: AccountEnv): SyncDb {
   return async (path, init = {}) => {
     if (!env.SUPABASE_SERVICE_ROLE_KEY) throw new OvokoError(503, "Brak konfiguracji bazy automatu.");
     const response = await fetch(`${env.NEXT_PUBLIC_SUPABASE_URL || "https://wgshalvkjfefavnbccil.supabase.co"}/rest/v1/${path}`, {
-      ...init, redirect: "error", signal: AbortSignal.timeout(15000), headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json", ...init.headers },
+      ...init, redirect: "manual", signal: AbortSignal.timeout(15000), headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json", ...init.headers },
     });
     if (!response.ok) throw new OvokoError(503, "Nie potwierdzono rejestru automatu. Sprawdz migracje 016; nie ponawiamy niepewnych zapisow.");
     return response.status === 204 ? null : response.json();

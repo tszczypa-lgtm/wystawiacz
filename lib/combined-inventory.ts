@@ -1,7 +1,7 @@
 import type { OvokoReadRow } from "./ovoko-read";
 import type { OvokoTransfer } from "./ovoko-transfer-client";
 
-export type AllegroInventoryRow = { id: string; name: string; image: string; externalId: string; status: string; stock: number | null; shippingRateId: string | null; price: { amount: string; currency: string } | null };
+export type AllegroInventoryRow = { id: string; name: string; image: string; externalId: string; status: string; stock: number | null; sold?: number | null; shippingRateId: string | null; price: { amount: string; currency: string } | null };
 export type CombinedPart = { key: string; name: string; image: string; allegro?: AllegroInventoryRow; ovoko?: OvokoReadRow; conflict: boolean; transfer?: OvokoTransfer };
 export type CombinedSnapshot = { allegro: AllegroInventoryRow[]; ovoko: OvokoReadRow[]; transfers: Record<string, OvokoTransfer>; sellerId: string; accountEmail?: string; ovokoVerifiedAt?: string; allegroComplete: boolean; ovokoComplete: boolean; allegroTotal: number; ovokoTotal: number; statuses: Record<string, string>; errors: string[]; admin: boolean; checkedAt: string };
 export const emptyCombinedSnapshot = (): CombinedSnapshot => ({ allegro: [], ovoko: [], transfers: {}, sellerId: "", allegroComplete: false, ovokoComplete: false, allegroTotal: 0, ovokoTotal: 0, statuses: {}, errors: [], admin: false, checkedAt: "" });
@@ -36,7 +36,7 @@ export function combineInventory(snapshot: CombinedSnapshot): CombinedPart[] {
 export function ovokoInStock(row: OvokoReadRow | undefined, statuses: Record<string, string>) {
   return !!row && ["na stanie", "in stock"].includes((statuses[row.status || ""] || "").trim().toLowerCase());
 }
-export type CombinedFilter = { allegro: boolean; ovoko: boolean; coverage: string; query: string; priceFrom: string; priceTo: string; allStatuses: boolean; transfer?: string; lifecycle?: "available" | "all" | "ovoko_withdrawn" | "allegro_ended" | "ovoko_sold" | "ovoko_reserved" };
+export type CombinedFilter = { allegro: boolean; ovoko: boolean; coverage: string; query: string; priceFrom: string; priceTo: string; allStatuses: boolean; transfer?: string; lifecycle?: "available" | "all" | "ended" | "sold" | "ovoko_withdrawn" | "allegro_ended" | "ovoko_sold" | "ovoko_reserved" };
 export const inventoryChannels = {
   all: { allegro: true, ovoko: true, coverage: "all" },
   allegro: { allegro: true, ovoko: false, coverage: "all" },
@@ -61,6 +61,15 @@ export function filterCombinedInventory(rows: CombinedPart[], filter: CombinedFi
     const lifecycle = filter.lifecycle || (filter.allStatuses ? "all" : "available");
     const showInactive = lifecycle !== "available";
     const oStatus = (snapshot.statuses[row.ovoko?.status || ""] || "").trim().toLowerCase();
+    const aSold = !!row.allegro && (row.allegro.sold ?? 0) > 0 && row.allegro.stock === 0;
+    const oSold = ["sprzedano", "sold out"].includes(oStatus);
+    const aEnded = !!row.allegro && ["ENDED", "INACTIVE"].includes(row.allegro.status) && !aSold;
+    const oEnded = ["wycofany", "written off"].includes(oStatus);
+    const selectedSold = filter.allegro && aSold || filter.ovoko && oSold;
+    const selectedActive = filter.allegro && row.allegro?.status === "ACTIVE" || filter.ovoko && ovokoInStock(row.ovoko, snapshot.statuses);
+    if (lifecycle === "available" && selectedSold) return false;
+    if (lifecycle === "sold" && !selectedSold) return false;
+    if (lifecycle === "ended" && (selectedSold || selectedActive || !(filter.allegro && aEnded || filter.ovoko && oEnded))) return false;
     if (lifecycle === "ovoko_withdrawn" && !["wycofany", "written off"].includes(oStatus)) return false;
     if (lifecycle === "ovoko_sold" && !["sprzedano", "sold out"].includes(oStatus)) return false;
     if (lifecycle === "ovoko_reserved" && !["zarezerwowano", "reserved"].includes(oStatus)) return false;

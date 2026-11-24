@@ -103,7 +103,7 @@ globalThis.fetch = async (input, init = {}) => {
 console.error = () => {};
 async function arm() {
   await reset(); const result = await salesSyncControl(owner, env, { operation: "enable", confirm: true });
-  assert.equal(result.enabled, true); assert.equal(result.reverseEnabled, false); assert.equal(writes, 0); assert.equal(sub.cursor, "100");
+  assert.equal(result.enabled, true); assert.equal(result.direction, "allegro_to_ovoko"); assert.equal(writes, 0); assert.equal(sub.cursor, "100");
   purchaseAt = new Date(Date.now() + 1000).toISOString();
   events = [{ id: "101", type: "READY_FOR_PROCESSING", occurredAt: purchaseAt, order: { seller: { id: "555" }, checkoutForm: { id: "order-1" }, buyer: { email: "private@test" }, lineItems: [{ id: "item-1", offer: { id: "10" }, quantity: 1, boughtAt: purchaseAt }] } }];
 }
@@ -133,7 +133,7 @@ try {
   assert.equal((await handleOvokoApi(request({ Authorization: "" }), env)).status, 401);
   assert.equal((await handleOvokoApi(request({}, "GET"), env)).status, 405);
   assert.equal((await handleOvokoApi(request({}, "POST", { operation: "status", owner: "other" }), env)).status, 400);
-  const api = await handleOvokoApi(request(), env); assert.equal(api.status, 200); assert.equal((await api.json()).reverseEnabled, false); assert.equal(writes, beforeApi, "Status endpoint never changes a portal");
+  const api = await handleOvokoApi(request(), env); assert.equal(api.status, 200); assert.equal((await api.json()).direction, "allegro_to_ovoko"); assert.equal(writes, beforeApi, "Status endpoint never changes a portal");
   const sql = readFileSync(new URL("../supabase/016_sales_sync.sql", import.meta.url), "utf8");
   for (const required of [/for update skip locked/i, /cursor is distinct from p_cursor/, /j\.updated_at<=b/, /b<s\.armed_at/, /unique\(owner_id,part_id,publication_hash,item_id\)/, /revoke all.*claim_sales_sync/]) assert.match(sql, required);
   console.log("Sales sync: explicit future-only consent, lease/cursor ingestion, exact generation/seller/stock guards, fresh order/cancellation checks, changed credentials, revocation, target races, durable write CAS, no retry after timeout, readback recovery, concurrency, kill switch and token refresh passed. Providers/SQL RPCs mocked; live DB migration not applied.");

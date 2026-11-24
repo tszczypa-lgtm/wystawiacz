@@ -127,7 +127,7 @@ globalThis.fetch = async (input, options = {}) => {
   assert.equal(form.get("photo"), form.get("photos[0]")); assert.equal(form.get("original_currency"), "PLN"); assert.equal(form.get("price"), expectedPrice);
   assert.deepEqual([...form.entries()].filter(([name]) => /^photos\[\d+\]$/.test(name)).map(([, url]) => url), snapshot.images, "Transfer the complete gallery in source order, not just the thumbnail");
   assert.equal(form.get("notes"), "Opis & uwagi + numer"); assert.equal(form.get("place"), null); assert.equal(form.get("storage_id"), null);
-  const expectedCodes = extraCodes.includes("JPLA-") ? ["JPLA14D617BA", "JPLA-14D617-BA"] : extraCodes ? ["A1649020300", "A1649004200BA"] : [];
+  const expectedCodes = mode === "hyphen-main" ? [expectedCode.replace(/-/g, "")] : extraCodes.includes("JPLA-") ? ["JPLA14D617BA", "JPLA-14D617-BA"] : extraCodes ? ["A1649020300", "A1649004200BA"] : [];
   assert.deepEqual([...form.entries()].filter(([name]) => /^optional_codes\[\d+\]$/.test(name)).map(([, value]) => value), expectedCodes, "Additional numbers occupy separate fields, retaining suffixes and not duplicating the main number");
   if (mode === "timeout") throw new DOMException("private-provider-error", "TimeoutError");
   if (mode === "redirect") return new Response("private-provider-error", { status: 302, headers: { Location: "https://evil.test" } });
@@ -202,6 +202,11 @@ try {
   reset(); mode = "price-change"; assert.equal((await handleOvokoApi(req(), env)).status, 409); assert.equal(writes, 0, "A true price change during recheck still blocks publication");
   reset(); extraCodes = "A1649020300\nA1649004200BA\nA1649020300\n0281010038"; assert.equal((await handleOvokoApi(req(), env)).status, 200); assert.equal(writes, 1);
   reset(); extraCodes = "JPLA14D617BA\nJPLA-14D617-BA\nJPLA-14D617-BA"; assert.equal((await handleOvokoApi(req(), env)).status, 200); assert.equal(writes, 1, "Both exact formatting variants reach separate optional_codes fields without losing the BA suffix");
+  for (const code of ["0281-010-038", "8K0-959-793-BA"]) {
+    reset(); mode = "hyphen-main"; const before = snapshot.title; snapshot.title = `AUDI A4 POMPA ${code}`; expectedCode = code;
+    assert.equal((await handleOvokoApi(req({ ...payload(), manufacturerCode: code.replace(/-/g, "") }), env)).status, 200);
+    assert.equal(writes, 1, "Server must preserve observed hyphens in the primary field and send the compact variant separately, even from an older client"); snapshot.title = before;
+  }
   for (const additionalCodes of [["A1649020300"], "<script>", Array.from({ length: 21 }, (_, index) => `CODE${100000 + index}`).join("\n")]) {
     reset(); assert.equal((await handleOvokoApi(req({ ...payload(), additionalCodes }), env)).status, 400); assert.equal(writes, 0);
   }

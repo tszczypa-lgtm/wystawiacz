@@ -12,7 +12,7 @@
 
 ## User-facing semantics
 
-1. Sale of the last single item: withdraw its exact linked counterpart. Allegro -> Ovoko means mark the part sold (not delete the part/car/warehouse). Ovoko -> Allegro means END the exact offer. Concurrent sales on both sides raise an alert; the application cannot undo a sale.
+1. Sale of the last single item: withdraw its exact linked counterpart. Allegro -> Ovoko means Written off (not a fabricated Ovoko sale and not delete). Ovoko -> Allegro means END the exact offer. Concurrent sales on both sides require review; the application cannot undo a sale.
 2. Manual withdrawal only Allegro: END, leave Ovoko unchanged. Only Ovoko: Written off, leave Allegro unchanged. Both: independent child jobs with separate outcomes; never claim an atomic all-or-nothing result.
 3. Permanent deletion is NOT a synonym for withdrawal. Ovoko documents removal of photos and an eBay listing as side effects of deletePart. Do not expose a misleading "Ovoko only" permanent-delete action.
 4. Returns/cancellations never automatically relist. A human must confirm physical availability and resolve payment/reservation state.
@@ -33,7 +33,7 @@ After the production build, run `node scripts/test-sales-coordination-build.mjs`
 
 ## Required before enabling writes
 
-The read-only review is not automatic synchronization. A separate opt-in Allegro-to-Ovoko pilot now provides a scheduler, persistent event cursor and durable action queue; see `docs/sales-sync-pilot.md` and migration 016. It does not include Ovoko order ingestion or two-way protection. The manual withdrawal executor below remains a separate feature. The checklist below defines the broader two-way rollout requirements, not a claim that the review enables writes.
+The read-only review is not automatic synchronization. Separate opt-in pilots now provide both directions; see `docs/sales-sync-pilot.md` and migrations 016/018. Reverse ingestion is limited to documented NEW Ovoko-source orders plus fresh Sold out and exact publication evidence; other lifecycle states need review. Bulk withdrawals and private reservations are documented in `docs/inventory-operations.md` (migration 017). The manual row executor below remains a separate feature. The following checklist remains the live rollout validation requirements, not a claim that a preview enables writes.
 
 - Verify Ovoko V2 order shapes, actual NEW/paid/cancelled/returned transitions, order_source and date timezone against an authorized read-only account. Status Sold alone is insufficient. The policy supports normalized Ovoko evidence, but the current review intentionally does not fabricate it.
 - Start at an explicit enable boundary with a durable Allegro event cursor. Page chronologically without skipping, retain cursor on errors, detect retention gaps, and overlap Ovoko order polling. Never replay old historical sales against a newer publication generation.

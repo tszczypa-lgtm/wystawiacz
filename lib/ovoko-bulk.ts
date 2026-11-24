@@ -3,7 +3,7 @@ import { handleAllegroApi } from "./allegro-api";
 import { loadOvokoConnection, ovokoConnectionKey } from "./ovoko-connection";
 import { publishOvokoPart, type OvokoPublishEnv } from "./ovoko-publish";
 import { createOvokoCar } from "./ovoko-create-car";
-import { initialOvokoDraft, ovokoPublicationBlockers, ovokoSourcePreview } from "./ovoko-preparation";
+import { initialOvokoDraft, ovokoPublicationBlockers, ovokoSourcePreview, validOvokoCode } from "./ovoko-preparation";
 import { automaticOvokoBrand, automaticOvokoModel, ovokoAutomaticFields, ovokoModelHasConflict, suggestOvokoBrands, vehicleSuggestionText } from "./ovoko-suggestions";
 import { ovokoCarYear } from "./ovoko-car-selection";
 import { OvokoError, parseOvokoRead, type OvokoReadRow } from "./ovoko-read";
@@ -18,7 +18,7 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
   if (!["start", "prepare", "item"].includes(String(input.operation)) || Object.keys(input).some(key => !["operation", "offerId", "adjustment", "binding", "notes", "expectedSource", "prepared", "fallbackVehicle", "overrides", "allowTechnicalModel"].includes(key))) throw new OvokoError(400, "Nieprawidlowa operacja przenoszenia.");
   if (input.allowTechnicalModel !== undefined && typeof input.allowTechnicalModel !== "boolean") throw new OvokoError(400, "Nieprawidlowy tryb modelu roboczego.");
   const overrides = input.overrides as Record<string, unknown> | undefined;
-  if (overrides !== undefined && (!overrides || typeof overrides !== "object" || Array.isArray(overrides) || Object.keys(overrides).some(key => !["categoryId", "manufacturerCode"].includes(key)) || Object.values(overrides).some(value => typeof value !== "string") || (overrides.categoryId !== undefined && !/^[1-9]\d{0,11}$/.test(String(overrides.categoryId))) || (overrides.manufacturerCode !== undefined && overrides.manufacturerCode !== "" && !/^[A-Z0-9]{6,32}$/.test(String(overrides.manufacturerCode))))) throw new OvokoError(400, "Sprawdz reczne uzupelnienie kategorii lub numeru.");
+  if (overrides !== undefined && (!overrides || typeof overrides !== "object" || Array.isArray(overrides) || Object.keys(overrides).some(key => !["categoryId", "manufacturerCode"].includes(key)) || Object.values(overrides).some(value => typeof value !== "string") || (overrides.categoryId !== undefined && !/^[1-9]\d{0,11}$/.test(String(overrides.categoryId))) || (overrides.manufacturerCode !== undefined && overrides.manufacturerCode !== "" && !validOvokoCode(String(overrides.manufacturerCode))))) throw new OvokoError(400, "Sprawdz reczne uzupelnienie kategorii lub numeru.");
   const fallback = input.fallbackVehicle as { brandId: string; modelId: string } | undefined;
   if (fallback !== undefined && (!fallback || typeof fallback !== "object" || Array.isArray(fallback) || Object.keys(fallback).some(key => !["brandId", "modelId"].includes(key)) || typeof fallback.brandId !== "string" || !/^[1-9]\d{0,11}$/.test(fallback.brandId) || typeof fallback.modelId !== "string" || !/^[1-9]\d{0,11}$/.test(fallback.modelId))) throw new OvokoError(400, "Nieprawidlowy model pomocniczy.");
   try { validateOvokoAdjustment(input.adjustment); } catch (error) { throw new OvokoError(400, (error as Error).message); }
@@ -106,8 +106,9 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
   }
   let fitmentOrigin = "";
   if (!modelId || !draft.categoryId) {
-    const fitment = await allegro(`/ovoko-fitment/${source.id}?expand=1${draft.manufacturerCode ? `&number=${encodeURIComponent(draft.manufacturerCode)}` : ""}`);
-    if (fitment.offerId !== source.id || fitment.number !== draft.manufacturerCode || !Array.isArray(fitment.rows) || fitment.rows.length > 200 || fitment.rows.some((row: any) => typeof row?.text !== "string" || row.text.length > 2000 || !["offer", "suggestion", "catalog", "catalog-suggestion"].includes(row.origin)) || !Array.isArray(fitment.names) || fitment.names.some((name: unknown) => typeof name !== "string" || name.length > 500)) throw new OvokoError(502, "Niepotwierdzone dane automatycznego dopasowania.");
+    const lookupCode = draft.manufacturerCode.replace(/-/g, "");
+    const fitment = await allegro(`/ovoko-fitment/${source.id}?expand=1${lookupCode ? `&number=${encodeURIComponent(lookupCode)}` : ""}`);
+    if (fitment.offerId !== source.id || fitment.number !== lookupCode || !Array.isArray(fitment.rows) || fitment.rows.length > 200 || fitment.rows.some((row: any) => typeof row?.text !== "string" || row.text.length > 2000 || !["offer", "suggestion", "catalog", "catalog-suggestion"].includes(row.origin)) || !Array.isArray(fitment.names) || fitment.names.some((name: unknown) => typeof name !== "string" || name.length > 500)) throw new OvokoError(502, "Niepotwierdzone dane automatycznego dopasowania.");
     if (!modelId) {
       const candidates = [...fitment.rows as FitmentRow[], ...fitment.names.map((text: string) => ({ text, origin: "catalog" }))];
       const matched = await matchOvokoFitment(candidates, dictionaries.brands, allowedBrands.map(row => row.id), vehicleText, loadModels);

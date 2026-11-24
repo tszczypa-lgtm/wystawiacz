@@ -38,17 +38,17 @@ export async function salesSyncControl(owner: string, env: SalesSyncEnv, input: 
   const rows = syncRows<SyncSubscription>(await db(`sales_sync?owner_id=eq.${owner}&select=*`));
   const jobs = syncRows<Record<string, unknown>>(await db(`sales_sync_actions?owner_id=eq.${owner}&select=id,offer_id,part_id,state,diagnostic,created_at&order=created_at.desc&limit=10`));
   const s = rows[0];
-  return { configured: env.SALES_SYNC_ENABLED === "true" && env.OVOKO_TEST_ENABLED !== "false", enabled: s?.enabled === true, direction: "allegro_to_ovoko" as const, reverseEnabled: false,
+  return { configured: env.SALES_SYNC_ENABLED === "true" && env.OVOKO_TEST_ENABLED !== "false", enabled: s?.enabled === true, direction: "allegro_to_ovoko" as const,
     lastChecked: s?.last_checked_at || null, lastError: s?.last_error || null, caughtUp: s?.caught_up ?? false, armedAt: s?.armed_at || null, jobs };
 }
 
 export async function runSalesSync(env: SalesSyncEnv) {
-  if (env.SALES_SYNC_ENABLED !== "true" || env.OVOKO_TEST_ENABLED === "false") return;
+  if (env.SALES_SYNC_ENABLED !== "true" || env.OVOKO_TEST_ENABLED === "false") return false;
   const db = salesSyncDb(env);
   let subscription: SyncSubscription | undefined;
   try {
     subscription = syncRows<SyncSubscription>(await db("rpc/claim_sales_sync", syncJson({})))[0];
-    if (!subscription) return;
+    if (!subscription) return false;
     await tickSalesSync(subscription, env, db);
   } catch (error) {
     const message = error instanceof OvokoError ? error.message : "Kontrola automatu nie zostala potwierdzona. Nie ponawiamy niepewnych zapisow.";
@@ -57,6 +57,7 @@ export async function runSalesSync(env: SalesSyncEnv) {
   } finally {
     if (subscription) try { await db(selection(subscription), { method: "PATCH", body: JSON.stringify({ lease: null, lease_until: null }) }); } catch { /* Lease expires; actions keep their own durable write locks. */ }
   }
+  return !!subscription;
 }
 
 export async function tickSalesSync(s: SyncSubscription, env: SalesSyncEnv, db: SyncDb) {

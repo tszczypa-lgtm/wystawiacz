@@ -451,7 +451,7 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
         // Seller identity comes exclusively from this user's encrypted connection, never query parameters.
         const data = await remote(`/sale/offers?${query}`, { signal: AbortSignal.timeout(15000) });
         if (!Array.isArray(data.offers) || data.offers.length > limit || !Number.isSafeInteger(data.totalCount) || Number(data.totalCount) < 0) throw new ApiError(502, "Allegro zwrocilo niepelna liste. Sprobuj ponownie; nie zmieniono zadnej oferty.");
-        type Item = { id?: string; name?: string; primaryImage?: { url?: string }; external?: { id?: string }; publication?: { status?: string }; stock?: { available?: number }; delivery?: { shippingRates?: { id?: string } }; sellingMode?: { price?: { amount?: string; currency?: string } } };
+        type Item = { id?: string; name?: string; primaryImage?: { url?: string }; external?: { id?: string }; publication?: { status?: string }; stock?: { available?: number; sold?: number }; delivery?: { shippingRates?: { id?: string } }; sellingMode?: { price?: { amount?: string; currency?: string } } };
         const offers = (data.offers as Item[]).map(item => {
           if (!item || typeof item.id !== "string" || !/^\d{1,30}$/.test(item.id)) throw new ApiError(502, "Allegro zwrocilo nieprawidlowe dane oferty.");
           let image = "";
@@ -460,6 +460,7 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
           return { id: item.id, name: typeof item.name === "string" ? item.name : "", image,
             externalId: typeof item.external?.id === "string" ? item.external.id : "",
             status: item.publication?.status || "UNKNOWN", stock: Number.isSafeInteger(item.stock?.available) && Number(item.stock?.available) >= 0 ? item.stock!.available : null,
+            sold: Number.isSafeInteger(item.stock?.sold) && Number(item.stock?.sold) >= 0 ? item.stock!.sold : null,
             shippingRateId: typeof item.delivery?.shippingRates?.id === "string" ? item.delivery.shippingRates.id : null,
             price: price && typeof price.amount === "string" && /^\d+(?:\.\d+)?$/.test(price.amount) && /^[A-Z]{3}$/.test(price.currency || "") ? { amount: price.amount, currency: price.currency } : null };
         });

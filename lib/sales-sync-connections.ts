@@ -24,7 +24,7 @@ export async function syncConnections(db: SyncDb, owner: string, env: SalesSyncE
   if (!connection.clientId || connection.clientId !== env.ALLEGRO_CLIENT_ID) throw new OvokoError(409, "Polaczenie aplikacji Allegro zmienilo sie; odnow zgode na automat.");
   if (!Number.isFinite(connection.expiresAt) || connection.expiresAt <= Date.now() + 30000) {
     if (!connection.refreshToken || !env.ALLEGRO_CLIENT_SECRET) throw new OvokoError(409, "Odnow polaczenie Allegro.");
-    const response = await fetch("https://allegro.pl/auth/oauth/token", { method: "POST", redirect: "error", signal: AbortSignal.timeout(15000), headers: { Authorization: `Basic ${btoa(`${connection.clientId}:${env.ALLEGRO_CLIENT_SECRET}`)}`, "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: connection.refreshToken }) });
+    const response = await fetch("https://allegro.pl/auth/oauth/token", { method: "POST", redirect: "manual", signal: AbortSignal.timeout(15000), headers: { Authorization: `Basic ${btoa(`${connection.clientId}:${env.ALLEGRO_CLIENT_SECRET}`)}`, "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: connection.refreshToken }) });
     const token = await response.json() as { access_token?: unknown; refresh_token?: unknown; expires_in?: unknown };
     if (!response.ok || typeof token.access_token !== "string" || typeof token.refresh_token !== "string" || typeof token.expires_in !== "number" || !Number.isFinite(token.expires_in) || token.expires_in <= 60) throw new OvokoError(409, "Allegro odrzucilo odnowienie tokenu; odnow polaczenie.");
     connection = { ...connection, accessToken: token.access_token, refreshToken: token.refresh_token, expiresAt: Date.now() + (token.expires_in - 60) * 1000 };
@@ -33,8 +33,9 @@ export async function syncConnections(db: SyncDb, owner: string, env: SalesSyncE
     if (updated.length !== 1) throw new OvokoError(409, "Polaczenie Allegro zmienilo sie podczas odnowienia. Ponowimy sam odczyt.");
   }
   if (typeof connection.accessToken !== "string" || !connection.accessToken) throw new OvokoError(409, "Brak tokenu Allegro.");
-  const allegro = async (path: string) => {
-    const response = await fetch(`https://api.allegro.pl${path}`, { redirect: "error", signal: AbortSignal.timeout(15000), headers: { Authorization: `Bearer ${connection.accessToken}`, Accept: "application/vnd.allegro.public.v1+json" } });
+  const allegro = async (path: string, init: RequestInit = {}) => {
+    if (!path.startsWith("/") || path.startsWith("//") || /[\\\r\n#]/.test(path)) throw new OvokoError(400, "Nieprawidlowa sciezka operacji.");
+    const response = await fetch(`https://api.allegro.pl${path}`, { ...init, redirect: "manual", signal: AbortSignal.timeout(15000), headers: { Authorization: `Bearer ${connection.accessToken}`, Accept: "application/vnd.allegro.public.v1+json", ...init.headers } });
     if (!response.ok) { await response.body?.cancel(); throw new OvokoError(502, `Odczyt Allegro HTTP ${response.status}. Automat nie uznal bledu odczytu za sprzedaz.`); }
     return await response.json() as Record<string, unknown>;
   };

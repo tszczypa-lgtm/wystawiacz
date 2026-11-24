@@ -37,7 +37,7 @@ export async function loadCombinedInventory(previous: CombinedSnapshot | undefin
     const seen = new Set(snapshot.allegro.map(row => row.id));
     for (let chunk = 0; chunk < 10 && !snapshot.allegroComplete; chunk++) {
       progress(`Odczyt Allegro: ${snapshot.allegro.length} czesci...`);
-      const page = await allegroRequest<{ offers: AllegroInventoryRow[]; totalCount: number }>(`/inventory?limit=200&offset=${snapshot.allegro.length}`, { signal });
+      const page = await allegroRequest<{ offers: AllegroInventoryRow[]; totalCount: number }>(`/inventory?status=&limit=200&offset=${snapshot.allegro.length}`, { signal });
       if (!Array.isArray(page.offers) || page.offers.length > 200 || !Number.isSafeInteger(page.totalCount) || page.totalCount < 0 || page.offers.some(row => !row || !/^\d{1,30}$/.test(row.id) || seen.has(row.id)) || new Set(page.offers.map(row => row.id)).size !== page.offers.length || snapshot.allegro.length && snapshot.allegroTotal !== page.totalCount) throw new Error("Lista Allegro zmienila sie lub jest niepelna. Odswiez od poczatku.");
       if (page.offers.length !== Math.min(200, Math.max(0, page.totalCount - snapshot.allegro.length))) throw new Error("Niepelna strona Allegro.");
       page.offers.forEach(row => seen.add(row.id)); snapshot.allegro.push(...page.offers); snapshot.allegroTotal = page.totalCount;

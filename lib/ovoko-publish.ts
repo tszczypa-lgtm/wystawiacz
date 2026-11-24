@@ -1,7 +1,8 @@
 import { accountContext, type AccountEnv } from "./account-api";
 import { handleAllegroApi } from "./allegro-api";
 import { loadOvokoConnection, ovokoConnectionKey, type OvokoKeyEnv } from "./ovoko-connection";
-import { ovokoSourcePreview, additionalOvokoCodes } from "./ovoko-preparation";
+import { ovokoSourcePreview, additionalOvokoCodes, validOvokoCode } from "./ovoko-preparation";
+import { ovokoAutomaticFields } from "./ovoko-suggestions";
 import { OvokoError, parseOvokoRead, ovokoPageData } from "./ovoko-read";
 import { ovokoWriteClient, ovokoWriteDigest as digest, ovokoRemoteDiagnosis } from "./ovoko-write-client";
 import { sameOvokoMoney } from "./ovoko-bulk-price";
@@ -21,7 +22,8 @@ export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, c
   const offerId = text(input, "offerId", /^\d{1,30}$/), donorId = text(input, "donorId", /^[1-9]\d{0,11}$/);
   const brandId = text(input, "brandId", /^[1-9]\d{0,11}$/), modelId = text(input, "modelId", /^[1-9]\d{0,11}$/);
   const categoryId = text(input, "categoryId", /^[1-9]\d{0,11}$/), qualityId = text(input, "qualityId", /^\d{1,12}$/), statusId = text(input, "statusId", /^\d{1,12}$/);
-  const code = input.manufacturerCode === undefined || input.manufacturerCode === "" ? "" : text(input, "manufacturerCode", /^[A-Z0-9]{6,32}$/);
+  let code = input.manufacturerCode === undefined || input.manufacturerCode === "" ? "" : text(input, "manufacturerCode", /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/);
+  if (code && !validOvokoCode(code)) throw new OvokoError(400, "Nieprawidlowy pelny numer czesci.");
   const price = text(input, "price", /^\d{1,10}(\.\d{1,2})?$/, 30), currency = text(input, "currency", /^(PLN|EUR)$/);
   if (input.additionalCodes !== undefined && typeof input.additionalCodes !== "string") throw new OvokoError(400, "Nieprawidlowe numery dodatkowe.");
   const optionalCodes = additionalOvokoCodes((input.additionalCodes as string | undefined) || "", code);
@@ -34,6 +36,11 @@ export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, c
   if (typeof owned.sellerId !== "string" || !/^\d{1,30}$/.test(owned.sellerId)) throw new OvokoError(502, "Niepotwierdzony sprzedawca Allegro.");
   if (binding && owned.sellerId !== binding.sellerId) throw new OvokoError(409, "Konto Allegro zmienilo sie. Nie wyslano czesci.");
   const source = ovokoSourcePreview(owned.offer, offerId, () => "");
+  const recognized = ovokoAutomaticFields(source, {}).manufacturerCode;
+  if (code && recognized && code.replace(/-/g, "") === recognized.replace(/-/g, "")) code = recognized;
+  if (code.includes("-") && !optionalCodes.includes(code.replace(/-/g, ""))) optionalCodes.unshift(code.replace(/-/g, ""));
+  if (optionalCodes.includes(code)) optionalCodes.splice(optionalCodes.indexOf(code), 1);
+  if (optionalCodes.length > 20) throw new OvokoError(400, "Maksymalnie 20 numerow dodatkowych.");
   if (source.status !== "ACTIVE" || source.stock !== 1 || source.bundle) throw new OvokoError(409, "Pierwsza proba wymaga aktywnej oferty z dokladnie jedna sztuka, bez zestawu. Nie wyslano czesci.");
   const expected = input.expectedSource as Record<string, unknown> | null;
   if (!expected || !sameOvokoMoney(expected.price, source.price) || ["title", "currency", "stock", "status", "condition"].some(key => expected[key] !== source[key as keyof typeof source]) || JSON.stringify(expected.images) !== JSON.stringify(source.images)) throw new OvokoError(409, "Oferta Allegro zmienila sie od otwarcia podgladu. Odswiez dane i sprawdz ponownie.");

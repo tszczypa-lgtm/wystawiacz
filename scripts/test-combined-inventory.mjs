@@ -25,4 +25,14 @@ assert.equal(conflicting.length, 5); assert.equal(conflicting.filter(row => row.
 const duplicates = combineInventory({ ...snapshot, ovoko: [o("10", "tymo:555:1"), o("11", "tymo:555:1")] });
 assert.equal(duplicates.length, 4); assert.ok(duplicates[0].conflict); assert.ok(!duplicates[0].ovoko);
 assert.deepEqual(snapshot.allegro.map(row => row.id), ["1", "2"], "Merge does not mutate source snapshots");
+const lifecycleRows = [
+  { key: "manual", name: "Recznie zakonczona", conflict: false, allegro: { ...a("31"), status: "ENDED", stock: 1, sold: 0 } },
+  { key: "sale", name: "Sprzedana Allegro", conflict: false, allegro: { ...a("32"), status: "ENDED", stock: 0, sold: 1 } },
+  { key: "partial", name: "Aktywna po czesciowej sprzedazy", conflict: false, allegro: { ...a("33"), sold: 1 } },
+  { key: "ovoko", name: "Sprzedana Ovoko", conflict: false, ovoko: { ...o("34", ""), status: "1" } },
+];
+assert.deepEqual(filterCombinedInventory(lifecycleRows, { ...filter, lifecycle: "ended" }, snapshot).map(r => r.key), ["manual"]);
+assert.deepEqual(filterCombinedInventory(lifecycleRows, { ...filter, lifecycle: "sold" }, snapshot).map(r => r.key), ["sale", "ovoko"]);
+assert.deepEqual(filterCombinedInventory(lifecycleRows, { ...filter, lifecycle: "sold", ovoko: false }, snapshot).map(r => r.key), ["sale"]);
+assert.deepEqual(filterCombinedInventory(lifecycleRows, { ...filter, lifecycle: "available" }, snapshot).map(r => r.key), ["partial"]);
 console.log("Combined inventory: exact links, union/intersection/exclusivity, stale records, OEM isolation, conflicts, partial reads and source-price ranges passed.");

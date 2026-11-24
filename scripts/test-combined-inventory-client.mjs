@@ -15,6 +15,7 @@ async function fixture({ total = 1501, admin = true, failA = false, failO = fals
     allegro: async path => {
       calls.push(path); if (failA) throw new Error("Allegro fixture unavailable");
       if (path === "/seller-identity") return { sellerId: rotateA && ++identities > 1 ? "666" : "555" };
+      assert.equal(new URL(path, "https://fixture.test").searchParams.get("status"), "", "Unified tabs must load ended offers too, not only ACTIVE");
       const offset = Number(new URL(path, "https://fixture.test").searchParams.get("offset"));
       return { totalCount: total, offers: Array.from({ length: Math.min(200, total - offset) }, (_, i) => ({ id: String(offset + i + 1), name: "part", status: "ACTIVE" })) };
     },

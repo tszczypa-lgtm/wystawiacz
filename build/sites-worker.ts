@@ -10,11 +10,18 @@ import { handleBetaApi, type BetaEnv } from "../lib/beta-api";
 import { handleOvokoApi } from "../lib/ovoko-api";
 import { runSalesSync } from "../lib/sales-sync";
 import type { SalesSyncEnv } from "../lib/sales-sync-connections";
+import { runReverseSalesSync } from "../lib/reverse-sales-sync";
 
 export default {
   async scheduled(_event: ScheduledController, env: Cloudflare.Env, ctx: ExecutionContext) {
     ctx.waitUntil(deliverOrderMail(env as OrderMailEnv));
-    ctx.waitUntil(runSalesSync(env as SalesSyncEnv));
+    ctx.waitUntil((async () => {
+      // Alternate active directions, keeping the provider/DB budget bounded per invocation.
+      const reverseFirst = Math.floor(_event.scheduledTime / 60000) % 2 === 1;
+      const first = reverseFirst ? runReverseSalesSync : runSalesSync;
+      const second = reverseFirst ? runSalesSync : runReverseSalesSync;
+      if (!await first(env as SalesSyncEnv)) await second(env as SalesSyncEnv);
+    })());
   },
   async fetch(request: Request, env: Cloudflare.Env, ctx: ExecutionContext<{ CONNECTORS?: ConnectorBinding }>) {
     if (new URL(request.url).pathname.startsWith("/api/ovoko/")) return handleOvokoApi(request, env as AccountEnv);

@@ -61,6 +61,7 @@ export function ovokoSourcePreview(input: unknown, expectedId: string, toText: (
     bundle: products.length !== 1 || Number(object(object(products[0]).quantity).value ?? 1) !== 1, condition };
 }
 export type OvokoPreparationDraft = { title: string; notes: string; manufacturerCode: string; additionalCodes: string; price: string; currency: string; categoryId: string; donorId: string; qualityId: string; statusId: string; shippingPlan: string };
+export const validOvokoCode = (value: string) => /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(value) && /^[A-Z0-9]{6,32}$/.test(value.replace(/-/g, ""));
 export function additionalOvokoCodes(value: string, primary: string): string[] | null {
   if (value.length > 4000) return null;
   const codes = [...new Set(value.split(/[\r\n,;]+/).map(code => code.trim().toUpperCase().replace(/[ .]/g, "")).filter(Boolean))].filter(code => code !== primary);
@@ -83,7 +84,7 @@ export function ovokoPublicationBlockers(source: OvokoSourcePreview, draft: Ovok
   if (!/^[1-9]\d{0,11}$/.test(draft.categoryId)) issues.push("Wybierz kategorie Ovoko poziomu 3.");
   if (!/^\d{1,12}$/.test(draft.qualityId)) issues.push("Wybierz stan czesci Ovoko.");
   if (!/^\d{1,12}$/.test(draft.statusId)) issues.push("Wybierz dostepnosc czesci Ovoko (Na stanie).");
-  if (draft.manufacturerCode && !/^[A-Z0-9]{6,32}$/.test(draft.manufacturerCode)) issues.push("Podany numer czesci musi byc pelny (6-32 litery lub cyfry); gdy go nie znasz, zostaw pole puste.");
+  if (draft.manufacturerCode && !validOvokoCode(draft.manufacturerCode)) issues.push("Podaj pelny numer (6-32 litery/cyfry, dozwolone myslniki wewnatrz) albo zostaw puste pole.");
   if (additionalOvokoCodes(draft.additionalCodes, draft.manufacturerCode) === null) issues.push("Sprawdz numery dodatkowe: maksymalnie 20, po jednym w wierszu, 6-32 litery lub cyfry kazdy; dozwolone myslniki wewnatrz numeru.");
   if (!/^\d{1,10}(\.\d{1,2})?$/.test(draft.price) || Number(draft.price) <= 0 || !["PLN", "EUR"].includes(draft.currency)) issues.push("Uzupelnij dodatnia cene i walute PLN lub EUR.");
   return issues;

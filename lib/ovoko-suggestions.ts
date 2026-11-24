@@ -4,12 +4,13 @@ import type { OvokoSourcePreview, OvokoPreparationDraft } from "./ovoko-preparat
 export function ovokoAutomaticFields(source: OvokoSourcePreview, dictionaries: Record<string, OvokoReadRow[]>): Partial<OvokoPreparationDraft> {
   const fields: Partial<OvokoPreparationDraft> = {};
   const numbers = suggestPartNumbers(source.title, source.parameters).filter(candidate => candidate.number.length !== 17);
-  if (numbers.length) fields.manufacturerCode = numbers[0].number;
+  const written = (candidate: NumberSuggestion) => candidate.evidence.map(item => item.raw.toUpperCase().replace(/[ .]/g, "")).find(raw => /^[A-Z0-9]+(?:-[A-Z0-9]+)+$/.test(raw) && normalizeNumber(raw) === candidate.number) || candidate.number;
+  if (numbers.length) fields.manufacturerCode = written(numbers[0]);
   const additional = numbers.flatMap((candidate, index) => [
-    ...(index ? [candidate.number] : []),
+    ...(index || candidate.number !== fields.manufacturerCode ? [candidate.number] : []),
     ...candidate.evidence.map(item => item.raw.toUpperCase().replace(/[ .]/g, "")).filter(raw => /^[A-Z0-9]+(?:-[A-Z0-9]+)+$/.test(raw) && normalizeNumber(raw) === candidate.number),
   ]);
-  if (additional.length) fields.additionalCodes = [...new Set(additional)].join("\n");
+  if (additional.length) fields.additionalCodes = [...new Set(additional)].filter(code => code !== fields.manufacturerCode).join("\n");
   const categories = suggestOvokoCategories(source.title, dictionaries.categories || []);
   if (categories.length) fields.categoryId = categories[0].id;
   const qualityNames: Record<string, string[]> = { used: ["uzywany", "used"], new: ["nowy", "new"], damaged: ["uszkodzony", "with defects"], restored: ["regenerowany", "restored"] };
@@ -33,6 +34,7 @@ function plausible(value: string) {
   return !/^\d{4}[-.]\d{4}$/.test(value) && !/^\d{4}(?:19|20)\d{2}$/.test(number);
 }
 export function suggestPartNumbers(title: string, parameters: { name: string; values: string[] }[] = []): NumberSuggestion[] {
+  title = title.replace(/[\u2010-\u2015\u2212]/g, "-");
   const found = new Map<string, NumberSuggestion>(), occupied: { start: number; end: number }[] = [];
   function add(raw: string, source: string, warnings: string[] = []) {
     if (!plausible(raw)) return;
@@ -69,7 +71,8 @@ export function suggestPartNumbers(title: string, parameters: { name: string; va
   const labels = new Set(["numer katalogowy czesci", "numer katalogowy części", "kod producenta", "manufacturer code", "numer oe"]);
   for (const parameter of parameters) {
     if (!labels.has(parameter.name.toLowerCase().trim())) continue;
-    for (const raw of parameter.values) {
+    for (const original of parameter.values) {
+      const raw = original.replace(/[\u2010-\u2015\u2212]/g, "-");
       // A title pasted into the MPN field is not a verified manufacturer code.
       if (raw.trim().toLowerCase() === title.trim().toLowerCase() || /[^A-Z0-9 .-]/i.test(raw) || /\s/.test(raw.trim())) continue;
       add(raw.trim(), `Parametr: ${parameter.name}`, ["Wartosc parametru rowniez wymaga sprawdzenia; nie uznajemy jej za pewniejsza od tytulu."]);
