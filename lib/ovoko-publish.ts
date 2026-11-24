@@ -6,6 +6,7 @@ import { ovokoAutomaticFields } from "./ovoko-suggestions";
 import { OvokoError, parseOvokoRead, ovokoPageData } from "./ovoko-read";
 import { ovokoWriteClient, ovokoWriteDigest as digest, ovokoRemoteDiagnosis } from "./ovoko-write-client";
 import { sameOvokoMoney } from "./ovoko-bulk-price";
+import { requireOvokoAccess } from "./ovoko-access";
 import { createdPublication, ovokoPublicationPresent, publicationCas, type CreatedPublication } from "./ovoko-publication-presence";
 
 type Context = Awaited<ReturnType<typeof accountContext>>;
@@ -90,7 +91,8 @@ export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, c
     const fresh = ovokoSourcePreview(latest.offer, offerId, () => "");
     if (latest.sellerId !== seller || fresh.status !== "ACTIVE" || fresh.stock !== 1 || fresh.bundle || JSON.stringify(fresh.images) !== JSON.stringify(source.images) || fresh.rejectedImages || !sameOvokoMoney(fresh.price, source.price) || ["title", "currency", "condition"].some(key => fresh[key as keyof typeof fresh] !== source[key as keyof typeof source])) throw new OvokoError(409, "Oferta lub konto Allegro zmienily sie podczas sprawdzania. Nie wyslano czesci.");
     const permission = await accountContext(request, env);
-    if (permission.user.id !== context.user.id || !permission.isAdmin || permission.account.suspended) throw new OvokoError(403, "Uprawnienia administratora zmienily sie podczas sprawdzania. Nie wyslano czesci.");
+    requireOvokoAccess(permission, env);
+    if (permission.user.id !== context.user.id) throw new OvokoError(403, "Konto zmienilo sie podczas sprawdzania. Nie wyslano czesci.");
     const latestCredentials = await loadOvokoConnection(permission, await ovokoConnectionKey(env));
     if (latestCredentials.username !== credentials.username || latestCredentials.user_token !== credentials.user_token || latestCredentials.password !== credentials.password) throw new OvokoError(409, "Polaczenie Ovoko zmienilo sie podczas sprawdzania. Nie wyslano czesci.");
     // A retransfer gets a fresh generation even if payload, part ID and timestamp repeat (ABA).

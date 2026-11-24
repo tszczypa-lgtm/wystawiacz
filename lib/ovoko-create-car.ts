@@ -2,6 +2,7 @@ import { accountContext } from "./account-api";
 import { loadOvokoConnection, ovokoConnectionKey } from "./ovoko-connection";
 import type { OvokoPublishEnv } from "./ovoko-publish";
 import { OvokoError, parseOvokoRead } from "./ovoko-read";
+import { requireOvokoAccess } from "./ovoko-access";
 import { ovokoWriteClient, ovokoWriteDigest } from "./ovoko-write-client";
 
 type Context = Awaited<ReturnType<typeof accountContext>>;
@@ -49,7 +50,8 @@ export async function createOvokoCar(request: Request, env: OvokoPublishEnv, con
     const added = Object.entries(statuses.list as Record<string, { pl?: string; en?: string }>).filter(([id, row]) => /^[1-9]\d{0,11}$/.test(id) && ["dodano", "added"].includes(String(row?.pl || row?.en || "").trim().toLowerCase()));
     if (added.length !== 1) throw new OvokoError(400, "Nie potwierdzono statusu Dodano w slowniku aut. Nie ustawiamy Kupiony ani Do demontazu.");
     const permission = await accountContext(request, env);
-    if (!permission.isAdmin || permission.account.suspended || permission.user.id !== context.user.id) throw new OvokoError(403, "Uprawnienia zmienily sie przed utworzeniem auta.");
+    requireOvokoAccess(permission, env);
+    if (permission.user.id !== context.user.id) throw new OvokoError(403, "Konto zmienilo sie przed utworzeniem auta.");
     const latestCredentials = await loadOvokoConnection(permission, await ovokoConnectionKey(env));
     if (latestCredentials.username !== credentials.username || latestCredentials.user_token !== credentials.user_token || latestCredentials.password !== credentials.password) throw new OvokoError(409, "Polaczenie Ovoko zmienilo sie podczas sprawdzania. Nie utworzono auta.");
     const reserved = await db("?on_conflict=ovoko_account,model_id,vehicle_year", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=representation" }, body: JSON.stringify({ ovoko_account: account, model_id: modelId, vehicle_year: year, owner_id: context.user.id, state: "sending" }) });

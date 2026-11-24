@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { combineInventory, emptyCombinedSnapshot, filterCombinedInventory, inventoryChannel, inventoryChannels, ovokoInStock, type InventoryChannel, type CombinedFilter, type CombinedPart, type CombinedSnapshot } from "@/lib/combined-inventory";
+import { combineInventory, emptyCombinedSnapshot, filterCombinedInventory, sortCombinedInventory, inventoryChannel, inventoryChannels, ovokoInStock, type InventoryChannel, type CombinedFilter, type CombinedPart, type CombinedSnapshot } from "@/lib/combined-inventory";
 import { loadCombinedInventory } from "@/lib/combined-inventory-client";
 import { suggestPartNumbers } from "@/lib/ovoko-suggestions";
 import { OvokoBulkLauncher } from "./ovoko-bulk-launcher";
@@ -22,18 +22,14 @@ export function CombinedInventoryPanel({ portal }: { portal?: "ovoko" }) {
   useEffect(() => {
     const controller = new AbortController();
     const previous = request.more ? current.current : undefined;
-    void loadCombinedInventory(previous, controller.signal, setProgress).then(value => { if (!controller.signal.aborted) setSnapshot(value); }).catch(error => { if (!controller.signal.aborted) setError(error.message); }).finally(() => { if (!controller.signal.aborted) setBusy(false); });
+    void loadCombinedInventory(previous, controller.signal, setProgress, { force: request.revision > 0 && !request.more, partial: value => { if (!controller.signal.aborted) setSnapshot(value); } }).then(value => { if (!controller.signal.aborted) setSnapshot(value); }).catch(error => { if (!controller.signal.aborted) { setSnapshot(emptyCombinedSnapshot()); setError(error.message); } }).finally(() => { if (!controller.signal.aborted) setBusy(false); });
     return () => controller.abort();
   }, [request]);
   const parts = useMemo(() => combineInventory(snapshot), [snapshot]);
-  let rows: CombinedPart[] = [], filterError = "";
-  try {
-    rows = filterCombinedInventory(parts, filter, snapshot);
-    if (sort === "price" || sort === "-price") rows.sort((a, b) => {
-      const left = a.allegro?.price ? Number(a.allegro.price.amount) : Infinity, right = b.allegro?.price ? Number(b.allegro.price.amount) : Infinity;
-      return left === right ? a.key.localeCompare(b.key) : left === Infinity ? 1 : right === Infinity ? -1 : sort === "price" ? left - right : right - left;
-    });
-  } catch (error) { filterError = (error as Error).message; }
+  const { rows, filterError } = useMemo(() => {
+    try { return { rows: sortCombinedInventory(filterCombinedInventory(parts, filter, snapshot), sort), filterError: "" }; }
+    catch (error) { return { rows: [] as CombinedPart[], filterError: (error as Error).message }; }
+  }, [parts, filter, snapshot, sort]);
   const pages = Math.max(1, Math.ceil(rows.length / limit)), actualPage = Math.min(page, pages), visible = rows.slice((actualPage - 1) * limit, actualPage * limit);
   function change(patch: Partial<CombinedFilter>) { setFilter(value => ({ ...value, ...patch })); setPage(1); setSelected(new Set()); }
   function reload(more = false) {
@@ -58,9 +54,9 @@ export function CombinedInventoryPanel({ portal }: { portal?: "ovoko" }) {
       <button className={button} onClick={() => change(initial)}>Wyczysc</button>
       <details className="relative"><summary className={`${button} cursor-pointer`}>Wiecej</summary>
         <div className="absolute right-0 z-20 mt-1 w-72 space-y-2 rounded border border-white/20 bg-[#11161d] p-3">
-          <label className="block">Sortowanie<select aria-label="Sortowanie czesci" className={`${field} mt-1 w-full`} value={sort} onChange={event => { setSort(event.target.value); setPage(1); setSelected(new Set()); }}><option value="source">Kolejnosc API</option><option value="price">Cena A rosnaco</option><option value="-price">Cena A malejaco</option></select></label>
+          <label className="block">Sortowanie<select aria-label="Sortowanie czesci" className={`${field} mt-1 w-full`} value={sort} onChange={event => { setSort(event.target.value); setPage(1); setSelected(new Set()); }}><option value="source">Kolejnosc API</option><option value="price">Cena A rosnaco</option><option value="-price">Cena A malejaco</option><option value="ovoko_price">Cena O rosnaco</option><option value="-ovoko_price">Cena O malejaco</option><option value="-age">Najnowsze (ID, osobno portale)</option><option value="age">Najstarsze (ID, osobno portale)</option><option value="name">Nazwa A–Z</option><option value="-name">Nazwa Z–A</option></select></label>
           {snapshot.admin && <label className="block">Historia przeniesienia do Ovoko<select aria-label="Historia przeniesienia do Ovoko" className={`${field} mt-1 w-full`} value={filter.transfer} onChange={event => change({ transfer: event.target.value })}><option value="all">Wszystkie</option><option value="not_transferred">Nieprzeniesione</option><option value="transferred">Przeniesione</option><option value="sending">W trakcie</option><option value="uncertain">Blad / do sprawdzenia</option></select></label>}
-          <p>Oba portale = suma, nie tylko wspolne czesci. Zakres i sortowanie cen dotycza Allegro, bez przewalutowania.</p>
+          <p>Zakres cen: Allegro. Sortowanie A/O osobno, bez przewalutowania; waluta Ovoko niepotwierdzona. Wiek wedlug ID wewnatrz portalu, nie data wznowienia. Brak ceny zawsze na koncu.</p>
           <p>Ovoko: status Na stanie z API nie potwierdza widocznosci w sklepie. Historia przeniesienia nie jest dowodem obecnosci.</p>
           <p>Odczyt do 2000 rekordow kazdego portalu w partii. Dalsze rekordy: Wczytaj dalsze czesci. Filtry dotycza wczytanych danych.</p>
           <a href="/panel/allegro" className="mr-3 underline">Polaczenie Allegro</a><a href="/panel/ovoko" className="underline">Polaczenie Ovoko</a>
@@ -68,7 +64,7 @@ export function CombinedInventoryPanel({ portal }: { portal?: "ovoko" }) {
       </details>
     </div>
     <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-white/65"><span>Widoczne: <b>{rows.length}</b> / wczytane: {parts.length}. Allegro {snapshot.allegro.length}/{snapshot.allegroTotal}, Ovoko {snapshot.ovoko.length}/{snapshot.ovokoTotal}. Zaznaczono: {selected.size}. {!complete && <span className="text-amber-200">Odczyt niepelny; brak rekordu nie oznacza nieobecnosci.</span>}</span>{snapshot.admin && <div className="flex flex-wrap items-center gap-2 [&_button]:!px-2 [&_button]:!py-1 [&_button]:!text-xs"><BulkInventoryActions rows={selectedRows} onFinished={refresh} /><OvokoBulkLauncher offers={selectedOffers} onFinished={refresh} /></div>}</div>
-    {busy && <p role="status" className="text-xs text-white/65">{progress} Wczytywanie tylko do podgladu, bez zmian na portalach.</p>}
+    <p role="status" className="text-xs text-white/65">{busy ? progress : "Lista moze pochodzic z pamieci (do 5 minut). Odswiez pobiera aktualne stany."} Operacje zawsze sprawdzaja stany na portalach ponownie.</p>
     {(error || filterError) && <p role="alert" className="text-xs text-amber-200">{error || filterError}</p>}
     {snapshot.errors.map(message => <p role="status" className="text-xs text-amber-200" key={message}>{message} Nie uznajemy bledu za pusta liste.</p>)}
     {!busy && !complete && <button className={button} onClick={() => reload(true)}>Wczytaj dalsze czesci</button>}

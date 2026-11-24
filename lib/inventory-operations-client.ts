@@ -1,5 +1,5 @@
 import { createSupabaseBrowserClient } from "./supabase";
-export type InventoryJob = { id: string; kind: string; offerId: string | null; partId: string | null; name: string; state: string; allegro: string; ovoko: string; closed: boolean; reservation: { customer: string; price: string; deposit: string; currency: string; until: string; comment: string } | null; diagnostic: string | null; createdAt: string };
+export type InventoryJob = { id: string; kind: string; offerId: string | null; partId: string | null; name: string; state: string; allegro: string; ovoko: string; closed: boolean; reservation: { customer: string; price: string; deposit: string; currency: string; until: string; comment: string; groupId?: string } | null; diagnostic: string | null; createdAt: string };
 export async function inventoryOperation<T = InventoryJob>(body: Record<string, unknown>): Promise<T> {
   const { data } = await createSupabaseBrowserClient().auth.getSession();
   if (!data.session) throw new Error("Zaloguj sie do Wystawiacza.");

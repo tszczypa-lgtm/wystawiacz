@@ -15,7 +15,7 @@ function load(file) {
 const { handleOvokoApi } = load(path.join(root, "lib/ovoko-api.ts"));
 const { sealConnection } = load(path.join(root, "lib/allegro-api.ts"));
 const bytes = new Uint8Array(32).fill(7), key = await crypto.subtle.importKey("raw", bytes, "AES-GCM", false, ["encrypt", "decrypt"]);
-const env = { SUPABASE_SERVICE_ROLE_KEY: "fixture", ALLEGRO_ENCRYPTION_KEY: Buffer.from(bytes).toString("base64"), OVOKO_PUBLISH_ENABLED: "true" };
+const env = { BILLING_ENFORCED: "true", SUPABASE_SERVICE_ROLE_KEY: "fixture", ALLEGRO_ENCRYPTION_KEY: Buffer.from(bytes).toString("base64"), OVOKO_PUBLISH_ENABLED: "true" };
 let user = 0, admin, mode, failDb, mutations, remoteCalls, prior, revoked;
 const rows = new Map(), owner = () => `00000000-0000-0000-0000-${String(user).padStart(12, "0")}`;
 const credentials = { username: "fixture", password: "private-password", user_token: "private-token" };

@@ -2,6 +2,7 @@ import { syncAuthorization, syncConnections, type SalesSyncEnv } from "./sales-s
 import { salesSyncDb, syncJson, syncRows, type SyncDb } from "./sales-sync-store";
 import { OvokoError, ovokoPageData, parseOvokoRead } from "./ovoko-read";
 import { ovokoSaleOrders } from "./ovoko-sale-evidence";
+import { syncAccountLock } from "./sales-sync-ownership";
 type Data = Record<string, unknown>;
 type Subscription = { owner_id: string; epoch: string; enabled: boolean; seller_id: string; ovoko_account: string; fingerprint: string; client_id: string; armed_at: string; baseline: string[]; watch: { offerId: string; partId: string; hash: string }[]; lease: string | null; lease_until: string | null; last_checked_at: string | null; last_error: string | null };
 type Action = { id: string; owner_id: string; epoch: string; order_id: string; part_id: string; offer_id: string; publication_hash: string; state: string };
@@ -54,6 +55,7 @@ export async function reverseSyncControl(owner: string, env: SalesSyncEnv, input
     if (stock.length !== 1) throw new OvokoError(502, "Nie potwierdzono statusu Na stanie.");
     const watch = journal.filter(j => obj(active.get(j.allegro_offer_id)?.stock).available === 1 && String(parts.get(j.part_id)?.status) === stock[0].id && parts.get(j.part_id)?.external_id === `tymo:${c.sellerId}:${j.allegro_offer_id}`).map(j => ({ offerId: j.allegro_offer_id, partId: j.part_id, hash: j.request_hash }));
     const s = { owner_id: owner, epoch: crypto.randomUUID(), enabled: true, seller_id: c.sellerId, ovoko_account: c.account, fingerprint: c.fingerprint, client_id: c.clientId, armed_at: start, baseline, watch, lease: null, lease_until: null, last_attempt_at: null, last_checked_at: null, last_error: null };
+    await syncAccountLock(db, owner, c.sellerId, c.account, "claim");
     const saved = existing ? await db(`sales_sync_reverse?owner_id=eq.${owner}&epoch=eq.${existing.epoch}&enabled=eq.false`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(s) }) : await db("sales_sync_reverse", { ...syncJson(s), headers: { Prefer: "return=representation" } });
     if (syncRows(saved).length !== 1) throw new OvokoError(409, "Ustawienia synchronizacji zmienily sie w innej karcie.");
   }
@@ -77,6 +79,7 @@ export async function runReverseSalesSync(env: SalesSyncEnv): Promise<boolean> {
 export async function tickReverseSalesSync(s: Subscription, env: SalesSyncEnv, db: SyncDb) {
   if (Date.now() - Date.parse(s.last_checked_at || s.armed_at) > 7 * 86400000) throw new OvokoError(409, "Przerwa przekroczyla 7 dni. Sprawdz recznie oferty i ponownie wlacz synchronizacje Ovoko.");
   const c = await syncConnections(db, s.owner_id, env);
+  await syncAccountLock(db, s.owner_id, c.sellerId, c.account, "claim");
   if (c.sellerId !== s.seller_id || c.clientId !== s.client_id || c.account !== s.ovoko_account || c.fingerprint !== s.fingerprint) throw new OvokoError(409, "Konto lub polaczenie zmienily sie. Synchronizacja Ovoko wstrzymana.");
   const orders = (await orderWindow(c, s.last_checked_at || s.armed_at)).filter(o => o.source === "ovoko" && !s.baseline.includes(o.id));
   const rows = orders.flatMap(o => o.parts.map(p => ({ orderId: o.id, partId: p.id, status: o.status })));
@@ -110,7 +113,8 @@ export async function tickReverseSalesSync(s: Subscription, env: SalesSyncEnv, d
     if (["ENDED", "INACTIVE"].includes(String(status))) { await save("done", "allegro_end_confirmed"); return; }
     if (!executable) { await save("uncertain", "write_not_confirmed_no_retry"); return; }
     if (status !== "ACTIVE" || obj(offers[0].stock).available !== 1) { await save("review", "stock_or_double_sale"); return; }
-    await syncAuthorization(db, s.owner_id);
+    await syncAuthorization(db, s.owner_id, env);
+    await syncAccountLock(db, s.owner_id, s.seller_id, s.ovoko_account, "check");
     const consent = syncRows<Subscription>(await db(`${selection(s)}&enabled=eq.true&select=*`))[0];
     const a = syncRows<{ sealed: string }>(await db(`allegro_connections?owner_id=eq.${s.owner_id}&select=sealed`)), o = syncRows<{ sealed: string }>(await db(`ovoko_connections?owner_id=eq.${s.owner_id}&select=sealed`));
     if (!consent || Date.parse(consent.lease_until || "") <= Date.now() || a.length !== 1 || o.length !== 1 || a[0].sealed !== c.allegroSealed || o[0].sealed !== c.ovokoSealed || env.SALES_SYNC_ENABLED !== "true" || !await readSource()) throw new OvokoError(409, "Zgoda, polaczenie lub zrodlo sprzedazy zmienily sie.");

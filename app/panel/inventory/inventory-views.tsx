@@ -7,7 +7,7 @@ export function InventoryViews({ active }: { active: "allegro" | "ovoko" }) {
   const [admin, setAdmin] = useState(false);
   useEffect(() => {
     let mounted = true;
-    void accountRequest<AccountInfo>("/me").then(info => { if (mounted) setAdmin(info.isAdmin); }).catch(() => {});
+    void accountRequest<AccountInfo>("/me").then(info => { if (mounted) setAdmin(info.isAdmin || info.access?.allowed === true); }).catch(() => {});
     return () => { mounted = false; };
   }, []);
   const style = (selected: boolean) => `rounded-lg border px-4 py-2 text-sm font-bold ${selected ? "border-[#ff5a00] bg-[#ff5a00] text-white" : "border-white/20 text-white/70 hover:bg-white/10"}`;

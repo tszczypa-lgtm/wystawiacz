@@ -1,6 +1,7 @@
 import { syncAuthorization, syncConnections, type SalesSyncEnv } from "./sales-sync-connections";
 import { salesSyncDb, syncRows, syncJson, type SyncAction, type SyncDb, type SyncSubscription } from "./sales-sync-store";
 import { OvokoError, ovokoPageData, parseOvokoRead } from "./ovoko-read";
+import { syncAccountLock } from "./sales-sync-ownership";
 
 const representation = { Prefer: "return=representation" };
 const selection = (s: SyncSubscription) => `sales_sync?owner_id=eq.${s.owner_id}&epoch=eq.${s.epoch}&lease=eq.${s.lease}`;
@@ -9,8 +10,12 @@ const instant = (v: unknown) => typeof v === "string" && /^\d{4}-\d\d-\d\dT\d\d:
 const record = (v: unknown): Record<string, unknown> => v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : {};
 
 export async function salesSyncControl(owner: string, env: SalesSyncEnv, input: Record<string, unknown>) {
-  if (!['status', 'enable', 'disable'].includes(String(input.operation)) || Object.keys(input).some(key => !["operation", "confirm"].includes(key))) throw new OvokoError(400, "Nieprawidlowa operacja automatu.");
+  if (!['status', 'enable', 'disable', 'release'].includes(String(input.operation)) || Object.keys(input).some(key => !["operation", "confirm"].includes(key))) throw new OvokoError(400, "Nieprawidlowa operacja synchronizacji.");
   const db = salesSyncDb(env);
+  if (input.operation === "release") {
+    if (input.confirm !== true) throw new OvokoError(400, "Potwierdz zwolnienie kont.");
+    await syncAccountLock(db, owner, null, null, "release");
+  }
   const existing = syncRows<SyncSubscription>(await db(`sales_sync?owner_id=eq.${owner}&select=*`))[0];
   if (input.operation === "disable" && existing) {
     await db(`sales_sync?owner_id=eq.${owner}`, { method: "PATCH", body: JSON.stringify({ enabled: false }) });
@@ -31,6 +36,7 @@ export async function salesSyncControl(owner: string, env: SalesSyncEnv, input: 
       const subscription = { owner_id: owner, epoch: crypto.randomUUID(), seller_id: connections.sellerId, ovoko_account: connections.account, fingerprint: connections.fingerprint, client_id: connections.clientId,
         enabled: true, armed_at: new Date().toISOString(), cursor: latest ? latest.id : null, caught_up: true, lease: null, lease_until: null, last_attempt_at: null, last_checked_at: null, last_error: null };
       // CAS prevents concurrent tabs from replacing an already active epoch/cursor.
+      await syncAccountLock(db, owner, connections.sellerId, connections.account, "claim");
       const saved = existing ? await db(`sales_sync?owner_id=eq.${owner}&epoch=eq.${existing.epoch}&enabled=eq.false`, { method: "PATCH", headers: representation, body: JSON.stringify(subscription) }) : await db("sales_sync", { ...syncJson(subscription), headers: representation });
       if (syncRows<SyncSubscription>(saved).length !== 1) throw new OvokoError(409, "Ustawienia automatu zmienily sie w innej karcie. Odswiez status.");
     }
@@ -63,6 +69,7 @@ export async function runSalesSync(env: SalesSyncEnv) {
 export async function tickSalesSync(s: SyncSubscription, env: SalesSyncEnv, db: SyncDb) {
   if (Date.now() - Date.parse(s.last_checked_at || s.armed_at) > 55 * 86400000) throw new OvokoError(409, "Przerwa przekroczyla bezpieczny zakres historii Allegro. Wylacz i ponownie wlacz automat po recznym sprawdzeniu ofert.");
   const connections = await syncConnections(db, s.owner_id, env);
+  await syncAccountLock(db, s.owner_id, connections.sellerId, connections.account, "claim");
   if (connections.sellerId !== s.seller_id || connections.clientId !== s.client_id || connections.account !== s.ovoko_account || connections.fingerprint !== s.fingerprint) throw new OvokoError(409, "Konto lub dane polaczenia zmienily sie. Automat wstrzymany; sprawdz oferty i ponownie wlacz zgode.");
   const batch = await connections.allegro(`/order/events?limit=100${s.cursor ? `&from=${s.cursor}` : ""}`);
   if (!Array.isArray(batch.events) || batch.events.length > 100) throw new OvokoError(502, "Nieprawidlowy dziennik zdarzen Allegro; nie przesunieto kursora.");
@@ -124,7 +131,8 @@ export async function tickSalesSync(s: SyncSubscription, env: SalesSyncEnv, db: 
     const source = await connections.allegro(`/sale/offers?offer.id=${job.offer_id}&limit=1`);
     const offers = Array.isArray(source.offers) ? source.offers.map(record) : [];
     if (offers.length !== 1 || offers[0].id !== job.offer_id || record(offers[0].stock).available !== 0 || !["ACTIVE", "ENDED", "INACTIVE"].includes(String(record(offers[0].publication).status))) { await save("review", "not_last_single_unit"); return; }
-    await syncAuthorization(db, s.owner_id);
+    await syncAuthorization(db, s.owner_id, env);
+    await syncAccountLock(db, s.owner_id, s.seller_id, s.ovoko_account, "check");
     const consent = syncRows<SyncSubscription>(await db(`${selection(s)}&enabled=eq.true&select=*`))[0];
     if (!consent || Date.parse(consent.lease_until || "") <= Date.now() || env.SALES_SYNC_ENABLED !== "true" || env.OVOKO_TEST_ENABLED === "false") throw new OvokoError(409, "Zgoda lub rezerwacja automatu wygasla.");
     const a = syncRows<{ sealed: string }>(await db(`allegro_connections?owner_id=eq.${s.owner_id}&select=sealed`));

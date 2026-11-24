@@ -6,7 +6,7 @@ import { ovokoWriteDigest } from "./ovoko-write-client";
 type Kind = "withdraw" | "reserve" | "restore";
 type Target = "allegro" | "ovoko";
 type Data = Record<string, unknown>;
-type Reservation = { customer: string; price: string; deposit: string; currency: string; until: string; comment: string };
+type Reservation = { customer: string; price: string; deposit: string; currency: string; until: string; comment: string; groupId?: string };
 type Job = { id: string; owner_id: string; kind: Kind; request_hash: string; parent_id: string | null; target_key: string; seller_id: string; ovoko_account: string; fingerprint: string; offer_id: string | null; part_id: string | null; publication_hash: string | null; external_id: string | null; name: string; a_initial: string | null; a_stock: number | null; a_sold: number | null; o_initial: string | null; targets: Target[]; reservation: Reservation | null; closed: boolean; state: string; allegro_state: string; ovoko_state: string; diagnostic: string | null; expires_at: string; created_at: string };
 const uuid = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
 const aId = (v: unknown) => typeof v === "string" && /^\d{1,30}$/.test(v);
@@ -15,17 +15,17 @@ const obj = (v: unknown): Data => v && typeof v === "object" && !Array.isArray(v
 const publicJob = (j: Job) => ({ id: j.id, kind: j.kind, offerId: j.offer_id, partId: j.part_id, name: j.name, state: j.state, allegro: j.allegro_state, ovoko: j.ovoko_state, closed: j.closed, reservation: j.reservation, diagnostic: j.diagnostic, createdAt: j.created_at });
 function reservationInput(v: unknown): Reservation {
   const r = obj(v);
-  if (Object.keys(r).some(k => !["customer", "price", "deposit", "currency", "until", "comment"].includes(k)) || typeof r.customer !== "string" || !r.customer.trim() || r.customer.length > 200 || typeof r.comment !== "string" || r.comment.length > 2000 || /\0/.test(r.customer + r.comment) || !["PLN", "EUR"].includes(String(r.currency))) throw new OvokoError(400, "Wpisz klienta, walute i komentarz (do 2000 znakow).");
+  if (Object.keys(r).some(k => !["customer", "price", "deposit", "currency", "until", "comment", "groupId"].includes(k)) || r.groupId !== undefined && (typeof r.groupId !== "string" || !uuid.test(r.groupId)) || typeof r.customer !== "string" || !r.customer.trim() || r.customer.length > 200 || typeof r.comment !== "string" || r.comment.length > 2000 || /\0/.test(r.customer + r.comment) || !["PLN", "EUR"].includes(String(r.currency))) throw new OvokoError(400, "Wpisz klienta, walute i komentarz (do 2000 znakow).");
   for (const k of ["price", "deposit"]) if (typeof r[k] !== "string" || !/^\d{1,8}(\.\d{1,2})?$/.test(r[k] as string)) throw new OvokoError(400, "Cena i zaliczka: dodatnia kwota lub 0, maksymalnie 2 miejsca po przecinku.");
   if (Number(r.deposit) > Number(r.price)) throw new OvokoError(400, "Zaliczka nie moze przekraczac ceny.");
   if (typeof r.until !== "string" || !/^\d{4}-\d\d-\d\dT.*Z$/.test(r.until) || !Number.isFinite(Date.parse(r.until)) || Date.parse(r.until) <= Date.now() || Date.parse(r.until) > Date.now() + 366 * 86400000) throw new OvokoError(400, "Termin rezerwacji musi byc w przyszlosci, maksymalnie rok.");
-  return { customer: r.customer.trim(), price: String(r.price), deposit: String(r.deposit), currency: String(r.currency), until: r.until, comment: r.comment.trim() };
+  return { customer: r.customer.trim(), price: String(r.price), deposit: String(r.deposit), currency: String(r.currency), until: r.until, comment: r.comment.trim(), ...(r.groupId ? { groupId: String(r.groupId) } : {}) };
 }
 
 export async function inventoryOperations(owner: string, env: SalesSyncEnv & { INVENTORY_WITHDRAW_ENABLED?: string }, input: Data) {
   const operation = input.operation;
-  if (!["list", "prepare", "execute", "status", "prepare-restore", "cancel-plan"].includes(String(operation))) throw new OvokoError(400, "Nieprawidlowa operacja magazynowa.");
-  const allowed = operation === "prepare" ? ["operation", "requestId", "kind", "offerId", "partId", "targets", "reservation"] : operation === "prepare-restore" ? ["operation", "requestId", "reservationId"] : operation === "list" ? ["operation"] : ["operation", "jobId", "confirm"];
+  if (!["list", "prepare", "execute", "status", "prepare-restore", "cancel-plan", "archive"].includes(String(operation))) throw new OvokoError(400, "Nieprawidlowa operacja magazynowa.");
+  const allowed = operation === "prepare" ? ["operation", "requestId", "kind", "offerId", "partId", "targets", "reservation", "reservationId"] : operation === "prepare-restore" ? ["operation", "requestId", "reservationId"] : operation === "list" ? ["operation"] : ["operation", "jobId", "confirm"];
   if (Object.keys(input).some(k => !allowed.includes(k))) throw new OvokoError(400, "Nieobslugiwane pole operacji magazynowej.");
   const rawDb = salesSyncDb(env);
   const db: SyncDb = async (path, init) => { try { return await rawDb(path, init); } catch { throw new OvokoError(503, "Nie potwierdzono rejestru rezerwacji/operacji. Sprawdz migracje 017; nie ponawiaj niepewnego zapisu."); } };
@@ -87,7 +87,13 @@ export async function inventoryOperations(owner: string, env: SalesSyncEnv & { I
     const targets = parent ? parent.targets : input.targets;
     if (!Array.isArray(targets) || !targets.length || targets.length > 2 || new Set(targets).size !== targets.length || targets.some(t => !["allegro", "ovoko"].includes(t) || t === "allegro" && !offerId || t === "ovoko" && !partId)) throw new OvokoError(400, "Sprawdz wybrane kanaly operacji.");
     if (kind === "reserve" && ((offerId && !targets.includes("allegro")) || (partId && !targets.includes("ovoko")))) throw new OvokoError(400, "Rezerwacja musi wstrzymac wszystkie wskazane kanaly tej czesci.");
-    const r = kind === "reserve" ? reservationInput(input.reservation) : null;
+    let r = kind === "reserve" ? reservationInput(input.reservation) : null;
+    if (input.reservationId !== undefined && kind !== "reserve" && operation !== "prepare-restore") throw new OvokoError(400, "Do rezerwacji dopisujemy tylko rezerwowane czesci.");
+    if (kind === "reserve" && input.reservationId !== undefined) {
+      const anchor = await one(input.reservationId);
+      if (anchor.kind !== "reserve" || anchor.closed || !anchor.reservation || Date.parse(anchor.reservation.until) <= Date.now()) throw new OvokoError(409, "Rezerwacja jest zamknieta lub po terminie. Utworz nowa.");
+      r = reservationInput({ ...anchor.reservation, groupId: anchor.reservation.groupId || anchor.id, price: r!.price, deposit: r!.deposit });
+    }
     const target = await live(offerId, partId);
     if (offerId && !["ACTIVE", "ENDED", "INACTIVE"].includes(target.aStatus)) throw new OvokoError(409, "Allegro ma przejsciowy lub nieznany status. Ponow sam odczyt.");
     if (kind === "reserve" && offerId && obj(target.a.sellingMode).format && obj(target.a.sellingMode).format !== "BUY_NOW") throw new OvokoError(409, "Rezerwacja z przywracaniem obsluguje oferty Kup teraz, nie licytacje.");
@@ -110,6 +116,14 @@ export async function inventoryOperations(owner: string, env: SalesSyncEnv & { I
     return publicJob(saved[0]);
   }
   const job = await one(input.jobId);
+  if (operation === "archive") {
+    if (input.confirm !== true || job.kind !== "reserve" || job.state !== "settled" || !["done", "not_requested"].includes(job.allegro_state) || !["done", "not_requested"].includes(job.ovoko_state)) throw new OvokoError(409, "Najpierw sprawdz wynik rezerwacji. Nie ukrywamy niepewnych operacji.");
+    const restores = syncRows<Job>(await db(`inventory_operations?owner_id=eq.${owner}&parent_id=eq.${job.id}&kind=eq.restore&select=*&limit=1`));
+    if (restores.some(r => r.state !== "prepared" && (r.allegro_state !== "done" && r.allegro_state !== "not_requested" || r.ovoko_state !== "done" && r.ovoko_state !== "not_requested"))) throw new OvokoError(409, "Przywracanie ma niepewny wynik. Najpierw sprawdz wynik.");
+    const saved = syncRows<Job>(await db("rpc/archive_inventory_reservation", { method: "POST", body: JSON.stringify({ p_owner: owner, p_id: job.id }) }));
+    if (saved.length !== 1) throw new OvokoError(409, "Rezerwacja zmienila sie.");
+    return publicJob(saved[0]);
+  }
   if (operation === "cancel-plan") {
     if (input.confirm !== true || job.kind === "restore" || job.state !== "prepared") throw new OvokoError(409, "Mozna anulowac tylko nieuruchomiony plan wycofania lub rezerwacji.");
     const rows = syncRows<Job>(await db(`${selector(job.id)}&state=eq.prepared`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ state: "settled", closed: true, allegro_state: "not_requested", ovoko_state: "not_requested", diagnostic: "Anulowano nieuruchomiony plan." }) }));
@@ -137,7 +151,7 @@ export async function inventoryOperations(owner: string, env: SalesSyncEnv & { I
   if (Date.parse(job.expires_at) <= Date.now()) throw new OvokoError(409, "Plan operacji wygasl. Nie wykonano zapisu.");
   if (job.kind === "restore" && job.offer_id && (target.stock !== job.a_stock || target.stock !== 1)) throw new OvokoError(409, "Brak potwierdzonej pojedynczej sztuki. Nie przywracamy oferty.");
   if (job.kind === "restore" && job.offer_id && job.a_sold !== null && obj(target.a.stock).sold !== job.a_sold) throw new OvokoError(409, "Licznik sprzedazy Allegro zmienil sie po rezerwacji. Nie przywracamy tej oferty.");
-  await syncAuthorization(db, owner);
+  await syncAuthorization(db, owner, env);
   const claim = syncRows(await db(`${selector(job.id)}&state=eq.prepared`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ state: "running" }) }));
   if (claim.length !== 1) throw new OvokoError(409, "Operacja juz uruchomiona. Nie powtarzamy zapisu.");
   job.state = "running";
@@ -150,7 +164,7 @@ export async function inventoryOperations(owner: string, env: SalesSyncEnv & { I
       if (job.kind === "restore" && job.offer_id && job.a_sold !== null && obj(target.a.stock).sold !== job.a_sold) throw new Error("sale counter changed");
       if (channel === "allegro" && (target.aStatus === desiredA || desiredA === "ENDED" && target.aStatus === "INACTIVE") || channel === "ovoko" && target.oStatus === desiredO) { job[field] = "done"; await save(); continue; }
       if (channel === "ovoko" && job.kind !== "restore" && target.oStatus !== target.stockCode) throw new Error("target not available");
-      await syncAuthorization(db, owner);
+      await syncAuthorization(db, owner, env);
       const aBinding = syncRows<{ sealed: string }>(await db(`allegro_connections?owner_id=eq.${owner}&select=sealed`)), oBinding = syncRows<{ sealed: string }>(await db(`ovoko_connections?owner_id=eq.${owner}&select=sealed`));
       if (aBinding.length !== 1 || oBinding.length !== 1 || aBinding[0].sealed !== c.allegroSealed || oBinding[0].sealed !== c.ovokoSealed) throw new Error("connection changed");
       job[field] = "running"; await save();

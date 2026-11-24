@@ -12,6 +12,7 @@ import { recoverOvokoPublication } from "./ovoko-publication-recovery";
 import { salesSyncControl } from "./sales-sync";
 import { inventoryOperations } from "./inventory-operations";
 import { reverseSyncControl } from "./reverse-sales-sync";
+import { requireOvokoAccess } from "./ovoko-access";
 
 type OvokoEnv = AccountEnv & OvokoKeyEnv & OvokoPublishEnv & { OVOKO_TEST_ENABLED?: string; SALES_SYNC_ENABLED?: string };
 const attempts = new Map<string, number[]>();
@@ -43,7 +44,8 @@ export async function handleOvokoApi(request: Request, env: OvokoEnv): Promise<R
   const reply = (data: unknown, status = 200) => Response.json(data, { status, headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
   try {
     const context = await accountContext(request, env);
-    if (!context.isAdmin || context.account.suspended || env.OVOKO_TEST_ENABLED === "false") return reply({ message: "Test Ovoko jest dostepny tylko dla administratora i moze byc wylaczony." }, 403);
+    requireOvokoAccess(context, env);
+    if (env.OVOKO_TEST_ENABLED === "false") return reply({ message: "Obsluga Ovoko jest wylaczona." }, 403);
     const url = new URL(request.url);
     if (url.pathname === "/api/ovoko/status" && request.method === "GET") {
       let storageReady = false;

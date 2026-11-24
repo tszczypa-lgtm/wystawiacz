@@ -4,6 +4,7 @@ import { ovokoTransferRequest, type OvokoTransfer } from "./ovoko-transfer-clien
 import { createSupabaseBrowserClient } from "./supabase";
 import { emptyCombinedSnapshot, type CombinedSnapshot, type AllegroInventoryRow } from "./combined-inventory";
 import type { OvokoReadResult } from "./ovoko-read";
+import { readInventoryCache, writeInventoryCache, clearInventoryCache } from "./inventory-cache";
 
 async function ovoko<T>(path: string, signal: AbortSignal, body?: unknown): Promise<T> {
   const { data } = await createSupabaseBrowserClient().auth.getSession();
@@ -24,12 +25,35 @@ async function budget(signal: AbortSignal) {
   });
   signal.throwIfAborted(); inventoryReads.push(Date.now());
 }
-export async function loadCombinedInventory(previous: CombinedSnapshot | undefined, signal: AbortSignal, progress: (message: string) => void) {
+export async function loadCombinedInventory(previous: CombinedSnapshot | undefined, signal: AbortSignal, progress: (message: string) => void, options: { force?: boolean; partial?: (snapshot: CombinedSnapshot) => void } = {}) {
   const snapshot = previous ? { ...previous, allegro: [...previous.allegro], ovoko: [...previous.ovoko], transfers: { ...previous.transfers }, errors: [] as string[] } : emptyCombinedSnapshot();
   const info = await accountRequest<AccountInfo>("/me"); signal.throwIfAborted(); snapshot.admin = info.isAdmin;
   if (snapshot.accountEmail && snapshot.accountEmail !== info.account.email) throw new Error("Konto Wystawiacza zmienilo sie. Odswiez cala liste.");
   snapshot.accountEmail = info.account.email;
-  if (!info.isAdmin) { snapshot.ovoko = []; snapshot.statuses = {}; snapshot.transfers = {}; snapshot.ovokoComplete = false; }
+  const session = await createSupabaseBrowserClient().auth.getSession();
+  const owner = session.data.session?.user?.id;
+  if (info.access ? !info.access.allowed : !info.isAdmin) throw new Error(info.access?.reason || "Konto nie ma aktywnego dostepu.");
+  snapshot.admin = true; // Legacy field means inventory tools are available, not administrator privilege.
+  if (owner && options.force) await clearInventoryCache(owner);
+  if (owner && !previous && !options.force) {
+    const cached = await readInventoryCache(owner); signal.throwIfAborted();
+    if (cached && cached.accountEmail === info.account.email) try {
+      const seller = await allegroRequest<{ sellerId: string }>("/seller-identity", { signal });
+      const connection = await ovoko<{ connected: boolean; verifiedAt?: string }>("status", signal);
+      signal.throwIfAborted();
+      if (cached.sellerId === seller.sellerId && connection.connected && cached.ovokoVerifiedAt === connection.verifiedAt) {
+        const final = await accountRequest<AccountInfo>("/me");
+        const latest = await createSupabaseBrowserClient().auth.getSession(); signal.throwIfAborted();
+        if (final.account.email !== info.account.email || (final.access ? !final.access.allowed : !final.isAdmin) || latest.data.session?.user?.id !== owner) throw new Error("Konto zmienilo sie.");
+        progress("Lista z pamieci (maks. 5 minut); Odswiez pobiera aktualne stany."); return cached;
+      }
+    } catch { signal.throwIfAborted(); await clearInventoryCache(owner); }
+  }
+  const partial = async () => {
+    signal.throwIfAborted();
+    if (owner && (await createSupabaseBrowserClient().auth.getSession()).data.session?.user?.id !== owner) throw new Error("Konto zmienilo sie podczas odczytu.");
+    options.partial?.({ ...snapshot, allegro: [...snapshot.allegro], ovoko: [...snapshot.ovoko], transfers: { ...snapshot.transfers } });
+  };
   try {
     const { sellerId } = await allegroRequest<{ sellerId: string }>("/seller-identity", { signal });
     if (!/^\d{1,30}$/.test(sellerId) || snapshot.sellerId && snapshot.sellerId !== sellerId) { snapshot.allegro = []; snapshot.transfers = {}; snapshot.allegroComplete = false; snapshot.sellerId = ""; throw new Error("Konto Allegro zmienilo sie. Odswiez cala liste."); }
@@ -41,17 +65,18 @@ export async function loadCombinedInventory(previous: CombinedSnapshot | undefin
       if (!Array.isArray(page.offers) || page.offers.length > 200 || !Number.isSafeInteger(page.totalCount) || page.totalCount < 0 || page.offers.some(row => !row || !/^\d{1,30}$/.test(row.id) || seen.has(row.id)) || new Set(page.offers.map(row => row.id)).size !== page.offers.length || snapshot.allegro.length && snapshot.allegroTotal !== page.totalCount) throw new Error("Lista Allegro zmienila sie lub jest niepelna. Odswiez od poczatku.");
       if (page.offers.length !== Math.min(200, Math.max(0, page.totalCount - snapshot.allegro.length))) throw new Error("Niepelna strona Allegro.");
       page.offers.forEach(row => seen.add(row.id)); snapshot.allegro.push(...page.offers); snapshot.allegroTotal = page.totalCount;
-      if (info.isAdmin && page.offers.length) try {
+      if (page.offers.length) try {
         const states = await ovokoTransferRequest<{ ok: boolean; statuses: Record<string, OvokoTransfer> }>({ operation: "statuses", offerIds: page.offers.map(row => row.id) }, signal);
         if (!states.ok || !states.statuses) throw new Error("Niepelny rejestr powiazan.");
         Object.assign(snapshot.transfers, states.statuses);
       } catch (error) { signal.throwIfAborted(); snapshot.errors.push(`Powiazania: ${(error as Error).message}`); }
+      await partial();
       if (snapshot.allegro.length >= page.totalCount) { snapshot.allegroComplete = true; break; }
     }
     const last = await allegroRequest<{ sellerId: string }>("/seller-identity", { signal });
     if (last.sellerId !== sellerId) { snapshot.allegro = []; snapshot.transfers = {}; snapshot.allegroComplete = false; throw new Error("Konto Allegro zmienilo sie. Odswiez liste."); }
   } catch (error) { signal.throwIfAborted(); snapshot.allegro = []; snapshot.transfers = {}; snapshot.allegroComplete = false; snapshot.errors.push(`Allegro: ${(error as Error).message}`); }
-  if (info.isAdmin) try {
+  try {
     const connection = await ovoko<{ connected: boolean; verifiedAt?: string }>("status", signal);
     if (!connection.connected || snapshot.ovokoVerifiedAt && snapshot.ovokoVerifiedAt !== connection.verifiedAt) { snapshot.ovoko = []; snapshot.ovokoComplete = false; throw new Error("Polacz konto Ovoko lub odswiez liste po zmianie polaczenia."); }
     snapshot.ovokoVerifiedAt = connection.verifiedAt;
@@ -64,13 +89,17 @@ export async function loadCombinedInventory(previous: CombinedSnapshot | undefin
       const page = await ovoko<OvokoReadResult>("read", signal, { useSaved: true, operation: "inventory", page: Math.floor(snapshot.ovoko.length / 100) + 1, limit: 100, sort: "oldest" });
       if (!page.ok || !page.readOnly || !Array.isArray(page.rows) || !page.pagination || page.pagination.limit !== 100 || page.pagination.page !== Math.floor(snapshot.ovoko.length / 100) + 1 || !Number.isSafeInteger(page.pagination.total) || page.pagination.total < 0 || page.rows.some(row => !row || !/^[1-9]\d{0,11}$/.test(row.id) || seen.has(row.id)) || new Set(page.rows.map(row => row.id)).size !== page.rows.length || snapshot.ovoko.length && snapshot.ovokoTotal !== page.pagination.total || page.rows.length !== Math.min(100, Math.max(0, page.pagination.total - snapshot.ovoko.length))) throw new Error("Lista Ovoko zmienila sie lub jest niepelna. Odswiez od poczatku.");
       page.rows.forEach(row => seen.add(row.id)); snapshot.ovoko.push(...page.rows); snapshot.ovokoTotal = page.pagination.total;
+      await partial();
       if (snapshot.ovoko.length >= page.pagination.total) { snapshot.ovokoComplete = true; break; }
     }
     const last = await ovoko<{ connected: boolean; verifiedAt?: string }>("status", signal);
     if (!last.connected || last.verifiedAt !== connection.verifiedAt) { snapshot.ovoko = []; snapshot.ovokoComplete = false; throw new Error("Polaczenie Ovoko zmienilo sie. Odswiez liste."); }
   } catch (error) { signal.throwIfAborted(); snapshot.ovoko = []; snapshot.ovokoComplete = false; snapshot.errors.push(`Ovoko: ${(error as Error).message}`); }
   const finalAccount = await accountRequest<AccountInfo>("/me"); signal.throwIfAborted();
-  if (finalAccount.account.email !== info.account.email || finalAccount.isAdmin !== info.isAdmin) throw new Error("Konto lub uprawnienia zmienily sie. Odswiez liste.");
+  if (finalAccount.account.email !== info.account.email || finalAccount.isAdmin !== info.isAdmin || (finalAccount.access ? !finalAccount.access.allowed : !finalAccount.isAdmin)) throw new Error("Konto lub uprawnienia zmienily sie. Odswiez liste.");
+  const latest = await createSupabaseBrowserClient().auth.getSession();
+  if (owner && latest.data.session?.user?.id !== owner) throw new Error("Konto zmienilo sie. Odswiez liste.");
   snapshot.errors = [...new Set(snapshot.errors)]; snapshot.checkedAt = new Date().toISOString();
+  if (owner) await writeInventoryCache(owner, snapshot);
   return snapshot;
 }

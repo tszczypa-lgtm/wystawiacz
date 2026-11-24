@@ -20,7 +20,7 @@ export function OvokoTransferWindow() {
   const [offers, setOffers] = useState<BulkOffer[] | null>(null), [allowed, setAllowed] = useState(false), [error, setError] = useState("");
   useEffect(() => {
     let mounted = true;
-    void accountRequest<AccountInfo>("/me").then(info => { if (mounted) { if (info.isAdmin) setAllowed(true); else setError("Przenoszenie Ovoko jest dostepne tylko dla administratora."); } }).catch(error => { if (mounted) setError(error.message); });
+    void accountRequest<AccountInfo>("/me").then(info => { if (mounted) { if (info.isAdmin || info.access?.allowed) setAllowed(true); else setError(info.access?.reason || "Brak aktywnego dostepu."); } }).catch(error => { if (mounted) setError(error.message); });
     return () => { mounted = false; };
   }, []);
   useEffect(() => {

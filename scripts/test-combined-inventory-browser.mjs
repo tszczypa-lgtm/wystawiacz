@@ -11,7 +11,7 @@ const bundle = await build({ stdin: { contents: 'import React from "react";impor
 const browser = await chromium.launch({ headless: true, channel: "chrome" });
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-  let admin = true, ovokoFail = false, identityReads = 0, changedAccount = false, reviewFailure;
+  let admin = false, ovokoFail = false, identityReads = 0, changedAccount = false, reviewFailure;
   const errors = [], operations = [], withdrawalCalls = [];
   const syncControls = []; let syncEnabled = false;
   page.on("pageerror", error => errors.push(error.message));
@@ -19,7 +19,7 @@ try {
     const req = route.request(), url = new URL(req.url());
     if (!url.pathname.startsWith("/api/")) return route.fulfill({ contentType: "text/html", body: '<html><body style="background:#0d1117;color:white"><main id="root" style="padding:12px"></main></body></html>' });
     operations.push(url.pathname);
-    if (url.pathname === "/api/account/me") return route.fulfill({ json: { isAdmin: admin, account: { email: "fixture@test", suspended: false } } });
+    if (url.pathname === "/api/account/me") return route.fulfill({ json: { isAdmin: admin, access: { allowed: true }, account: { email: "fixture@test", suspended: false } } });
     if (url.pathname === "/api/allegro/seller-identity") { identityReads++; return route.fulfill({ json: { sellerId: changedAccount && identityReads > 1 ? "666" : "555" } }); }
     if (url.pathname === "/api/ovoko/sales-sync") {
       const body = req.postDataJSON(); syncControls.push(body);
@@ -35,15 +35,15 @@ try {
       return route.fulfill({ json: job });
     }
     if (url.pathname === "/api/allegro/inventory") return route.fulfill({ json: { offers: Array.from({ length: 44 }, (_, i) => ({ id: String(i + 1), name: `Radio ABC123456 egzemplarz ${i + 1}`, image: "", externalId: "", status: "ACTIVE", stock: 1, price: { amount: "50.00", currency: "PLN" } })), totalCount: 44 } });
-    if (url.pathname === "/api/ovoko/transfer-inventory") { assert.ok(admin); assert.equal(req.postDataJSON().operation, "statuses"); return route.fulfill({ json: { ok: true, statuses: { "2": { state: "transferred", partId: "999" } } } }); }
-    if (url.pathname === "/api/ovoko/status") { assert.ok(admin); return route.fulfill({ json: { allowed: true, connected: true, verifiedAt: "fixture-binding" } }); }
+    if (url.pathname === "/api/ovoko/transfer-inventory") { assert.equal(req.postDataJSON().operation, "statuses"); return route.fulfill({ json: { ok: true, statuses: { "2": { state: "transferred", partId: "999" } } } }); }
+    if (url.pathname === "/api/ovoko/status") { return route.fulfill({ json: { allowed: true, connected: true, verifiedAt: "fixture-binding" } }); }
     if (url.pathname === "/api/ovoko/coordination-review") {
       assert.deepEqual(req.postDataJSON(), { offerIds: ["1"] });
       if (reviewFailure) return route.fulfill({ status: reviewFailure.status, json: reviewFailure });
       return route.fulfill({ json: { readOnly: true, automatic: false, eventsRead: 1, partial: false, scope: "Zakres kontrolny", rows: [{ offerId: "1", partId: "10", name: "Radio ABC123456", allegroStatus: "ACTIVE", stock: 1, ovokoStatus: "stock", decision: { status: "idle", action: null, reason: "Brak potwierdzonej sprzedazy." }, withdrawal: { allegro: true, ovoko: true, both: true } }] } });
     }
     if (url.pathname === "/api/ovoko/read") {
-      assert.ok(admin); assert.equal(req.method(), "POST"); const body = req.postDataJSON(); assert.equal(body.useSaved, true);
+      assert.equal(req.method(), "POST"); const body = req.postDataJSON(); assert.equal(body.useSaved, true);
       if (body.operation === "statuses") return route.fulfill({ json: { ok: true, readOnly: true, rows: [{ id: "0", name: "Na stanie" }, { id: "1", name: "Sprzedano" }, { id: "4", name: "Wycofany" }] } });
       assert.equal(body.operation, "inventory"); if (ovokoFail) return route.fulfill({ status: 503, json: { message: "Awaria odczytu fixture" } });
       return route.fulfill({ json: { ok: true, readOnly: true, rows: [{ id: "10", name: "Radio", externalId: "tymo:555:1", manufacturerCode: "ABC123456", status: "0", price: "100.00" }, { id: "11", name: "Samodzielna czesc Ovoko", externalId: "", manufacturerCode: "ABC123456", status: "0", price: "100.00" }, { id: "12", name: "Sprzedana czesc Ovoko", status: "1" }, { id: "13", name: "Wycofana czesc Ovoko", status: "4" }], pagination: { page: body.page, limit: 100, total: 4 } } });
@@ -52,6 +52,9 @@ try {
   });
   async function open() { identityReads = 0; await page.goto("https://combined.test/panel/inventory"); await page.addStyleTag({ content: css.css }); await page.addScriptTag({ content: bundle.outputFiles[0].text }); await page.locator('[data-part-key="o:11"]').waitFor(); await page.getByText(/Odczyt niepelny/).waitFor({ state: "hidden" }); }
   await open();
+  assert.equal(await page.getByRole("link", { name: "Administrator", exact: true }).count(), 0, "Ordinary users get inventory tools, not administrator privileges");
+  await page.getByLabel("Szukaj czesci").fill("abc123 radio"); assert.equal(await page.getByRole("table", { name: "Czesci Allegro i Ovoko" }).locator("tbody tr").count(),44); await page.getByLabel("Szukaj czesci").fill("");
+  await page.getByText("Wiecej", { exact: true }).click(); await page.getByLabel("Sortowanie czesci").selectOption("-age"); assert.equal(await page.locator("[data-part-key]").first().getAttribute("data-part-key"),"a:44"); await page.getByLabel("Sortowanie czesci").selectOption("ovoko_price"); assert.equal(await page.locator("[data-part-key]").first().getAttribute("data-part-key"),"a:1"); await page.getByLabel("Sortowanie czesci").selectOption("source"); await page.getByText("Wiecej", { exact: true }).click();
   assert.equal(syncControls.length, 0, "Opening the list never arms or even probes the background monitor");
   assert.equal(await page.getByRole("link", { name: "Synchronizacja", exact: true }).count(), 1);
   assert.equal(await page.getByRole("link", { name: "Zarezerwowane", exact: true }).count(), 1);

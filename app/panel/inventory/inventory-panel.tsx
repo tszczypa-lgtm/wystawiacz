@@ -17,7 +17,7 @@ const button = "rounded-lg border border-white/20 px-3 py-2 text-sm font-bold ho
 
 export function InventoryPanel() {
   const [ovokoPreviewAllowed, setOvokoPreviewAllowed] = useState(false);
-  useEffect(() => { let mounted = true; void accountRequest<AccountInfo>("/me").then(info => { if (mounted) setOvokoPreviewAllowed(info.isAdmin); }).catch(() => {}); return () => { mounted = false; }; }, []);
+  useEffect(() => { let mounted = true; void accountRequest<AccountInfo>("/me").then(info => { if (mounted) setOvokoPreviewAllowed(info.isAdmin || info.access?.allowed === true); }).catch(() => {}); return () => { mounted = false; }; }, []);
   const [draft, setDraft] = useState(initial);
   const [filters, setFilters] = useState(initial);
   const [offset, setOffset] = useState(0);

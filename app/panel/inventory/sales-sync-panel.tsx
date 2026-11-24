@@ -11,19 +11,21 @@ const reasons: Record<string, string> = { confirmed_withdrawn: "Status Wycofany 
 export function SalesSyncPanel() {
   const [status, setStatus] = useState<Status>(), [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [receivedAt, setReceivedAt] = useState(0);
+  const [notice, setNotice] = useState("");
   const lock = useRef(false);
-  async function request(operation: "status" | "enable" | "disable") {
+  async function request(operation: "status" | "enable" | "disable" | "release") {
     if (lock.current) return;
-    lock.current = true; setBusy(true); setError("");
+    lock.current = true; setBusy(true); setError(""); setNotice("");
     try {
       const { data } = await createSupabaseBrowserClient().auth.getSession();
       if (!data.session) throw new Error("Zaloguj sie do Wystawiacza.");
-      const response = await fetch("/api/ovoko/sales-sync", { method: "POST", cache: "no-store", headers: { Authorization: `Bearer ${data.session.access_token}`, "Content-Type": "application/json" }, body: JSON.stringify({ operation, ...(operation === "enable" ? { confirm: true } : {}) }) });
+      const response = await fetch("/api/ovoko/sales-sync", { method: "POST", cache: "no-store", headers: { Authorization: `Bearer ${data.session.access_token}`, "Content-Type": "application/json" }, body: JSON.stringify({ operation, ...(["enable", "release"].includes(operation) ? { confirm: true } : {}) }) });
       const body = await response.json() as Status & { message?: string };
       if (!response.ok) throw new Error(body.message || "Nie potwierdzono ustawien automatu.");
       if (body.direction !== "allegro_to_ovoko" || !Array.isArray(body.jobs)) throw new Error("Nieprawidlowy status synchronizacji.");
       setStatus(body);
       setReceivedAt(Date.now());
+      if (operation === "release") setNotice("Zwolniono konta. Mozesz wlaczyc synchronizacje na docelowym koncie Wystawiacza po przygotowaniu jego powiazan.");
     } catch (e) { setError(e instanceof Error ? e.message : "Nie potwierdzono ustawien."); }
     finally { lock.current = false; setBusy(false); }
   }
@@ -33,10 +35,13 @@ export function SalesSyncPanel() {
     <div className="mt-2 space-y-2">
       <p>Po wlaczeniu: nowe zakupy ostatniej pojedynczej sztuki Allegro wycofuja dokladnie powiazana czesc Ovoko. Bez usuwania zdjec, bez wznawiania po anulowaniu. Dziala w tle; to nie jest gwarancja natychmiastowej ochrony przed jednoczesnym zakupem.</p>
       <p className="text-amber-200">Reczne wycofanie nie oznacza sprzedazy. Kazdy kierunek ma osobna zgode. Przy obu wlaczonych kierunkach kontrole sa naprzemienne, zwykle co ok. 2 minuty dla jednego konta; kolejki i bledy wydluzaja czas.</p>
+      <p>Jedna synchronizacja dla kont Allegro i Ovoko, niezaleznie od liczby kart. Przy zmianie konta Wystawiacza wylacz oba kierunki na starym koncie i zwolnij powiazanie. Nie przenosi to historii publikacji ani rezerwacji.</p>
+      <button className={button} disabled={busy || status?.enabled !== false} onClick={() => { if (window.confirm("Zwolnic konta do podlaczenia na innym koncie Wystawiacza? Oba kierunki musza byc wylaczone; trwajace i niepewne operacje blokuja zwolnienie.")) void request("release"); }}>Zwolnij konta po wylaczeniu obu kierunkow</button>
       {status && <p>Ostatni odczyt: {status.lastChecked ? new Date(status.lastChecked).toLocaleString("pl-PL", { timeZone: "Europe/Warsaw" }) : "jeszcze nie wykonano kontroli w tle"}. {!status.caughtUp && status.enabled && "Odczyt zaleglych zdarzen - zapisy wstrzymane."}</p>}
       {status && !status.configured && <p className="text-amber-200">Wymagana migracja 016, SALES_SYNC_ENABLED=true i harmonogram Cloudflare co minute.</p>}
       {status?.lastError && <p role="alert" className="text-amber-200">{status.lastError}</p>}
       {error && <p role="alert" className="text-amber-200">{error}</p>}
+      {notice && <p role="status" className="text-emerald-200">{notice}</p>}
       <div className="flex flex-wrap gap-2"><button className={button} disabled={busy} onClick={() => void request("status")}>Odswiez status Allegro → Ovoko</button>{status && <button className={button} disabled={busy || !status.enabled && !status.configured} onClick={() => void request(status.enabled ? "disable" : "enable")}>{status.enabled ? "Wylacz Allegro → Ovoko" : "Wlacz Allegro → Ovoko od teraz"}</button>}</div>
       {busy && <p role="status">Sprawdzam ustawienia...</p>}
       {!!status?.jobs.length && <div className="max-h-48 overflow-auto"><table className="w-full text-left text-xs" aria-label="Dziennik automatu"><tbody>{status.jobs.map(job => <tr className="border-t border-white/10" key={String(job.id)}><td className="p-1">Allegro {String(job.offer_id)} / Ovoko {String(job.part_id)}</td><td className="p-1">{states[String(job.state)] || "Nieznany wynik"}</td><td className="p-1">{reasons[String(job.diagnostic)] || ""}</td></tr>)}</tbody></table></div>}

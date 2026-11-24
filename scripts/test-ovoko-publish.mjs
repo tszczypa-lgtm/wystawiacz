@@ -15,9 +15,9 @@ function load(file) {
 const { handleOvokoApi } = load(path.join(root, "lib/ovoko-api.ts"));
 const { sealConnection } = load(path.join(root, "lib/allegro-api.ts"));
 const keyBytes = new Uint8Array(32).fill(7), key = await crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, ["encrypt", "decrypt"]);
-const env = { SUPABASE_SERVICE_ROLE_KEY: "fixture", ALLEGRO_ENCRYPTION_KEY: Buffer.from(keyBytes).toString("base64"), OVOKO_PUBLISH_ENABLED: "true" };
+const env = { BILLING_ENFORCED: "true", SUPABASE_SERVICE_ROLE_KEY: "fixture", ALLEGRO_ENCRYPTION_KEY: Buffer.from(keyBytes).toString("base64"), OVOKO_PUBLISH_ENABLED: "true" };
 const credentials = { username: "fixture-account", password: "private-password", user_token: "private-token" };
-let user = 1, admin, suspended, owns, stock, bundle, mode, donorModel, duplicate, failDb, sourceReads, lateStock, writes, categoryName, revokeAfterRead, imageMode, extraCodes, bulk, expectedPrice, credentialReads, rotateAt;
+let user = 1, admin, suspended, owns, stock, bundle, mode, donorModel, duplicate, failDb, sourceReads, lateStock, writes, categoryName, revokeAfterRead, imageMode, extraCodes, bulk, expectedPrice, credentialReads, rotateAt, ordinaryAccess = false;
 let providerPresent, inventoryReads;
 const owner = () => `00000000-0000-0000-0000-${String(user).padStart(12, "0")}`;
 const records = new Map(), calls = [];
@@ -36,7 +36,7 @@ globalThis.fetch = async (input, options = {}) => {
   const url = new URL(input), method = options.method || "GET";
   calls.push({ url: url.href, method });
   if (url.pathname === "/auth/v1/user") return Response.json({ id: owner(), email_confirmed_at: "2026-01-01" });
-  if (url.pathname === "/rest/v1/customer_accounts") return Response.json([{ owner_id: owner(), company: {}, suspended }]);
+  if (url.pathname === "/rest/v1/customer_accounts") return Response.json([{ owner_id: owner(), company: {}, suspended, access_mode: ordinaryAccess ? "free" : "standard", free_until: null }]);
   if (url.pathname === "/rest/v1/account_admins") return Response.json(admin ? [{ owner_id: owner() }] : []);
   if (url.pathname === "/rest/v1/allegro_connections") return Response.json([{ sealed: await sealConnection({ accessToken: "seller-token", expiresAt: Date.now() + 3600000 }, key, owner()) }]);
   if (url.pathname === "/rest/v1/ovoko_connections") { credentialReads++; return Response.json([{ sealed: await sealConnection({ ...credentials, ...(credentialReads >= rotateAt ? { password: "private-changed" } : {}) }, key, `ovoko:v1:${owner()}`) }]); }
@@ -143,6 +143,7 @@ globalThis.fetch = async (input, options = {}) => {
 try {
   reset(); assert.equal((await handleOvokoApi(req(), { ...env, OVOKO_PUBLISH_ENABLED: "false" })).status, 503); assert.equal(writes, 0);
   reset(); admin = false; assert.equal((await handleOvokoApi(req(), env)).status, 403); assert.equal(calls.some(call => call.url.includes("api.rrr.lt")), false);
+  reset(); admin = false; ordinaryAccess = true; const ordinary = await handleOvokoApi(req(), env); assert.equal(ordinary.status, 200, await ordinary.text()); assert.equal(writes, 1, "Normal active account can publish its own part without administrator access"); ordinaryAccess = false;
   reset(); suspended = true; assert.equal((await handleOvokoApi(req(), env)).status, 403);
   reset(); assert.equal((await handleOvokoApi(req(payload(), { Origin: "https://evil.test" }), env)).status, 403);
   for (const changed of [{ confirmSingle: false }, { username: "other" }, { price: "0" }, { currency: "USD" }, { donorId: "../1" }, { photos: ["https://evil.test"] }]) {

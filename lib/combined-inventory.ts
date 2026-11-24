@@ -83,7 +83,8 @@ export function filterCombinedInventory(rows: CombinedPart[], filter: CombinedFi
     if (filter.coverage === "both" && !(a && o)) return false;
     if (filter.coverage === "allegro" && !(a && !o && oKnown && snapshot.ovokoComplete)) return false;
     if (filter.coverage === "ovoko" && !(o && !a && aKnown && snapshot.allegroComplete)) return false;
-    if (filter.query && !folded([row.name, row.allegro?.id, row.allegro?.externalId, row.ovoko?.id, row.ovoko?.manufacturerCode, row.ovoko?.externalId].join(" ")).includes(folded(filter.query.trim()))) return false;
+    const haystack = folded([row.name, row.allegro?.id, row.allegro?.externalId, row.ovoko?.id, row.ovoko?.manufacturerCode, row.ovoko?.externalId].join(" "));
+    if (folded(filter.query).trim().split(/\s+/).filter(Boolean).some(token => !haystack.includes(token) && !haystack.replace(/[-\s]/g, "").includes(token.replace(/-/g, "")))) return false;
     // The range is always Allegro's source price; never compare an unconfirmed Ovoko currency.
     if (from !== null || to !== null) {
       if (!row.allegro?.price) return false;
@@ -91,5 +92,22 @@ export function filterCombinedInventory(rows: CombinedPart[], filter: CombinedFi
       if (!Number.isFinite(price) || from !== null && price < from || to !== null && price > to) return false;
     }
     return true;
+  });
+}
+export function sortCombinedInventory(rows: CombinedPart[], sort: string) {
+  const direction = sort.startsWith("-") ? -1 : 1, mode = sort.replace(/^-/, "");
+  if (mode === "source") return rows;
+  return [...rows].sort((a, b) => {
+    if (mode === "name") return direction * a.name.localeCompare(b.name, "pl", { numeric: true }) || a.key.localeCompare(b.key);
+    if (mode === "age") {
+      // Portal IDs increase within each portal; never compare unrelated portal IDs as timestamps.
+      const channel = Number(!a.allegro) - Number(!b.allegro);
+      if (channel) return channel;
+      const left = BigInt(a.allegro?.id || a.ovoko!.id), right = BigInt(b.allegro?.id || b.ovoko!.id);
+      return left === right ? 0 : (left < right ? -1 : 1) * direction;
+    }
+    const value = (r: CombinedPart) => { const raw = mode === "ovoko_price" ? r.ovoko?.price : r.allegro?.price?.amount; return raw != null && raw !== "" && Number.isFinite(Number(raw)) ? Number(raw) : null; };
+    const left = value(a), right = value(b);
+    return left === null ? right === null ? a.key.localeCompare(b.key) : 1 : right === null ? -1 : direction * (left - right) || a.key.localeCompare(b.key);
   });
 }

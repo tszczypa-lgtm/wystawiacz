@@ -92,21 +92,23 @@ for (const change of ["rotate-midway", "sold-midway"]) {
   assert.deepEqual(writes, ["allegro"]); assert.equal(result.ovoko, "uncertain", "Changed/sold target after the first leg cannot be overwritten");
 }
 // Real HTTP perimeter: admin role/suspension, CSRF, input bounds and no unauthenticated mutation.
-let allowed = false, suspended = false, dispatched = 0;
-const api = load("allegro-api", name => { assert.equal(name, "./inventory-withdrawal"); return { manageWithdrawal: async () => { dispatched++; return { ok: true }; }, WithdrawalError: class extends Error {} }; });
+let allowed = false, suspended = false, dispatched = 0, normalFree = false;
+const accountModule = load("account-api", name => { assert.equal(name, "./account-validation"); return load("account-validation"); });
+const api = load("allegro-api", name => { if (name === "./inventory-withdrawal-access") return load("inventory-withdrawal-access", n => { assert.equal(n,"./account-api"); return accountModule; }); assert.equal(name, "./inventory-withdrawal"); return { manageWithdrawal: async () => { dispatched++; return { ok: true }; }, WithdrawalError: class extends Error {} }; });
+const apiOwner = "00000000-0000-4000-8000-000000000001";
 const keyBytes = new Uint8Array(32).fill(8), key = await crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, ["encrypt", "decrypt"]);
-const sealed = await api.sealConnection({ accessToken: "fixture", expiresAt: Date.now() + 3600000 }, key, owner);
+const sealed = await api.sealConnection({ accessToken: "fixture", expiresAt: Date.now() + 3600000 }, key, apiOwner);
 const originalFetch = globalThis.fetch;
 try {
   globalThis.fetch = async (input, options = {}) => {
     const path = new URL(input).pathname; assert.equal(options.method || "GET", "GET");
-    if (path === "/auth/v1/user") return Response.json({ id: owner });
+    if (path === "/auth/v1/user") return Response.json({ id: apiOwner, email_confirmed_at: "2026-01-01T00:00:00Z" });
     if (path === "/rest/v1/allegro_connections") return Response.json([{ sealed }]);
-    if (path === "/rest/v1/account_admins") return Response.json(allowed ? [{ owner_id: owner }] : []);
-    if (path === "/rest/v1/customer_accounts") return Response.json([{ owner_id: owner, suspended }]);
+    if (path === "/rest/v1/account_admins") return Response.json(allowed ? [{ owner_id: apiOwner }] : []);
+    if (path === "/rest/v1/customer_accounts") return Response.json([{ owner_id: apiOwner, suspended, access_mode: normalFree ? "free" : "standard", free_until: null }]);
     throw new Error(path);
   };
-  const apiEnv = { SUPABASE_SERVICE_ROLE_KEY: "fixture", ALLEGRO_ENCRYPTION_KEY: Buffer.from(keyBytes).toString("base64") };
+  const apiEnv = { BILLING_ENFORCED: "true", SUPABASE_SERVICE_ROLE_KEY: "fixture", ALLEGRO_ENCRYPTION_KEY: Buffer.from(keyBytes).toString("base64") };
   const req = (body = {}, headers = {}) => new Request("https://fixture.test/api/allegro/inventory-withdrawal", { method: "POST", headers: { Authorization: "Bearer fixture", Origin: "https://fixture.test", "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
   assert.equal((await api.handleAllegroApi(req(), apiEnv)).status, 403);
   allowed = true; suspended = true; assert.equal((await api.handleAllegroApi(req(), apiEnv)).status, 403);
@@ -114,5 +116,6 @@ try {
   assert.equal((await api.handleAllegroApi(req({}, { "Content-Length": "8193" }), apiEnv)).status, 413);
   assert.equal((await api.handleAllegroApi(req([]), apiEnv)).status, 400); assert.equal(dispatched, 0);
   assert.equal((await api.handleAllegroApi(req(), apiEnv)).status, 200); assert.equal(dispatched, 1);
+  allowed = false; normalFree = true; assert.equal((await api.handleAllegroApi(req(), apiEnv)).status, 200); assert.equal(dispatched, 2, "Active normal accounts can withdraw their own offers");
 } finally { globalThis.fetch = originalFetch; }
 console.log("Manual withdrawal: exact scopes, durable CAS, owner/account/generation binding, confirmation, expiry, no delete, partial outcomes, timeout readback, concurrency and no-replay passed. All services mocked.");

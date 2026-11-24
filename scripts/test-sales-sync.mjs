@@ -16,9 +16,9 @@ const { handleOvokoApi } = load(path.join(root, "lib/ovoko-api.ts"));
 const { sealConnection } = load(path.join(root, "lib/allegro-api.ts"));
 const raw = new Uint8Array(32).fill(7), key = await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
 const owner = "00000000-0000-4000-8000-000000000001";
-const env = { SUPABASE_SERVICE_ROLE_KEY: "fixture", NEXT_PUBLIC_SUPABASE_URL: "https://database.test", ALLEGRO_ENCRYPTION_KEY: Buffer.from(raw).toString("base64"), ALLEGRO_CLIENT_ID: "client", ALLEGRO_CLIENT_SECRET: "secret", SALES_SYNC_ENABLED: "true" };
+const env = { BILLING_ENFORCED: "true", SUPABASE_SERVICE_ROLE_KEY: "fixture", NEXT_PUBLIC_SUPABASE_URL: "https://database.test", ALLEGRO_ENCRYPTION_KEY: Buffer.from(raw).toString("base64"), ALLEGRO_CLIENT_ID: "client", ALLEGRO_CLIENT_SECRET: "secret", SALES_SYNC_ENABLED: "true" };
 let sub, jobs, admin, suspended, mode, writes, partStatus, events, cursorCommits, providerReads, refreshes, aSealed, oSealed, sourceStock, log, purchaseAt;
-let expireToken = false;
+let expireToken = false, ordinaryAccess = false;
 async function reset() {
   sub = undefined; jobs = []; admin = true; suspended = false; mode = "ok"; writes = 0; partStatus = "0"; events = []; cursorCommits = []; providerReads = 0; refreshes = 0; sourceStock = 0; log = [];
   aSealed = await sealConnection({ accessToken: "private-a", refreshToken: "private-r", expiresAt: expireToken ? 0 : Date.now() + 3600000, clientId: "client", sellerId: "555" }, key, owner);
@@ -38,8 +38,9 @@ globalThis.fetch = async (input, init = {}) => {
   if (url.hostname === "database.test") {
     if (url.pathname === "/auth/v1/user") return Response.json({ id: owner, email_confirmed_at: "2026-01-01T00:00:00Z" });
     const table = url.pathname.replace("/rest/v1/", "");
+    if (table === "rpc/sync_account_lock") return Response.json(mode !== "ownership-conflict");
     if (table === "account_admins") return Response.json(admin ? [{ owner_id: owner }] : []);
-    if (table === "customer_accounts") return Response.json([{ suspended }]);
+    if (table === "customer_accounts") return Response.json([{ suspended, access_mode: ordinaryAccess ? "free" : "standard", free_until: null }]);
     if (table === "allegro_connections") { if (method === "PATCH") { aSealed = body.sealed; return Response.json([{ sealed: aSealed }]); } return Response.json([{ sealed: aSealed }]); }
     if (table === "ovoko_connections") return Response.json([{ sealed: oSealed }]);
     if (table === "sales_sync") {
@@ -110,10 +111,11 @@ async function arm() {
 try {
   await arm(); await runSalesSync(env); assert.equal(writes, 1); assert.equal(jobs[0].state, "done"); assert.equal(sub.cursor, "101");
   events = []; await runSalesSync(env); assert.equal(writes, 1, "Never replay a completed action");
-  for (const failure of ["foreign", "generation", "quantity", "cancelled", "suspend", "disable", "binding", "late-sold", "lost-cas"]) {
+  for (const failure of ["foreign", "generation", "quantity", "cancelled", "suspend", "disable", "binding", "late-sold", "lost-cas", "ownership-conflict"]) {
     await arm(); mode = failure; await runSalesSync(env); assert.equal(writes, 0, failure);
   }
   await arm(); sourceStock = 1; await runSalesSync(env); assert.equal(writes, 0); assert.equal(jobs[0].diagnostic, "not_last_single_unit");
+  await arm(); admin = false; ordinaryAccess = true; await runSalesSync(env); assert.equal(writes, 1, "Active regular accounts synchronize their own links"); ordinaryAccess = false;
   await arm(); mode = "outage"; await runSalesSync(env); assert.equal(sub.cursor, "100"); assert.equal(cursorCommits.length, 0); assert.ok(sub.last_error); assert.equal(writes, 0);
   await arm(); mode = "timeout"; await runSalesSync(env); assert.equal(writes, 1); assert.equal(jobs[0].state, "uncertain");
   events = []; mode = "ok"; await runSalesSync(env); assert.equal(writes, 1, "Ambiguous writes are read back, never replayed");

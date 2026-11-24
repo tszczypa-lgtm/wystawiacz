@@ -13,6 +13,14 @@ const db = async (path, init = {}) => {
   if (table === "ovoko_single_publications") return [{ state: "created", part_id: "20", request_hash: hash }];
   if (table === "allegro_connections") return [{ sealed: mode === "rotate" ? "changed" : "a-sealed" }];
   if (table === "ovoko_connections") return [{ sealed: "o-sealed" }];
+  if (table === "rpc/archive_inventory_reservation") {
+    const job = jobs.get(body.p_id); assert.equal(body.p_owner, owner);
+    if (!job || job.owner_id !== owner) throw new Error("owner mismatch");
+    const restore = [...jobs.values()].find(j => j.parent_id === job.id);
+    if (restore && restore.state !== "prepared") throw new Error("restore started");
+    if (restore) Object.assign(restore, { state: "settled", allegro_state: "not_requested", ovoko_state: "not_requested" });
+    job.closed = true; return [structuredClone(job)];
+  }
   assert.equal(table, "inventory_operations");
   if (method === "POST") { if (jobs.has(body.id) || body.kind === "reserve" && [...jobs.values()].some(j => j.kind === "reserve" && !j.closed && j.target_key === body.target_key)) throw new Error("unique conflict"); jobs.set(body.id, structuredClone(body)); return [structuredClone(body)]; }
   let rows = [...jobs.values()].filter(j => matches(j, url.searchParams));
@@ -62,5 +70,14 @@ reset(); job = await execute(await prepare("withdraw", { offerId: null, targets:
 reset(); mode = "foreign"; await assert.rejects(prepare()); assert.equal(writes.length, 0);
 reset(); await assert.rejects(prepare("reserve", { reservation: { ...reservation(), deposit: "101" } })); await assert.rejects(prepare("reserve", { reservation: { ...reservation(), until: "2000-01-01T00:00:00Z" } }));
 job = await prepare(); await assert.rejects(run("other", env, { operation: "status", jobId: job.id })); await assert.rejects(run(owner, env, { operation: "execute", jobId: job.id }));
+reset(); job = await execute(await prepare()); const countBeforeArchive = writes.length;
+await run(owner, env, { operation: "archive", jobId: job.id, confirm: true }); assert.equal(jobs.get(job.id).closed, true); assert.equal(writes.length, countBeforeArchive, "Removing a reservation never restores or deletes portal listings");
+reset(); job = await execute(await prepare()); await run(owner, env, { operation: "prepare-restore", reservationId: job.id, requestId: crypto.randomUUID() }); await run(owner, env, { operation: "archive", jobId: job.id, confirm: true }); assert.equal(writes.length, 2, "Unstarted restore is cancelled without provider mutations");
+reset(); job = await prepare(); const anchor = jobs.get(job.id); anchor.offer_id = "11"; anchor.part_id = "21"; anchor.target_key = "a:11";
+const appended = await prepare("reserve", { reservationId: job.id, reservation: { ...reservation(), customer: "Tampered customer", price: "75", deposit: "5" } });
+assert.equal(appended.reservation.groupId, job.id); assert.equal(appended.reservation.customer, "Private customer"); assert.equal(appended.reservation.price, "75"); assert.equal(writes.length, 0);
+await assert.rejects(prepare("reserve", { reservationId: crypto.randomUUID() }));
+anchor.closed = true; await assert.rejects(prepare("reserve", { reservationId: job.id }));
 const sql = readFileSync(new URL("../supabase/017_inventory_operations.sql", import.meta.url), "utf8"); assert.match(sql, /enable row level security/); assert.match(sql, /revoke all.*from public,anon,authenticated/); assert.match(sql, /inventory_restore_once/);
+const extraSql = readFileSync(new URL("../supabase/019_sync_ownership_reservations.sql", import.meta.url), "utf8"); assert.match(extraSql, /pg_advisory_xact_lock/); assert.match(extraSql, /ovoko_account text not null unique/); assert.match(extraSql, /owner_id uuid not null unique/); assert.match(extraSql, /before insert.*inventory_operations/); assert.match(extraSql, /parent_id=p_id.*for update/);
 console.log("Inventory operations: exact scopes incl. Ovoko-only, private reservation validation, durable per-target locks, partial timeout/no replay, stock/sold/generation/credential/role/CAS guards, non-mutating preparation, manual safe restore, plan cancellation and owner isolation passed. DB/provider fixtures only.");

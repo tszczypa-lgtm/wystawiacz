@@ -3,19 +3,26 @@ import { ovokoConnectionKey, validateOvokoCredentials, type OvokoKeyEnv } from "
 import { ovokoWriteClient, ovokoWriteDigest } from "./ovoko-write-client";
 import { OvokoError } from "./ovoko-read";
 import { syncRows, type SyncDb } from "./sales-sync-store";
-import type { AccountEnv } from "./account-api";
+import { accountAccess, type CustomerAccount, type AccountEnv } from "./account-api";
+import { validateCompany } from "./account-validation";
 
 export type SalesSyncEnv = AccountEnv & OvokoKeyEnv & {
   SALES_SYNC_ENABLED?: string; OVOKO_TEST_ENABLED?: string; ALLEGRO_CLIENT_ID?: string; ALLEGRO_CLIENT_SECRET?: string;
 };
 type Connection = { accessToken: string; refreshToken?: string; expiresAt: number; clientId: string; sellerId?: string };
-export async function syncAuthorization(db: SyncDb, owner: string) {
+export async function syncAuthorization(db: SyncDb, owner: string, env: AccountEnv = {}) {
   const roles = syncRows<{ owner_id: string }>(await db(`account_admins?owner_id=eq.${owner}&select=owner_id`));
-  const accounts = syncRows<{ suspended: boolean }>(await db(`customer_accounts?owner_id=eq.${owner}&select=suspended`));
-  if (roles.length !== 1 || accounts.length !== 1 || accounts[0].suspended !== false) throw new OvokoError(403, "Automat wstrzymany: konto nie ma aktywnych uprawnien administratora.");
+  const accounts = syncRows<CustomerAccount>(await db(`customer_accounts?owner_id=eq.${owner}&select=*`));
+  const account = accounts[0], company = account?.company as { customerType?: string; nip?: string } | null;
+  let trial = false;
+  if (env.TRIAL_ENABLED === "true" && company) {
+    if (company.customerType === "person") { try { trial = validateCompany(company).customerType === "person"; } catch { /* Incomplete profiles do not retain a trial. */ } }
+    else trial = typeof company.nip === "string" && /^\d{10}$/.test(company.nip) && account.trial_claimed_nip === company.nip;
+  }
+  if (accounts.length !== 1 || account.suspended !== false || !accountAccess({ ...account, trial_until: trial ? account.trial_until : null }, env.BILLING_ENFORCED === "true", roles.length === 1).allowed) throw new OvokoError(403, "Synchronizacja wstrzymana: konto nie ma aktywnego dostepu.");
 }
 export async function syncConnections(db: SyncDb, owner: string, env: SalesSyncEnv) {
-  await syncAuthorization(db, owner);
+  await syncAuthorization(db, owner, env);
   const rows = syncRows<{ sealed: string }>(await db(`allegro_connections?owner_id=eq.${owner}&select=sealed`));
   if (rows.length !== 1) throw new OvokoError(409, "Brak polaczenia Allegro.");
   let allegroSealed = rows[0].sealed;

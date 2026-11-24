@@ -11,7 +11,7 @@ const bundle = await build({ stdin: { contents: 'import React from "react";impor
 const browser = await chromium.launch({ headless: true, channel: "chrome" });
 try {
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
-  const calls = [], jobs = new Map(), errors = []; let activeReservation, failedWithdraw = false, aEnabled = false, oEnabled = false;
+  const calls = [], jobs = new Map(), errors = []; let activeReservation, failedWithdraw = false, aEnabled = false, oEnabled = false, expired = false;
   page.on("pageerror", e => errors.push(e.message));
   await page.route("https://workflow.test/**", async route => {
     const req = route.request(), url = new URL(req.url());
@@ -23,11 +23,11 @@ try {
       return route.fulfill({ json: { configured: true, enabled: reverse ? oEnabled : aEnabled, direction: "allegro_to_ovoko", lastChecked: null, lastError: null, caughtUp: true, watched: 1, jobs: [] } });
     }
     assert.equal(url.pathname, "/api/ovoko/inventory-actions");
-    if (b.operation === "list") return route.fulfill({ json: { rows: activeReservation && !activeReservation.closed ? [{ ...activeReservation, reservation: { ...activeReservation.reservation, until: "2000-01-01T00:00:00Z" } }] : [] } });
+    if (b.operation === "list") return route.fulfill({ json: { rows: [...jobs.values()].filter(j => j.kind === "reserve" && !j.closed).map(j => ({ ...j, reservation: { ...j.reservation, ...(expired ? { until: "2000-01-01T00:00:00Z" } : {}) } })) } });
     if (b.operation === "prepare" || b.operation === "prepare-restore") {
       const restore = b.operation === "prepare-restore";
       if (!restore) assert.deepEqual(b.targets, ["allegro", "ovoko"]);
-      const job = { id: b.requestId, kind: restore ? "restore" : b.kind, offerId: "10", partId: "20", name: "Drzwi testowe", state: "prepared", allegro: "pending", ovoko: "pending", reservation: restore ? null : b.reservation || null, closed: b.kind !== "reserve" };
+      const job = { id: b.requestId, parentId: b.reservationId, kind: restore ? "restore" : b.kind, offerId: "10", partId: "20", name: "Drzwi testowe", state: "prepared", allegro: "pending", ovoko: "pending", reservation: restore ? null : b.reservationId ? { ...jobs.get(b.reservationId).reservation, price: b.reservation.price } : b.reservation || null, closed: b.kind !== "reserve" };
       jobs.set(job.id, job); return route.fulfill({ json: job });
     }
     const job = jobs.get(b.jobId); assert.ok(job);
@@ -36,8 +36,8 @@ try {
       if (job.kind === "withdraw" && !failedWithdraw) { failedWithdraw = true; job.allegro = "submitted"; job.ovoko = "uncertain"; return route.fulfill({ status: 503, json: { message: "Wynik niepewny - nie ponawiaj" } }); }
       job.allegro = "done"; job.ovoko = "done";
       if (job.kind === "reserve") activeReservation = job;
-      if (job.kind === "restore") activeReservation.closed = true;
-    } else assert.equal(b.operation, "status");
+      if (job.kind === "restore") jobs.get(job.parentId).closed = true;
+    } else if (b.operation === "archive") { assert.equal(b.confirm, true); job.closed = true; } else assert.equal(b.operation, "status");
     return route.fulfill({ json: job });
   });
   async function open(path) { await page.goto(`https://workflow.test/${path}`); await page.addStyleTag({ content: css.css }); await page.addScriptTag({ content: bundle.outputFiles[0].text }); }
@@ -53,13 +53,21 @@ try {
   await reserve.getByLabel("Termin rezerwacji").fill(new Date(Date.now() + 86400000).toISOString().slice(0, 16)); await reserve.getByLabel("Komentarz rezerwacji").fill('<img src=x onerror="alert(1)"> komentarz');
   await reserve.getByRole("button", { name: "Potwierdz rezerwacje zaznaczonych", exact: true }).click(); await reserve.getByText(/Allegro: Potwierdzone/).waitFor();
   const prepared = calls.find(c => c.kind === "reserve"); assert.equal(prepared.reservation.price, "120"); assert.equal(prepared.reservation.deposit, "20"); assert.equal(prepared.reservation.customer, "Klient testowy");
+  const anchorId = activeReservation.id;
+  await open("actions"); await page.getByRole("button", { name: "Zarezerwuj zaznaczone", exact: true }).click();
+  const append = page.getByRole("dialog", { name: "Rezerwacja zaznaczonych czesci" });
+  await append.getByLabel("Dodaj do rezerwacji").selectOption(anchorId); assert.equal(await append.getByLabel("Klient rezerwacji").inputValue(), "Klient testowy"); assert.equal(await append.getByLabel("Klient rezerwacji").isDisabled(), true);
+  await append.getByLabel("Cena rezerwacji", { exact: true }).fill("75"); await append.getByRole("button", { name: "Potwierdz rezerwacje zaznaczonych", exact: true }).click(); await append.getByText(/Allegro: Potwierdzone/).waitFor();
+  assert.equal(calls.find(c => c.reservationId === anchorId && c.operation === "prepare").reservation.price, "75");
   const restoresBefore = calls.filter(c => c.operation === "prepare-restore" || c.operation === "execute" && jobs.get(c.jobId)?.kind === "restore").length;
-  await open("reservations"); await page.getByText("Klient testowy", { exact: false }).waitFor();
-  const row = page.getByRole("table", { name: "Zarezerwowane czesci" }).locator("tbody tr");
-  assert.match(await row.getAttribute("class"), /bg-red-700/); assert.equal(await row.locator("img").count(), 0, "Customer notes render as text, not HTML");
+  expired = true; await open("reservations"); await page.getByText("Klient testowy", { exact: false }).first().waitFor();
+  const row = page.getByRole("table", { name: "Zarezerwowane czesci" }).locator("tbody tr").filter({ has: page.getByRole("button", { name: "Przywroc", exact: true }) });
+  assert.equal(await row.count(), 2); assert.match(await row.first().getAttribute("class"), /bg-red-700/); assert.equal(await row.locator("img").count(), 0, "Customer notes render as text, not HTML");
+  assert.equal(await page.getByRole("columnheader", { name: /Klient testowy · 2 czesci/ }).count(), 1, "Parts added later share one customer reservation group");
   assert.equal(calls.filter(c => c.operation === "prepare-restore" || c.operation === "execute" && jobs.get(c.jobId)?.kind === "restore").length, restoresBefore, "Expiry/opening never restores an offer");
   await mkdir(new URL("../outputs/stock-workflows/", import.meta.url), { recursive: true }); await page.screenshot({ path: fileURLToPath(new URL("../outputs/stock-workflows/reservations.png", import.meta.url)) });
-  await row.getByRole("button", { name: "Przygotuj przywrocenie", exact: true }).click(); const restore = page.getByRole("dialog", { name: "Przywroc rezerwacje" });
+  await row.first().getByRole("button", { name: "Usun", exact: true }).click(); const removal = page.getByRole("dialog", { name: "Usun rezerwacje" }); await removal.getByText(/Oferty pozostana wycofane/).waitFor(); await removal.getByRole("button", { name: "Usun z rezerwacji bez wznawiania", exact: true }).click(); await removal.waitFor({ state: "hidden" }); assert.equal(jobs.get(anchorId).closed, true);
+  await row.getByRole("button", { name: "Przywroc", exact: true }).click(); const restore = page.getByRole("dialog", { name: "Przywroc rezerwacje" });
   await restore.getByRole("button", { name: "Potwierdz dostepnosc i przywroc", exact: true }).waitFor(); assert.equal(activeReservation.closed, false);
   await restore.getByRole("button", { name: "Potwierdz dostepnosc i przywroc", exact: true }).click(); await page.getByText("Brak otwartych rezerwacji.").waitFor(); assert.equal(activeReservation.closed, true);
   await open("synchronization"); await page.getByRole("button", { name: "Wlacz Allegro → Ovoko od teraz", exact: true }).waitFor(); await page.getByRole("button", { name: "Wlacz Ovoko → Allegro od teraz", exact: true }).waitFor();

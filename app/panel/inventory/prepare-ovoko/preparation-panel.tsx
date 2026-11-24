@@ -58,7 +58,7 @@ export function OvokoPreparationPanel() {
         const ids = new URL(window.location.href).searchParams.getAll("offerId");
         if (ids.length !== 1 || !/^\d{1,30}$/.test(ids[0])) throw new Error("Wybierz jedna oferte z listy Allegro.");
         const info = await accountRequest<AccountInfo>("/me");
-        if (!info.isAdmin) throw new Error("Przygotowanie Ovoko jest na razie dostepne tylko dla administratora.");
+        if (!info.isAdmin && !info.access?.allowed) throw new Error(info.access?.reason || "Brak aktywnego dostepu.");
         if (controller.signal.aborted) return;
         const offer = await allegroRequest<unknown>(`/own-offers/${ids[0]}`, { signal: controller.signal });
         const preview = ovokoSourcePreview(offer, ids[0], offerDescriptionText);

@@ -16,7 +16,7 @@ const { handleOvokoApi } = load(path.join(root, "lib/ovoko-api.ts"));
 const { sealConnection } = load(path.join(root, "lib/allegro-api.ts"));
 const { ovokoWriteDigest } = load(path.join(root, "lib/ovoko-write-client.ts"));
 const bytes = new Uint8Array(32).fill(7), key = await crypto.subtle.importKey("raw", bytes, "AES-GCM", false, ["encrypt", "decrypt"]);
-const env = { SUPABASE_SERVICE_ROLE_KEY: "fixture", ALLEGRO_ENCRYPTION_KEY: Buffer.from(bytes).toString("base64") };
+const env = { BILLING_ENFORCED: "true", SUPABASE_SERVICE_ROLE_KEY: "fixture", ALLEGRO_ENCRYPTION_KEY: Buffer.from(bytes).toString("base64") };
 let user = 0, admin, mode, pages, journal, seller, target, total, priceBounds, pricedRows, journalBatches, search, requestPages;
 const owner = () => `00000000-0000-0000-0000-${String(user).padStart(12, "0")}`;
 function reset() { user++; admin = true; mode = "ok"; pages = []; journal = []; seller = "555"; target = "fixture"; total = 900; priceBounds = [null, null]; pricedRows = null; journalBatches = []; search = "ABS"; }
