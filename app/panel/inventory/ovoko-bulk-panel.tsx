@@ -9,6 +9,7 @@ import { OvokoFallbackVehicle, type FallbackVehicle } from "./ovoko-fallback-veh
 import { OvokoJobRepair, type OvokoCorrections } from "./ovoko-job-repair";
 import type { OvokoRepairHint } from "@/lib/ovoko-read";
 import { ManualOvokoLauncher } from "./manual-ovoko-launcher";
+import { ManualOvokoOverride } from "./manual-override";
 
 export type BulkOffer = { id: string; name: string; price: { amount: string; currency: string } | null };
 type Job = { id: string; name: string; price: string; currency: string; state: "waiting" | "sending" | "done" | "skipped" | "error"; message: string; retryable: boolean; repair?: OvokoRepairHint; rule: OvokoPriceAdjustment; technical: boolean };
@@ -29,6 +30,7 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
   const [mode, setMode] = useState<OvokoPriceAdjustment["mode"]>("none"), [value, setValue] = useState("0");
   const [running, setRunning] = useState(false), [jobs, setJobs] = useState<Job[]>([]), [message, setMessage] = useState("");
   const [fallbackVehicle, setFallbackVehicle] = useState<FallbackVehicle>(), [technical, setTechnical] = useState(true);
+  const [recovering, setRecovering] = useState(false);
   const lock = useRef(false), stop = useRef(false), mounted = useRef(true), lastAttempt = useRef(0), binding = useRef<Binding | null>(null);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; stop.current = true; }; }, []);
   useEffect(() => {
@@ -52,7 +54,7 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
     binding.current = session.binding;
     return session.binding;
   }
-  async function transfer(offer: BulkOffer, rule: OvokoPriceAdjustment, session: Binding, useTechnical: boolean, fallback?: FallbackVehicle, overrides?: OvokoCorrections): Promise<boolean> {
+  async function transfer(offer: BulkOffer, rule: OvokoPriceAdjustment, session: Binding, useTechnical: boolean, fallback?: FallbackVehicle, overrides?: OvokoCorrections, manualVehicle = false): Promise<boolean> {
     // The same pace applies to the batch and explicit one-row corrections.
     if (!await waitForTransferSlot(lastAttempt, stop)) return false;
     update(offer.id, { state: "sending", message: "Sprawdzam i przenosze..." });
@@ -63,7 +65,7 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
     if (!sameOvokoMoney(source.price, offer.price?.amount) || source.currency !== offer.price?.currency) throw new OvokoBulkClientError(`Cena Allegro zmienila sie od zaznaczenia (${offer.price?.amount} ${offer.price?.currency} -> ${source.price} ${source.currency}). Odswiez oferte.`, 400);
     if (stop.current) { update(offer.id, { state: "waiting", message: "Nie wyslano" }); return false; }
     const item = { offerId: offer.id, binding: session, adjustment: rule, notes: source.description, expectedSource: { title: source.title, price: source.price, currency: source.currency, stock: source.stock, status: source.status, condition: source.condition, images: source.images } };
-    const preparation = await ovokoBulkRequest<Outcome & { category?: { id: string; name: string }; vehicle?: { brand: string; model: string; usedFallback: boolean; evidence?: string } }>({ ...item, operation: "prepare", allowTechnicalModel: useTechnical, ...(fallback ? { fallbackVehicle: fallback } : {}), ...(overrides ? { overrides } : {}) });
+    const preparation = await ovokoBulkRequest<Outcome & { category?: { id: string; name: string }; vehicle?: { brand: string; model: string; usedFallback: boolean; evidence?: string } }>({ ...item, operation: "prepare", allowTechnicalModel: useTechnical, ...(fallback ? { fallbackVehicle: fallback } : {}), ...(manualVehicle ? { manualVehicle: true } : {}), ...(overrides ? { overrides } : {}) });
     if (!preparation.alreadyCreated && stop.current) { update(offer.id, { state: "waiting", message: "Auto przygotowane. Czesc nie zostala wyslana." }); return false; }
     // Never cancel, repeat or unlock an uncertain write.
     const result = preparation.alreadyCreated ? preparation : await ovokoBulkRequest<Outcome>({ ...item, operation: "item", prepared: preparation.prepared });
@@ -109,7 +111,7 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
     lock.current = true; stop.current = false; setRunning(true); setMessage("");
     try {
       const session = await begin(job.rule, true);
-      await transfer(offer, job.rule, session, job.technical, fallback, overrides);
+      await transfer(offer, job.rule, session, job.technical, fallback, overrides, !!fallback);
       if (mounted.current) setMessage("Zakonczono poprawianie pozycji.");
     } catch (error) { failure(job.id, error); if (mounted.current) setMessage("Nie przeniesiono poprawianej pozycji. Sprawdz jej wynik ponizej."); }
     finally { finish(); }
@@ -122,7 +124,7 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
     <div className="flex flex-wrap items-end gap-2">
       <label className="flex flex-col gap-1 text-sm">Cena w Ovoko<select aria-label="Cena w Ovoko" className={field} value={mode} disabled={running} onChange={event => setMode(event.target.value as OvokoPriceAdjustment["mode"])}><option value="none">Bez zmiany</option><option value="amount">Zmien o kwote</option><option value="percent">Zmien procentowo</option><option value="fixed">Ustaw cene</option></select></label>
       {mode !== "none" && <label className="flex flex-col gap-1 text-sm">{priceLabel}<input aria-label={priceLabel} className={`${field} w-44`} inputMode="decimal" value={value} disabled={running} onChange={event => setValue(event.target.value)} placeholder={mode === "fixed" ? "np. 100" : "np. -10 lub 15"} /></label>}
-      <button className={`${button} bg-[#ff5a00]`} disabled={running || !offers.length || offers.length > 200} onClick={() => void start()}>{running ? "Przenoszenie trwa..." : "Przenies zaznaczone do Ovoko"}</button>
+      <button className={`${button} bg-[#ff5a00]`} disabled={running || recovering || !offers.length || offers.length > 200} onClick={() => void start()}>{running ? "Przenoszenie trwa..." : "Przenies zaznaczone do Ovoko"}</button>
       {running && <button className={button} onClick={() => { stop.current = true; setMessage("Zatrzymuje po biezacym zadaniu. Nie przerywamy wysylki w trakcie."); }}>Zatrzymaj po biezacej</button>}
     </div>
     <label className="flex items-center gap-2 text-xs text-white/70"><input type="checkbox" checked={technical} disabled={running} onChange={event => setTechnical(event.target.checked)} />Gdy brak dopasowania, uzyj modelu roboczego rozpoznanej marki</label>
@@ -132,8 +134,14 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
     {!!jobs.length && <div className="max-h-[calc(100vh-330px)] min-h-48 divide-y divide-white/10 overflow-auto rounded border border-white/10 text-sm" aria-live="polite">{jobs.map(job => <div key={job.id} className="px-2 py-1.5" data-offer-id={job.id}>
       <div className="flex items-start justify-between gap-3"><a href={`/panel/inventory/prepare-ovoko?offerId=${job.id}`} target="_blank" rel="noopener noreferrer" className="min-w-0 font-semibold underline">{job.name}</a><span className="shrink-0 whitespace-nowrap text-xs text-white/70">{job.state === "skipped" ? "Cena istniejacej czesci bez zmian." : `${job.state === "done" ? "Cena wyslana" : "Cena planowana"}: ${job.price} ${job.currency}`}</span></div>
       <p className={`text-xs leading-5 ${job.state === "done" || job.state === "skipped" ? "text-emerald-300" : job.state === "error" ? "text-amber-200" : "text-white/60"}`}>{job.message}</p>
-      {job.retryable && <OvokoJobRepair key={`${job.id}:${JSON.stringify(job.repair)}`} id={job.id} hint={job.repair} disabled={running} onTransfer={(vehicle, corrections) => void retry(job, vehicle, corrections)} />}
-      {job.state === "error" && !running && <ManualOvokoLauncher offerId={job.id} />}
+      {job.retryable && <OvokoJobRepair key={`${job.id}:${JSON.stringify(job.repair)}`} id={job.id} hint={job.repair} disabled={running || recovering} onTransfer={(vehicle, corrections) => void retry(job, vehicle, corrections)} />}
+      {job.state === "error" && !running && <>
+        <ManualOvokoOverride offerId={job.id} brandId={job.repair?.vehicle?.brandId || job.repair?.brandId || ""} modelId={job.repair?.vehicle?.modelId || ""} year={job.repair?.vehicle?.year || ""} disabled={recovering} onBusyChange={busy => { lock.current = busy; setRecovering(busy); }} onResolved={result => {
+          if (result.kind === "part" && result.foundId) update(job.id, { state: "skipped", retryable: false, message: `Potwierdzono istniejaca czesc Ovoko ID: ${result.foundId}. Powiazanie naprawione; nie utworzono duplikatu.` });
+          else update(job.id, { retryable: true, repair: job.repair || { needsVehicle: false, needsCategory: false, brandId: "", categoryId: "" }, message: `${result.message} Kliknij Uzupelnij i przenies, aby ponowic tylko te pozycje z zachowana cena.` });
+        }} />
+        <ManualOvokoLauncher offerId={job.id} />
+      </>}
     </div>)}</div>}
   </section>;
 }

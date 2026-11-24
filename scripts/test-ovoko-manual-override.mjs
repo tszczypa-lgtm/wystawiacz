@@ -19,7 +19,7 @@ const c={sellerId:"555",account:"a".repeat(64),clientId:"client",get fingerprint
 const db=async(path,init={})=>{
  if(path.startsWith("ovoko_single_publications?")||path.startsWith("ovoko_vehicle_creations?"))return journal?[journal]:[];
  if(path.startsWith("ovoko_manual_overrides?"))return decisions;
- assert.equal(path,"rpc/apply_ovoko_manual_override");const b=JSON.parse(init.body);assert.equal(b.p_owner,owner);assert.equal(b.p_allegro,"a-sealed");assert.equal(b.p_ovoko,"o-sealed");assert.deepEqual(b.p_expected,journal);
+ assert.equal(path,"rpc/apply_ovoko_manual_override");const b=JSON.parse(init.body);assert.equal(b.p_owner,owner);assert.equal(b.p_allegro,"a-sealed");assert.equal(b.p_ovoko,"o-sealed");assert.deepEqual(b.p_expected,journal||{});
  applies++;const row={id:b.p_id,kind:b.p_kind,action:b.p_found?"reconciled":"released",found_id:b.p_found};decisions=[row];if(mode==="lost-ack")throw new Error("lost acknowledgment");return[row];
 };
 const {manualOvokoOverride:run}=load("ovoko-manual-override",name=>{
@@ -47,6 +47,8 @@ reset();p=await check("vehicle");assert.equal(proof.brand,"7");assert.equal((awa
 reset();p=await check("vehicle");await assert.rejects(run(owner,{}, {operation:"confirm",token:p.token,brandId:"8",checkedOvoko:true,confirmRisk:true,typedOfferId:"10",reason:"Sprawdzono wszystkie statusy"}));assert.equal(applies,0);
 reset();p=await check();assert.equal((await run(owner,{}, {operation:"confirm",token:p.token,brandId:"7",confirmManual:true})).resolved,true);assert.equal(applies,1,"Single explicit consent needs no typed ID or reason");
 reset();p=await check();await assert.rejects(run(owner,{}, {operation:"confirm",token:p.token,confirmManual:false}));assert.equal(applies,0);
-reset();journal=null;mode="present";p=await check();assert.equal(p.foundId,"20");assert.ok(proof.planId);await run(owner,{}, {operation:"confirm",token:p.token,confirmManual:true});assert.deepEqual(recoveryCalls,[{operation:"check",offerId:"10",partId:"20"},{operation:"confirm",planId:proof.planId,confirm:true}]);assert.equal(applies,0,"Missing journal uses exact-link recovery, not forced duplicate creation");
+reset();journal=null;mode="present";p=await check();assert.equal(p.foundId,"20");await run(owner,{}, {operation:"confirm",token:p.token,confirmManual:true});assert.equal(recoveryCalls.length,0);assert.equal(applies,1,"Missing journal reconciles exact existing part without paused-sync recovery plan");
 reset();journal=null;p=await check();assert.equal(p.resolved,true);assert.equal(recoveryCalls.length,0);assert.equal(applies,0);
+reset();mode="present";journal.updated_at=new Date().toISOString();p=await check();assert.equal((await confirm(p)).action,"reconciled","Positive provider proof can repair a fresh uncertain row");
+reset();p=await check();mode="present";await assert.rejects(confirm(p));assert.equal(applies,0,"Provider result changing after preview invalidates consent");
 console.log("Manual override server: stale preview, explicit confirmations, provider presence/conflicts, token expiry, account binding, permissions, vehicle brand binding, idempotent lost DB acknowledgment, and zero provider writes passed. Fixtures only.");

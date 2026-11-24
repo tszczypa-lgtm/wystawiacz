@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase";
 type Row = { id: string; name: string; years?: string };
-export type FallbackVehicle = { brandId: string; modelId: string };
+export type FallbackVehicle = { brandId: string; modelId: string; year?: string };
 async function read(operation: "brands" | "models", signal: AbortSignal, brandId?: string): Promise<Row[]> {
   const { data } = await createSupabaseBrowserClient().auth.getSession();
   if (!data.session) throw new Error("Zaloguj sie ponownie.");
@@ -13,9 +13,10 @@ async function read(operation: "brands" | "models", signal: AbortSignal, brandId
   if (!response.ok || !result.ok || !result.readOnly || !Array.isArray(rows)) throw new Error(result.message || "Nie odczytano modeli Ovoko.");
   return rows;
 }
-export function OvokoFallbackVehicle({ disabled, onChange, knownBrandId = "", initiallyOpen = false, title = "Model pomocniczy dla ofert bez rozpoznanego modelu (opcjonalnie)" }: { disabled: boolean; onChange: (value: FallbackVehicle | undefined) => void; knownBrandId?: string; initiallyOpen?: boolean; title?: string }) {
+export function OvokoFallbackVehicle({ disabled, onChange, knownBrandId = "", knownModelId = "", requireYear = false, initiallyOpen = false, title = "Model pomocniczy dla ofert bez rozpoznanego modelu (opcjonalnie)" }: { disabled: boolean; onChange: (value: FallbackVehicle | undefined) => void; knownBrandId?: string; knownModelId?: string; requireYear?: boolean; initiallyOpen?: boolean; title?: string }) {
   const [opened, setOpened] = useState(initiallyOpen), [brands, setBrands] = useState<Row[]>([]), [models, setModels] = useState<Row[]>([]);
-  const [brandId, setBrandId] = useState(knownBrandId), [modelId, setModelId] = useState(""), [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const [brandId, setBrandId] = useState(knownBrandId), [modelId, setModelId] = useState(knownModelId), [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const [year, setYear] = useState("");
   useEffect(() => {
     if (!opened || knownBrandId) return;
     const controller = new AbortController();
@@ -31,8 +32,9 @@ export function OvokoFallbackVehicle({ disabled, onChange, knownBrandId = "", in
   const field = "w-full rounded-lg border border-white/20 bg-[#0d1117] px-3 py-2 disabled:opacity-40";
   return <details className="rounded-lg border border-white/10 p-3 text-sm" open={opened} onToggle={event => setOpened(event.currentTarget.open)}>
     <summary className="cursor-pointer font-bold">{title}</summary>
-    <p className="my-2 text-xs text-white/65">Wybor dla brakujacego modelu. Pierwszenstwo maja dane rozpoznane; marka nie moze byc sprzeczna z oferta.</p>
-    <div className="grid gap-3 sm:grid-cols-2">{!knownBrandId && <label>Marka pomocnicza<select aria-label="Marka pomocnicza" className={field} value={brandId} disabled={disabled || busy} onChange={event => { setBrandId(event.target.value); setModelId(""); setModels([]); onChange(undefined); }}><option value="">Bez modelu pomocniczego</option>{brands.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>}<label>Model pomocniczy<select aria-label="Model pomocniczy" className={field} value={modelId} disabled={disabled || busy || !models.length} onChange={event => { setModelId(event.target.value); onChange(event.target.value ? { brandId, modelId: event.target.value } : undefined); }}><option value="">Wybierz model</option>{models.map(row => <option key={row.id} value={row.id}>{row.name} {row.years}</option>)}</select></label></div>
+    <p className="my-2 text-xs text-white/65">Wybrany model zostanie uzyty przy poprawianiu tej pozycji. Marka musi pasowac do oferty.</p>
+    <div className="grid gap-3 sm:grid-cols-2">{!knownBrandId && <label>Marka pomocnicza<select aria-label="Marka pomocnicza" className={field} value={brandId} disabled={disabled || busy} onChange={event => { setBrandId(event.target.value); setModelId(""); setModels([]); onChange(undefined); }}><option value="">Bez modelu pomocniczego</option>{brands.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>}<label>Model pomocniczy<select aria-label="Model pomocniczy" className={field} value={modelId} disabled={disabled || busy || !models.length} onChange={event => { setModelId(event.target.value); onChange(event.target.value ? { brandId, modelId: event.target.value, ...(year ? { year } : {}) } : undefined); }}><option value="">Wybierz model</option>{models.map(row => <option key={row.id} value={row.id}>{row.name} {row.years}</option>)}</select></label></div>
     {busy && <p role="status">Pobieram slownik Ovoko...</p>}{error && <p role="status" className="text-amber-200">{error}</p>}
+    {requireYear && <label className="mt-2 block">Rok rekordu auta<input aria-label="Rok rekordu auta" className={field} inputMode="numeric" maxLength={4} value={year} disabled={disabled} onChange={event => { setYear(event.target.value); onChange(modelId ? { brandId, modelId, ...(event.target.value ? { year: event.target.value } : {}) } : undefined); }} /></label>}
   </details>;
 }

@@ -30,10 +30,6 @@ export async function createOvokoCar(request: Request, env: OvokoPublishEnv, con
   };
   const existing = await db(`?${selector}&owner_id=eq.${context.user.id}&select=state,car_id`);
   if (!Array.isArray(existing)) throw new OvokoError(503, "Nieprawidlowy rejestr tworzenia aut.");
-  if (existing.length) {
-    if (existing[0].state === "created" && /^[1-9]\d{0,11}$/.test(existing[0].car_id)) return { ok: true, carId: existing[0].car_id, modelId, year, reused: true };
-    throw new OvokoError(409, "Auto do sprawdzenia: ten model i rok maja juz rozpoczeta lub niepewna probe utworzenia auta. Tej czesci nie wyslano. Sprawdz Ovoko; nie tworzymy kolejnego rekordu.", "vehicle_creation_locked");
-  }
   try {
     const models = parseOvokoRead("models", await remote(`/get/car_models/${brandId}`), brandId).rows;
     const model = models.find(row => row.id === modelId);
@@ -44,6 +40,12 @@ export async function createOvokoCar(request: Request, env: OvokoPublishEnv, con
     const savedCars = parseOvokoRead("cars", await remote(`/v2/get/cars?model_ids=${modelId}&page=1&limit=20`), modelId).rows;
     const savedCar = savedCars.find(row => row.years === year) || savedCars[0];
     if (savedCar && /^[1-9]\d{0,11}$/.test(savedCar.id)) return { ok: true, carId: savedCar.id, modelId, year, reused: true };
+    if (existing.length === 1 && existing[0]?.state === "created" && /^[1-9]\d{0,11}$/.test(String(existing[0].car_id))) {
+      const verified = await remote(`/get/car/${existing[0].car_id}`);
+      const car = Array.isArray(verified.list) && verified.list.length === 1 && Array.isArray(verified.list[0]) && verified.list[0].length === 1 ? verified.list[0][0] : null;
+      if (car && String(car.id) === existing[0].car_id && String(car.car_model) === modelId && String(car.car_years) === year) return { ok: true, carId: String(car.id), modelId, year, reused: true };
+    }
+    if (existing.length) throw new OvokoError(409, "Nie znaleziono zapisanego auta, a poprzednia proba ma blokade. Uzyj Odblokuj wybrane auto przy tej pozycji.", "vehicle_creation_locked");
     const externalId = `tymo:car:${modelId}:${year}`;
     const statuses = await remote("/get/car_status");
     if (!statuses.list || typeof statuses.list !== "object" || Array.isArray(statuses.list)) throw new Error("status shape");

@@ -78,7 +78,8 @@ export default defineConfig(async ({ command }) => {
           workers_dev: true,
           // Runtime settings are managed in the Cloudflare dashboard.
           keep_vars: true,
-          ...(command === "build" ? { triggers: { crons: ["* * * * *"] } } : {}),
+          // Production requires Workers Paid; keep a bounded budget across deployments.
+          ...(command === "build" ? { limits: { cpu_ms: 30_000 }, triggers: { crons: ["* * * * *"] } } : {}),
           ...(command === "serve"
             ? {
                 services: [

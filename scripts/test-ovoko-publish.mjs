@@ -295,7 +295,7 @@ try {
   assert.equal(preparedVehicle.brand, "Audi", "Try other mentioned makes for a recognizable model before using a fallback"); assert.equal(preparedVehicle.usedFallback, false);
   reset(); bulk = true; snapshot.title = "AUDI VW POMPA 0281010038";
   const noModel = await bulkPlan({ mode: "none", value: "0" });
-  const missing = await bulkSend(noModel); assert.equal(missing.status, 400); const missingBody = await missing.json(); assert.match(missingBody.message, /Automat nie znalazl modelu/); assert.equal(missingBody.repair.needsVehicle, true); assert.equal(missingBody.repair.needsCategory, false); assert.equal(missingBody.repair.categoryId, "3"); assert.equal(writes, 0);
+  const missing = await bulkSend(noModel); assert.equal(missing.status, 400); const missingBody = await missing.json(); assert.match(missingBody.message, /Nie rozpoznano modelu/); assert.equal(missingBody.repair.needsVehicle, true); assert.equal(missingBody.repair.needsCategory, false); assert.equal(missingBody.repair.categoryId, "3"); assert.equal(writes, 0);
   reset(); bulk = true;
   const technicalPlan = { ...await bulkPlan({ mode: "none", value: "0" }), allowTechnicalModel: true };
   const technicalResult = await bulkSend(technicalPlan);
@@ -338,10 +338,16 @@ try {
   const conflict = { ...await bulkPlan({ mode: "none", value: "0" }), fallbackVehicle: { brandId: "1", modelId: "11" }, allowTechnicalModel: true };
   assert.equal((await bulkSend(conflict)).status, 400); assert.equal(writes, 0, "A fallback cannot bypass an explicit conflicting generation");
   const technicalConflict = { ...await bulkPlan({ mode: "none", value: "0" }), allowTechnicalModel: true };
-  assert.equal((await bulkSend(technicalConflict)).status, 400); assert.equal(writes, 0, "Technical models cannot bypass an explicit conflicting generation either"); generationTest = false;
+  assert.equal((await bulkSend(technicalConflict)).status, 400); assert.equal(writes, 0, "Technical models cannot bypass an explicit conflicting generation either");
+  const explicitManual={...conflict,manualVehicle:true};fitmentMode="error";
+  assert.equal((await bulkSend(explicitManual)).status,200,"A deliberate one-row model choice is used instead of repeating a failed automatic catalog lookup");
+  assert.equal(writes,1);assert.equal(preparedVehicle.evidence,"Wybor reczny");generationTest=false;fitmentMode="none";
   reset(); bulk = true; snapshot.title = originalTitle;
   const ignoredFallback = { ...await bulkPlan({ mode: "none", value: "0" }), fallbackVehicle: { brandId: "2", modelId: "22" } };
   assert.equal((await bulkSend(ignoredFallback)).status, 200); assert.equal(preparedVehicle.usedFallback, false); assert.equal(preparedVehicle.brand, "Audi");
+  reset();bulk=true;donorModel="22";
+  const manualInstead={...await bulkPlan({mode:"none",value:"0"}),manualVehicle:true,fallbackVehicle:{brandId:"2",modelId:"22",year:"2005"}};
+  assert.equal((await bulkSend(manualInstead)).status,400,"Manual brand cannot contradict the only make in the source title");assert.equal(writes,0);
   for (const manufacturerCode of [undefined, ""]) {
     reset(); expectedCode = "";
     const item = { ...payload(), manufacturerCode };
@@ -364,7 +370,7 @@ try {
   assert.ok(!calls.some(call => call.url.includes("/sale/products?")));
   reset(); bulk = true; expectedCode = ""; snapshot.title = "DRZWI AUDI"; categoryName = "Drzwi";
   const missingCar = await bulkPlan({ mode: "none", value: "0" }); const blocked = await bulkSend(missingCar);
-  assert.equal(blocked.status, 400); assert.match(await blocked.text(), /brakuje dopasowanego modelu/); assert.equal(writes, 0);
+  assert.equal(blocked.status, 400); assert.match(await blocked.text(), /Nie rozpoznano modelu/); assert.equal(writes, 0);
   snapshot.title = originalTitle;
   console.log("Ovoko single + bulk publication: guards, source/target binding, prices, multi-make model lookup, constrained fallback and generation/brand conflicts, car reuse, full photos, durable duplicate locks and uncertain no-retry passed. All services mocked; nothing published live.");
 } finally { globalThis.fetch = originalFetch; }

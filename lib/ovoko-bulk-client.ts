@@ -14,7 +14,11 @@ export async function ovokoBulkRequest<T>(body: unknown): Promise<T> {
   const current = await createSupabaseBrowserClient().auth.getSession();
   if (!current.data.session || current.data.session.user.id !== data.session.user.id) throw new OvokoBulkClientError("Sesja Wystawiacza zmienila sie. Zatrzymano partie; sprawdz wynik biezacej oferty w Ovoko.", 401);
   const result = await response.json().catch(() => null) as { message?: string; code?: string; repair?: OvokoRepairHint } | null;
-  if (!result || typeof result !== "object" || Array.isArray(result)) throw new OvokoBulkClientError(`Serwer zwrocil HTML lub nieprawidlowe dane zamiast JSON (HTTP ${response.status}, etap ${stage}). ${uncertain}`, response.ok ? 502 : response.status, "item_transport");
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    const ray = response.headers.get("cf-ray");
+    const diagnostic = ray && /^[a-z0-9-]{1,80}$/i.test(ray) ? ` Identyfikator Cloudflare: ${ray}.` : "";
+    throw new OvokoBulkClientError(`Serwer przerwal odpowiedz (HTTP ${response.status}, etap ${stage}).${diagnostic} ${uncertain} Pozostale pozycje sa niezalezne.`, response.ok ? 502 : response.status, "item_transport");
+  }
   if (!response.ok) throw new OvokoBulkClientError(result.message || "Nie potwierdzono wysylki. Sprawdz Ovoko.", response.status, result.code, stage === "prepare" ? result.repair : undefined);
   return result as T;
 }

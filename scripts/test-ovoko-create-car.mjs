@@ -122,6 +122,8 @@ try {
   for (const method of ["GET", "POST"]) { reset(); failDb = method; assert.equal((await handleOvokoApi(req(), env)).status, 503); assert.equal(mutations, 0); }
   reset(); prior = true; const reused = await handleOvokoApi(req(), env); assert.equal(reused.status, 200); assert.equal((await reused.json()).reused, true); assert.equal(mutations, 0);
   reset(); mode = "saved-car"; const manual = await handleOvokoApi(req(), env); assert.equal(manual.status, 200); assert.equal((await manual.json()).carId, "88"); assert.equal(mutations, 0, "Reuse manually added same-model car, even with a different year, never create another");
+  reset(); mode="timeout";assert.equal((await handleOvokoApi(req(),env)).status,409);mode="saved-car";
+  const afterTimeout=await handleOvokoApi(req(),env);assert.equal(afterTimeout.status,200);assert.equal((await afterTimeout.json()).carId,"88");assert.equal(mutations,1,"A real saved car is reused despite an uncertain vehicle journal; import is never replayed");
   reset(); mode = "wrong-car"; assert.equal((await handleOvokoApi(req(), env)).status, 502); assert.equal(mutations, 0, "Untrusted model-filter response blocks creation");
   reset(); mode = "no-cars"; assert.equal((await handleOvokoApi(req(), env)).status, 200); assert.equal(mutations, 1, "Documented R004 empty lookup allows one guarded creation, never a retry");
   reset(); mode = "legacy-empty"; const legacyCreated = await handleOvokoApi(req(), env); assert.equal(legacyCreated.status, 200, await legacyCreated.clone().text()); assert.equal(mutations, 1, "Missing V2 pagination is recovered by the complete legacy export before creating");

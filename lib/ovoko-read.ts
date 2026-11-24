@@ -1,4 +1,4 @@
-export type OvokoRepairHint = { needsVehicle: boolean; needsCategory: boolean; brandId: string; categoryId: string };
+export type OvokoRepairHint = { needsVehicle: boolean; needsYear?: boolean; needsCategory: boolean; brandId: string; categoryId: string; vehicle?: { brandId: string; modelId: string; year: string } };
 export class OvokoError extends Error {
   constructor(public status: number, message: string, public code?: string, public repair?: OvokoRepairHint) { super(message); }
 }
