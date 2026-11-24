@@ -13,6 +13,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   let admin = true, ovokoFail = false, identityReads = 0, changedAccount = false, reviewFailure;
   const errors = [], operations = [], withdrawalCalls = [];
+  const syncControls = []; let syncEnabled = false;
   page.on("pageerror", error => errors.push(error.message));
   await page.route("https://combined.test/**", async route => {
     const req = route.request(), url = new URL(req.url());
@@ -20,6 +21,12 @@ try {
     operations.push(url.pathname);
     if (url.pathname === "/api/account/me") return route.fulfill({ json: { isAdmin: admin, account: { email: "fixture@test", suspended: false } } });
     if (url.pathname === "/api/allegro/seller-identity") { identityReads++; return route.fulfill({ json: { sellerId: changedAccount && identityReads > 1 ? "666" : "555" } }); }
+    if (url.pathname === "/api/ovoko/sales-sync") {
+      const body = req.postDataJSON(); syncControls.push(body);
+      if (body.operation === "enable") { assert.equal(body.confirm, true); syncEnabled = true; }
+      if (body.operation === "disable") syncEnabled = false;
+      return route.fulfill({ json: { configured: true, enabled: syncEnabled, direction: "allegro_to_ovoko", reverseEnabled: false, lastChecked: null, lastError: null, caughtUp: true, armedAt: null, jobs: [] } });
+    }
     if (url.pathname === "/api/allegro/inventory-withdrawal") {
       const input = req.postDataJSON(); withdrawalCalls.push(input);
       const job = { id: "11111111-1111-4111-8111-111111111111", offerId: "1", partId: "10", scope: "both", state: "prepared", allegro: "pending", ovoko: "pending" };
@@ -45,6 +52,17 @@ try {
   });
   async function open() { identityReads = 0; await page.goto("https://combined.test/panel/inventory"); await page.addStyleTag({ content: css.css }); await page.addScriptTag({ content: bundle.outputFiles[0].text }); await page.locator('[data-part-key="o:11"]').waitFor(); await page.getByText(/Odczyt niepelny/).waitFor({ state: "hidden" }); }
   await open();
+  assert.equal(syncControls.length, 0, "Opening the list never arms or even probes the background monitor");
+  await page.locator("summary").filter({ hasText: "Automat Allegro" }).click();
+  await page.getByRole("button", { name: "Wlacz Allegro → Ovoko od teraz", exact: true }).waitFor();
+  assert.deepEqual(syncControls, [{ operation: "status" }], "Expanding monitor settings reads status only");
+  await page.getByRole("button", { name: "Wlacz Allegro → Ovoko od teraz", exact: true }).click();
+  await page.getByRole("button", { name: "Wylacz automat", exact: true }).waitFor();
+  assert.ok(await page.getByText(/Kierunek Ovoko.*NIE jest jeszcze wlaczony/).isVisible());
+  await page.getByRole("button", { name: "Wylacz automat", exact: true }).click();
+  await page.getByRole("button", { name: "Wlacz Allegro → Ovoko od teraz", exact: true }).waitFor();
+  assert.deepEqual(syncControls.map(call => call.operation), ["status", "enable", "disable"]);
+  await page.locator("summary").filter({ hasText: "Automat Allegro" }).click();
   const table = page.getByRole("table", { name: "Czesci Allegro i Ovoko" });
   assert.equal(await table.locator("tbody tr").count(), 45, "44 Allegro plus one Ovoko-only, linked part appears once");
   assert.equal(await table.locator('[data-part-key="a:1"]').getByLabel("Ovoko: na stanie", { exact: true }).count(), 1);

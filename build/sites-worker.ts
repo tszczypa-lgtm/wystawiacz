@@ -8,10 +8,13 @@ import type { ConnectorBinding } from "../lib/connector-contract.mjs";
 import { deliverOrderMail, type OrderMailEnv } from "../lib/order-mail";
 import { handleBetaApi, type BetaEnv } from "../lib/beta-api";
 import { handleOvokoApi } from "../lib/ovoko-api";
+import { runSalesSync } from "../lib/sales-sync";
+import type { SalesSyncEnv } from "../lib/sales-sync-connections";
 
 export default {
   async scheduled(_event: ScheduledController, env: Cloudflare.Env, ctx: ExecutionContext) {
     ctx.waitUntil(deliverOrderMail(env as OrderMailEnv));
+    ctx.waitUntil(runSalesSync(env as SalesSyncEnv));
   },
   async fetch(request: Request, env: Cloudflare.Env, ctx: ExecutionContext<{ CONNECTORS?: ConnectorBinding }>) {
     if (new URL(request.url).pathname.startsWith("/api/ovoko/")) return handleOvokoApi(request, env as AccountEnv);

@@ -7,6 +7,7 @@ import { suggestPartNumbers } from "@/lib/ovoko-suggestions";
 import { OvokoBulkLauncher } from "./ovoko-bulk-launcher";
 import { CoordinationReview } from "./coordination-review";
 import { ManualWithdrawal } from "./manual-withdrawal";
+import { SalesSyncPanel } from "./sales-sync-panel";
 
 const initial: CombinedFilter = { allegro: true, ovoko: true, coverage: "all", query: "", priceFrom: "", priceTo: "", allStatuses: false, transfer: "all", lifecycle: "available" };
 const field = "h-7 min-w-0 rounded border border-white/15 bg-[#0d1117] px-2 text-xs";
@@ -68,6 +69,7 @@ export function CombinedInventoryPanel({ portal }: { portal?: "ovoko" }) {
     </div>
     <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-white/65"><span>Widoczne: <b>{rows.length}</b> / wczytane: {parts.length}. Allegro {snapshot.allegro.length}/{snapshot.allegroTotal}, Ovoko {snapshot.ovoko.length}/{snapshot.ovokoTotal}. Zaznaczono: {selected.size}. {!complete && <span className="text-amber-200">Odczyt niepelny; brak rekordu nie oznacza nieobecnosci.</span>}</span>{snapshot.admin && <div className="flex flex-wrap items-center gap-2 [&_button]:!px-2 [&_button]:!py-1 [&_button]:!text-xs"><CoordinationReview offerIds={selectedOffers.map(offer => offer.id)} /><OvokoBulkLauncher offers={selectedOffers} onFinished={refresh} /></div>}</div>
     {busy && <p role="status" className="text-xs text-white/65">{progress} Wczytywanie tylko do podgladu, bez zmian na portalach.</p>}
+    {snapshot.admin && <SalesSyncPanel />}
     {(error || filterError) && <p role="alert" className="text-xs text-amber-200">{error || filterError}</p>}
     {snapshot.errors.map(message => <p role="status" className="text-xs text-amber-200" key={message}>{message} Nie uznajemy bledu za pusta liste.</p>)}
     {!busy && !complete && <button className={button} onClick={() => reload(true)}>Wczytaj dalsze czesci</button>}

@@ -33,7 +33,7 @@ After the production build, run `node scripts/test-sales-coordination-build.mjs`
 
 ## Required before enabling writes
 
-Automatic sale synchronization does not yet include an active scheduler, persistent event cursors or Ovoko order ingestion. Do not label the review as automatic synchronization. The manual withdrawal executor below is a separate opt-in feature, not a background sale monitor.
+The read-only review is not automatic synchronization. A separate opt-in Allegro-to-Ovoko pilot now provides a scheduler, persistent event cursor and durable action queue; see `docs/sales-sync-pilot.md` and migration 016. It does not include Ovoko order ingestion or two-way protection. The manual withdrawal executor below remains a separate feature. The checklist below defines the broader two-way rollout requirements, not a claim that the review enables writes.
 
 - Verify Ovoko V2 order shapes, actual NEW/paid/cancelled/returned transitions, order_source and date timezone against an authorized read-only account. Status Sold alone is insufficient. The policy supports normalized Ovoko evidence, but the current review intentionally does not fabricate it.
 - Start at an explicit enable boundary with a durable Allegro event cursor. Page chronologically without skipping, retain cursor on errors, detect retention gaps, and overlap Ovoko order polling. Never replay old historical sales against a newer publication generation.

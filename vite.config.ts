@@ -78,6 +78,7 @@ export default defineConfig(async ({ command }) => {
           workers_dev: true,
           // Runtime settings are managed in the Cloudflare dashboard.
           keep_vars: true,
+          ...(command === "build" ? { triggers: { crons: ["* * * * *"] } } : {}),
           ...(command === "serve"
             ? {
                 services: [

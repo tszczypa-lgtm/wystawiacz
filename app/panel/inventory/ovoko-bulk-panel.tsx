@@ -105,7 +105,7 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
   }
   return <section className="space-y-2 rounded-xl border border-orange-400/30 bg-orange-500/5 p-3" aria-label="Masowe przenoszenie do Ovoko">
     <h2 className="text-base font-bold">{running ? `Trwa przenoszenie partii (${jobs.length})` : `Przenies zaznaczone do Ovoko (${offers.length})`}</h2>
-    <p className="text-xs text-white/65">Kopie ze zdjeciami. Allegro bez zmian. Wysylka wedlug Ovoko; bez synchronizacji sprzedazy. Do 200 pozycji, maks. 10 na minute.</p>
+    <p className="text-xs text-white/65">Kopie ze zdjeciami. Allegro bez zmian. Wysylka wedlug Ovoko. Automat sprzedazy ma osobny wlacznik na liscie czesci. Do 200 pozycji, maks. 10 na minute.</p>
     <details className="text-xs text-white/65"><summary className="cursor-pointer">Dopasowanie i bezpieczenstwo</summary><p className="mt-1">Automat sprawdza tytul, Pasuje do i katalog po pelnym numerze. Model roboczy to tylko przypisanie techniczne do marki, nie potwierdzenie zgodnosci czesci. Blokady duplikatow i niepewnych zapisow pozostaja aktywne.</p></details>
     <OvokoFallbackVehicle disabled={running} onChange={setFallbackVehicle} />
     <div className="flex flex-wrap items-end gap-2">

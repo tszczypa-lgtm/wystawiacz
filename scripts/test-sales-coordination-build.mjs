@@ -26,4 +26,6 @@ for (const file of files.filter(file => file.endsWith(".js"))) {
   tested++;
 }
 assert.ok(tested > 0, "No production adapter dynamic import was tested; run the production build first");
+const workerConfig = JSON.parse(await readFile(path.join(root, "wrangler.json"), "utf8"));
+assert.deepEqual(workerConfig.triggers?.crons, ["* * * * *"], "Background sale checks need the generated minute schedule");
 console.log("Production coordination parser: actual worker import target exports a callable parser; empty events, valid sales, seller isolation and no buyer data passed.");
