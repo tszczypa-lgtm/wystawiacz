@@ -140,7 +140,7 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
   const categoryNames: string[] = []; let current = category;
   for (let i = 0; current && i < 4; i++) { categoryNames.push(current.name); current = dictionaries.categories.find(row => row.id === current!.parentId); }
   if (/opon|felg|tires|rims/i.test(categoryNames.join(" "))) blockers.push("Opony i felgi nie sa jeszcze obslugiwane.");
-  if (blockers.length) throw new OvokoError(400, blockers.join(" "));
+  if (blockers.length) throw new OvokoError(400, blockers.join(" "), "preparation_incomplete", { needsVehicle: !model || !year, needsCategory: !category || category.level !== "3", brandId, categoryId: category?.level === "3" ? category.id : "" });
   const car = await createOvokoCar(request, env, context, { brandId, modelId, year, confirmCreate: true }, fingerprint);
   // Separate preparation (including car reuse/create) from part publication to bound Worker subrequests.
   return { ok: true, category: { id: draft.categoryId, name: categoryNames.slice().reverse().join(" / ") }, vehicle: { brand: dictionaries.brands.find(row => row.id === brandId)?.name || brandId, model: model!.name, usedFallback, evidence: fitmentOrigin === "technical" ? "Model roboczy marki - zgodnosc niepotwierdzona" : fitmentOrigin ? fitmentOrigin.startsWith("catalog") ? "Katalog Allegro - pelny MPN" : "Pasuje do Allegro" : "Dane oferty" }, prepared: { brandId, modelId, donorId: car.carId, categoryId: draft.categoryId, qualityId: draft.qualityId, statusId: draft.statusId, manufacturerCode: draft.manufacturerCode, additionalCodes: draft.additionalCodes || "" }, price, currency: source.currency };

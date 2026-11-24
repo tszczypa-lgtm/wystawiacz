@@ -38,6 +38,15 @@ try {
     assert.equal(oversized.status, 413);
   }
   admin = false;
+  for (const [headers, body, status] of [
+    [{ Origin: "https://foreign.test", "Content-Type": "application/json" }, "{}", 403],
+    [{ Origin: "https://fixture.test", "Content-Type": "text/plain" }, "{}", 415],
+    [{ Origin: "https://fixture.test", "Content-Type": "application/json" }, JSON.stringify({payload:"x".repeat(21000)}), 413],
+    [{ Origin: "https://fixture.test", "Content-Type": "application/json" }, "{}", 400],
+  ]) {
+    const checked = await mf.dispatchFetch("https://fixture.test/api/ovoko/manual-override", { method:"POST", headers:{Authorization:"Bearer fixture",...headers}, body });
+    assert.equal(checked.status,status,await checked.text());
+  }
   const invalidWithdrawal = await mf.dispatchFetch("https://fixture.test/api/allegro/inventory-withdrawal", { method: "POST", headers: { Authorization: "Bearer fixture", Origin: "https://fixture.test", "Content-Type": "application/json" }, body: "{}" });
   assert.equal(invalidWithdrawal.status, 400, await invalidWithdrawal.text()); // Reaches the real dynamic account guard/validator, never provider writes.
   for (const [endpoint, operation] of [["sales-sync", "status"], ["reverse-sales-sync", "status"], ["inventory-actions", "list"], ["link-recovery", "plans"]]) {

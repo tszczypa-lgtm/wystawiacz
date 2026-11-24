@@ -13,26 +13,26 @@ async function read(operation: "brands" | "models", signal: AbortSignal, brandId
   if (!response.ok || !result.ok || !result.readOnly || !Array.isArray(rows)) throw new Error(result.message || "Nie odczytano modeli Ovoko.");
   return rows;
 }
-export function OvokoFallbackVehicle({ disabled, onChange, initiallyOpen = false, title = "Model pomocniczy dla ofert bez rozpoznanego modelu (opcjonalnie)" }: { disabled: boolean; onChange: (value: FallbackVehicle | undefined) => void; initiallyOpen?: boolean; title?: string }) {
+export function OvokoFallbackVehicle({ disabled, onChange, knownBrandId = "", initiallyOpen = false, title = "Model pomocniczy dla ofert bez rozpoznanego modelu (opcjonalnie)" }: { disabled: boolean; onChange: (value: FallbackVehicle | undefined) => void; knownBrandId?: string; initiallyOpen?: boolean; title?: string }) {
   const [opened, setOpened] = useState(initiallyOpen), [brands, setBrands] = useState<Row[]>([]), [models, setModels] = useState<Row[]>([]);
-  const [brandId, setBrandId] = useState(""), [modelId, setModelId] = useState(""), [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const [brandId, setBrandId] = useState(knownBrandId), [modelId, setModelId] = useState(""), [busy, setBusy] = useState(false), [error, setError] = useState("");
   useEffect(() => {
-    if (!opened) return;
-    const controller = new AbortController(); setBusy(true); setError("");
-    void read("brands", controller.signal).then(rows => { if (!controller.signal.aborted) setBrands(rows); }).catch(error => { if (!controller.signal.aborted) setError(error.message); }).finally(() => { if (!controller.signal.aborted) setBusy(false); });
+    if (!opened || knownBrandId) return;
+    const controller = new AbortController();
+    void Promise.resolve().then(async () => { if (controller.signal.aborted) return; setBusy(true); setError(""); const rows = await read("brands", controller.signal); if (!controller.signal.aborted) setBrands(rows); }).catch(error => { if (!controller.signal.aborted) setError(error.message); }).finally(() => { if (!controller.signal.aborted) setBusy(false); });
     return () => controller.abort();
-  }, [opened]);
+  }, [opened, knownBrandId]);
   useEffect(() => {
     if (!brandId) return;
-    const controller = new AbortController(); setBusy(true); setError("");
-    void read("models", controller.signal, brandId).then(rows => { if (!controller.signal.aborted) setModels(rows); }).catch(error => { if (!controller.signal.aborted) setError(error.message); }).finally(() => { if (!controller.signal.aborted) setBusy(false); });
+    const controller = new AbortController();
+    void Promise.resolve().then(async () => { if (controller.signal.aborted) return; setBusy(true); setError(""); const rows = await read("models", controller.signal, brandId); if (!controller.signal.aborted) setModels(rows); }).catch(error => { if (!controller.signal.aborted) setError(error.message); }).finally(() => { if (!controller.signal.aborted) setBusy(false); });
     return () => controller.abort();
   }, [brandId]);
   const field = "w-full rounded-lg border border-white/20 bg-[#0d1117] px-3 py-2 disabled:opacity-40";
   return <details className="rounded-lg border border-white/10 p-3 text-sm" open={opened} onToggle={event => setOpened(event.currentTarget.open)}>
     <summary className="cursor-pointer font-bold">{title}</summary>
     <p className="my-2 text-xs text-white/65">Wybor dla brakujacego modelu. Pierwszenstwo maja dane rozpoznane; marka nie moze byc sprzeczna z oferta.</p>
-    <div className="grid gap-3 sm:grid-cols-2"><label>Marka pomocnicza<select aria-label="Marka pomocnicza" className={field} value={brandId} disabled={disabled || busy} onChange={event => { setBrandId(event.target.value); setModelId(""); setModels([]); onChange(undefined); }}><option value="">Bez modelu pomocniczego</option>{brands.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label><label>Model pomocniczy<select aria-label="Model pomocniczy" className={field} value={modelId} disabled={disabled || busy || !models.length} onChange={event => { setModelId(event.target.value); onChange(event.target.value ? { brandId, modelId: event.target.value } : undefined); }}><option value="">Wybierz model</option>{models.map(row => <option key={row.id} value={row.id}>{row.name} {row.years}</option>)}</select></label></div>
+    <div className="grid gap-3 sm:grid-cols-2">{!knownBrandId && <label>Marka pomocnicza<select aria-label="Marka pomocnicza" className={field} value={brandId} disabled={disabled || busy} onChange={event => { setBrandId(event.target.value); setModelId(""); setModels([]); onChange(undefined); }}><option value="">Bez modelu pomocniczego</option>{brands.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>}<label>Model pomocniczy<select aria-label="Model pomocniczy" className={field} value={modelId} disabled={disabled || busy || !models.length} onChange={event => { setModelId(event.target.value); onChange(event.target.value ? { brandId, modelId: event.target.value } : undefined); }}><option value="">Wybierz model</option>{models.map(row => <option key={row.id} value={row.id}>{row.name} {row.years}</option>)}</select></label></div>
     {busy && <p role="status">Pobieram slownik Ovoko...</p>}{error && <p role="status" className="text-amber-200">{error}</p>}
   </details>;
 }

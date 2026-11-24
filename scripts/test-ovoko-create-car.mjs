@@ -43,6 +43,8 @@ globalThis.fetch = async (input, options = {}) => {
     const id = ["ovoko_account", "model_id", "vehicle_year"].map(key => url.searchParams.get(key)?.slice(3)).join(":"), row = rows.get(id);
     if (method === "GET") return Response.json(row?.owner_id === owner() ? [row] : []);
     assert.equal(method, "PATCH");
+    assert.ok(url.searchParams.has("attempt_id"), "Late confirmation must be fenced to its own attempt generation");
+    if (row && url.searchParams.get("attempt_id") !== `eq.${row.attempt_id}`) return Response.json([]);
     if (!row || row.owner_id !== owner() || (url.searchParams.has("state") && url.searchParams.get("state") !== `eq.${row.state}`)) return Response.json([]);
     const patch = JSON.parse(options.body);
     if (patch.state === "created") {
@@ -144,7 +146,7 @@ try {
     ["confirmation-invalid", /Nieprawidlowa reprezentacja po PATCH/, true],
     ["confirmation-multiple", /Nieprawidlowa reprezentacja po PATCH/, true],
     ["confirmation-null-row", /Niezgodny wiersz po PATCH/, true],
-    ...["state", "car_id", "ovoko_account", "model_id", "vehicle_year", "owner_id"].map(field => [`confirmation-mismatch-${field}`, /Niezgodny wiersz po PATCH/, true]),
+    ...["state", "car_id", "ovoko_account", "model_id", "vehicle_year", "owner_id", "attempt_id"].map(field => [`confirmation-mismatch-${field}`, /Niezgodny wiersz po PATCH/, true]),
   ]) {
     reset(); mode = failure;
     const response = await handleOvokoApi(req(), env), body = await response.text();

@@ -9,10 +9,11 @@ import type { OvokoReadResult, OvokoReadRow } from "@/lib/ovoko-read";
 import { ovokoCarYear, preferredOvokoCar } from "@/lib/ovoko-car-selection";
 import { suggestPartNumbers, suggestOvokoCategories, suggestionSearchMatches, suggestOvokoBrands, suggestOvokoModels, vehicleSuggestionText, ovokoAutomaticFields, automaticOvokoBrand, automaticOvokoModel } from "@/lib/ovoko-suggestions";
 import { PublicationRecovery } from "../publication-recovery";
+import { ManualOvokoOverride } from "../manual-override";
 
 const button = "rounded-lg border border-white/20 px-3 py-2 text-sm font-bold disabled:opacity-40";
 const field = "mt-1 w-full rounded-lg border border-white/20 bg-[#0d1117] px-3 py-2 text-white";
-export function OvokoPreparationPanel() {
+export function OvokoPreparationPanel({ popup=false }: { popup?:boolean }) {
   const [source, setSource] = useState<OvokoSourcePreview | null>(null), [draft, setDraft] = useState<OvokoPreparationDraft | null>(null);
   const [busy, setBusy] = useState(true), [error, setError] = useState(""), [dictionaryError, setDictionaryError] = useState("");
   const [dictionaries, setDictionaries] = useState<Record<string, OvokoReadRow[]>>({}), [dictionaryBusy, setDictionaryBusy] = useState(false);
@@ -26,6 +27,7 @@ export function OvokoPreparationPanel() {
   const lastCarModel = useRef("");
   const carWriteLocks = useRef(new Set<string>());
   const publicationLock = useRef(false), publicationSent = useRef(false);
+  const [overrideBusy, setOverrideBusy] = useState(false);
   const [review, setReview] = useState(false);
   const [publishing, setPublishing] = useState(false), [attempted, setAttempted] = useState(false), [publicationMessage, setPublicationMessage] = useState(""), [partId, setPartId] = useState("");
   const vehicleText = source ? vehicleSuggestionText(source.title, source.parameters) : "";
@@ -180,6 +182,7 @@ export function OvokoPreparationPanel() {
   ] : [];
   const otherCodes = draft ? additionalOvokoCodes(draft.additionalCodes, draft.manufacturerCode) : [];
   async function createCar(): Promise<string | null> {
+    if (overrideBusy) return null;
     const attemptKey = `${modelId}:${carYear}`;
     if (!brandId || !modelId || !/^\d{4}$/.test(carYear) || creatingCar || carWriteLocks.current.has(attemptKey) || carAttempted || carsBusy || modelsBusy || dictionaryBusy) {
       setPublicationMessage(carWriteLocks.current.has(attemptKey) || carAttempted ? "Przygotowanie tego auta bylo juz uruchomione. Sprawdz komunikat przy aucie; nie ponawiamy niepewnego zapisu." : "Nie przygotowano auta: wybierz marke, model i poprawny rok lub poczekaj na zakonczenie odczytu.");
@@ -215,6 +218,7 @@ export function OvokoPreparationPanel() {
     publicationPanel.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
   async function publishSingle() {
+    if (overrideBusy) return;
     if (!source || !draft || publishing || attempted || publicationLock.current || publicationSent.current || creatingCar || carsBusy || modelsBusy || dictionaryBusy) return;
     if (!brandId || !modelId || modelError || source.status !== "ACTIVE" || source.stock !== 1 || source.bundle) {
       setPublicationMessage(modelError || "Przygotowanie auta wymaga marki, modelu i aktywnej pojedynczej oferty Allegro z jedna sztuka.");
@@ -244,9 +248,14 @@ export function OvokoPreparationPanel() {
     } finally { setPublishing(false); publicationLock.current = false; }
   }
   return <section className="space-y-5">
-    <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-3xl font-black">Przygotuj do Ovoko</h1><button type="button" className={`${button} bg-orange-600`} disabled={!source || busy || dictionaryBusy || modelsBusy || carsBusy || publishing || attempted || creatingCar} onClick={() => void publishSingle()}>{publishing ? "Wystawiam..." : "Wystaw 1 czesc w Ovoko"}</button></div>
+    <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-3xl font-black">Przygotuj do Ovoko</h1><div className="flex gap-2">{popup&&<button type="button" className={button} disabled={publishing||creatingCar} onClick={()=>window.close()}>Zamknij okno</button>}<button type="button" className={`${button} bg-orange-600`} disabled={!source || busy || dictionaryBusy || modelsBusy || carsBusy || publishing || attempted || creatingCar} onClick={() => void publishSingle()}>{publishing ? "Wystawiam..." : "Wystaw 1 czesc w Ovoko"}</button></div></div>
     {publicationMessage && <p ref={feedbackPanel} role={partId || publishing ? "status" : "alert"} className={`rounded-lg border p-3 ${partId ? "border-emerald-400/40 text-emerald-200" : "border-amber-400/40 text-amber-200"}`}>{publicationMessage}</p>}
-    {source && !publishing && <PublicationRecovery offerId={source.id} />}
+    {source && !publishing && !creatingCar && !overrideBusy && <PublicationRecovery offerId={source.id} />}
+    {source && <ManualOvokoOverride key={`${source.id}:${brandId}:${modelId}:${carYear}`} offerId={source.id} brandId={brandId} modelId={modelId} year={carYear} disabled={publishing || creatingCar} onBusyChange={setOverrideBusy} onResolved={result => {
+      setReview(false); setPublicationMessage(result.message);
+      setAttempted(false); publicationSent.current = false; setPartId("");
+      if (result.kind === "vehicle") { setCarAttempted(false); carWriteLocks.current.delete(`${modelId}:${carYear}`); setCarMessage(result.message); setCarsRefresh(value => value + 1); if (result.foundId) setDraft(previous => previous ? { ...previous, donorId: result.foundId! } : previous); }
+    }} />}
     <p className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm leading-6"><strong>Jedno klikniecie Wystaw.</strong> Automat sprawdza dane, wykorzystuje zapisane auto albo tworzy brakujace i wysyla czesc ze zdjeciami. Bez dodatkowych checkboxow. Sam podglad niczego nie wysyla. Cennika wysylki Allegro nie przenosimy; obowiazuja ustawienia Ovoko. Nie zmieniamy Allegro. Niepewnych zapisow nie ponawiamy.</p>
     <a href="/panel/inventory" className="inline-block text-sm underline">Wroc do ofert Allegro</a>
     {busy && <p role="status">Sprawdzam uprawnienia i pobieram oferte z polaczonego konta Allegro...</p>}
@@ -262,7 +271,7 @@ export function OvokoPreparationPanel() {
           <p className="text-sm text-white/60">Galeria do przeniesienia: {source.images.length} zdjec. Powtorzenia pominiete: {source.duplicateImages}. Niedozwolone lub ponad limit: {source.rejectedImages}. {partId ? "Przekazano adresy calej galerii do API Ovoko; sprawdz zdjecia na koncie." : "Przy wystawieniu przekazujemy cala te galerie, nie tylko miniature. Sam podglad jeszcze jej nie wysyla."}</p>
           <details><summary className="cursor-pointer text-sm font-bold">Parametry zrodlowe Allegro (bez mapowania ID)</summary><ul className="max-h-60 overflow-auto text-sm">{source.parameters.map((parameter, index) => <li key={index} className="mt-2 break-words">{parameter.name || parameter.id}: {parameter.values.join(", ") || "Brak wartosci tekstowej"}</li>)}</ul></details>
         </section>
-        <fieldset disabled={publishing || attempted || creatingCar} className="min-w-0 space-y-4 rounded-2xl border border-white/10 p-4"><h2 className="text-xl font-bold">Robocze dane do Ovoko</h2>
+        <fieldset disabled={publishing || attempted || creatingCar || overrideBusy} className="min-w-0 space-y-4 rounded-2xl border border-white/10 p-4"><h2 className="text-xl font-bold">Robocze dane do Ovoko</h2>
           <p className="rounded-lg bg-emerald-400/10 p-3 text-sm text-emerald-200">Dane uzupelniamy automatycznie. Poprawiasz tylko wyjatki i klikasz Wystaw: auto oraz czesc przygotuja sie bez dodatkowych potwierdzen.</p>
           <label className="block text-sm">Nazwa robocza<input className={field} value={draft.title} maxLength={500} onChange={event => change("title", event.target.value)} /></label><p className="text-xs text-white/60">Nie jest to gotowy tytul importu. W Ovoko nazwa czesci wynika z kategorii.</p>
           <label className="block text-sm">Numer katalogowy - opcjonalny<input className={field} value={draft.manufacturerCode} maxLength={255} onChange={event => change("manufacturerCode", event.target.value)} /></label><p className="text-xs text-white/60">Gdy nie znasz numeru, zostaw pole puste. Pierwszy znaleziony numer jest glowny; pozostale uzupelniamy ponizej, z pelnymi indeksami i poczatkowymi zerami. Mozliwe VIN-y pomijamy.</p>

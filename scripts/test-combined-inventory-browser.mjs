@@ -58,7 +58,10 @@ try {
   assert.equal(syncControls.length, 0, "Opening the list never arms or even probes the background monitor");
   assert.equal(await page.getByRole("link", { name: "Synchronizacja", exact: true }).count(), 1);
   assert.equal(await page.getByRole("link", { name: "Zarezerwowane", exact: true }).count(), 1);
-  assert.equal(await page.getByRole("link", { name: "Do Ovoko", exact: true }).count(), 0);
+  assert.equal(await page.getByRole("link", { name: "Do Ovoko", exact: true }).count(), 44);
+  await page.evaluate(() => { window.open = (url, name, features) => { window.manualPopup = {url,name,features}; return { opener: window, focus() {} }; }; });
+  await page.getByRole("link", { name: "Do Ovoko", exact: true }).first().click();
+  assert.deepEqual(await page.evaluate(() => window.manualPopup), {url:"/panel/inventory/prepare-ovoko?offerId=1&popup=1",name:"ovoko-manual-1",features:"popup,width=1150,height=900,scrollbars=yes,resizable=yes"});
   const table = page.getByRole("table", { name: "Czesci Allegro i Ovoko" });
   assert.equal(await table.locator("tbody tr").count(), 45, "44 Allegro plus one Ovoko-only, linked part appears once");
   assert.equal(await table.locator('[data-part-key="a:1"]').getByLabel("Ovoko: na stanie", { exact: true }).count(), 1);

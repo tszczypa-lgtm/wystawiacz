@@ -39,7 +39,10 @@ export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, c
   const source = ovokoSourcePreview(owned.offer, offerId, () => "");
   const recognized = ovokoAutomaticFields(source, {}).manufacturerCode;
   if (code && recognized && code.replace(/-/g, "") === recognized.replace(/-/g, "")) code = recognized;
-  if (code.includes("-") && !optionalCodes.includes(code.replace(/-/g, ""))) optionalCodes.unshift(code.replace(/-/g, ""));
+  // Ovoko's primary-code normalization must not erase the only hyphenated variant.
+  const writtenCode = code;
+  code = code.replace(/-/g, "");
+  if (writtenCode !== code && !optionalCodes.includes(writtenCode)) optionalCodes.unshift(writtenCode);
   if (optionalCodes.includes(code)) optionalCodes.splice(optionalCodes.indexOf(code), 1);
   if (optionalCodes.length > 20) throw new OvokoError(400, "Maksymalnie 20 numerow dodatkowych.");
   if (source.status !== "ACTIVE" || source.stock !== 1 || source.bundle) throw new OvokoError(409, "Pierwsza proba wymaga aktywnej oferty z dokladnie jedna sztuka, bez zestawu. Nie wyslano czesci.");
@@ -95,8 +98,8 @@ export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, c
     if (permission.user.id !== context.user.id) throw new OvokoError(403, "Konto zmienilo sie podczas sprawdzania. Nie wyslano czesci.");
     const latestCredentials = await loadOvokoConnection(permission, await ovokoConnectionKey(env));
     if (latestCredentials.username !== credentials.username || latestCredentials.user_token !== credentials.user_token || latestCredentials.password !== credentials.password) throw new OvokoError(409, "Polaczenie Ovoko zmienilo sie podczas sprawdzania. Nie wyslano czesci.");
-    // A retransfer gets a fresh generation even if payload, part ID and timestamp repeat (ABA).
-    const requestHash = await digest(retransfer ? `${crypto.randomUUID()}:${form.toString()}` : form.toString());
+    // Fresh generation also fences late replies after an audited manual lock retirement (ABA).
+    const requestHash = await digest(`${crypto.randomUUID()}:${form.toString()}`);
     const reserved = retransfer
       ? await db(`?${selector}&owner_id=eq.${context.user.id}${publicationCas(retransfer)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ state: "sending", part_id: null, request_hash: requestHash, updated_at: new Date().toISOString() }) })
       : await db("?on_conflict=ovoko_account,allegro_seller_id,allegro_offer_id", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=representation" }, body: JSON.stringify({ ovoko_account: account, allegro_seller_id: seller, allegro_offer_id: offerId, owner_id: context.user.id, request_hash: requestHash, state: "sending" }) });

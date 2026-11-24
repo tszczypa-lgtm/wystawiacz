@@ -14,6 +14,7 @@ import { inventoryOperations } from "./inventory-operations";
 import { reverseSyncControl } from "./reverse-sales-sync";
 import { requireOvokoAccess } from "./ovoko-access";
 import { inventoryLinkRecovery } from "./inventory-link-recovery";
+import { manualOvokoOverride } from "./ovoko-manual-override";
 
 type OvokoEnv = AccountEnv & OvokoKeyEnv & OvokoPublishEnv & { OVOKO_TEST_ENABLED?: string; SALES_SYNC_ENABLED?: string };
 const attempts = new Map<string, number[]>();
@@ -54,14 +55,20 @@ export async function handleOvokoApi(request: Request, env: OvokoEnv): Promise<R
       const status = storageReady ? await ovokoConnectionStatus(context) : { connected: false, verifiedAt: null };
       return reply({ allowed: true, readOnly: true, storageReady, credentialsStored: status.connected, ...status });
     }
-    if (!["/api/ovoko/test", "/api/ovoko/read", "/api/ovoko/connect", "/api/ovoko/disconnect", "/api/ovoko/publish", "/api/ovoko/create-car", "/api/ovoko/transfer-inventory", "/api/ovoko/bulk", "/api/ovoko/coordination-review", "/api/ovoko/publication-recovery", "/api/ovoko/sales-sync", "/api/ovoko/reverse-sales-sync", "/api/ovoko/inventory-actions", "/api/ovoko/link-recovery"].includes(url.pathname)) return reply({ message: "Nieznana operacja Ovoko." }, 404);
+    if (!["/api/ovoko/test", "/api/ovoko/read", "/api/ovoko/connect", "/api/ovoko/disconnect", "/api/ovoko/publish", "/api/ovoko/create-car", "/api/ovoko/transfer-inventory", "/api/ovoko/bulk", "/api/ovoko/coordination-review", "/api/ovoko/publication-recovery", "/api/ovoko/sales-sync", "/api/ovoko/reverse-sales-sync", "/api/ovoko/inventory-actions", "/api/ovoko/link-recovery", "/api/ovoko/manual-override"].includes(url.pathname)) return reply({ message: "Nieznana operacja Ovoko." }, 404);
     if (request.method !== "POST") return reply({ message: "Nieprawidlowa metoda." }, 405);
     if (request.headers.get("Origin") !== url.origin || (env.APP_ORIGIN && env.APP_ORIGIN !== url.origin)) return reply({ message: "Nieprawidlowe zrodlo zadania." }, 403);
     if (request.headers.get("Content-Type")?.split(";")[0].trim() !== "application/json") return reply({ message: "Nieprawidlowy format formularza." }, 415);
     let input: unknown;
-    try { input = JSON.parse(await boundedText(request, ["/api/ovoko/publish", "/api/ovoko/bulk"].includes(url.pathname) ? 200000 : 8192)); } catch (error) { if (error instanceof OvokoError) throw error; throw new OvokoError(400, "Nieprawidlowy formularz."); }
+    try { input = JSON.parse(await boundedText(request, ["/api/ovoko/publish", "/api/ovoko/bulk"].includes(url.pathname) ? 200000 : url.pathname==="/api/ovoko/manual-override" ? 20000 : 8192)); } catch (error) { if (error instanceof OvokoError) throw error; throw new OvokoError(400, "Nieprawidlowy formularz."); }
     if (!input || typeof input !== "object" || Array.isArray(input)) throw new OvokoError(400, "Nieprawidlowy formularz.");
     const values = input as Record<string, unknown>;
+    if(url.pathname==="/api/ovoko/manual-override"){
+      const now=Date.now(),key=`${context.user.id}:manual-override`,recent=(attempts.get(key)||[]).filter(t=>now-t<60000);
+      if(recent.length>=6)throw new OvokoError(429,"Maksymalnie 6 kontroli lub recznych decyzji na minute.");
+      if(attempts.size>=1000&&!attempts.has(key))attempts.delete(attempts.keys().next().value!);
+      attempts.set(key,[...recent,now]);return reply(await manualOvokoOverride(context.user.id,env,values));
+    }
     if (url.pathname === "/api/ovoko/link-recovery") {
       const now=Date.now(), key=`${context.user.id}:link-recovery`, recent=(attempts.get(key)||[]).filter(time=>now-time<60000);
       if (recent.length>=10) throw new OvokoError(429,"Maksymalnie 10 odczytow lub planow odzyskiwania na minute.");
@@ -163,7 +170,7 @@ export async function handleOvokoApi(request: Request, env: OvokoEnv): Promise<R
     if (connecting) await saveOvokoConnection(context, key!, credentials, checkedAt);
     return reply({ ok: true, code: "R200", readOnly: true, credentialsStored: connecting || useSaved, connected: connecting || useSaved, checkedAt, brands: result.list.map(item => ({ id: String(item.id), name: item.name })) });
   } catch (error) {
-    if (error instanceof OvokoError) return reply({ message: error.message, ...(error.code ? { code: error.code } : {}) }, error.status);
+    if (error instanceof OvokoError) return reply({ message: error.message, ...(error.code ? { code: error.code } : {}), ...(error.repair ? { repair: error.repair } : {}) }, error.status);
     if (error instanceof Error && "status" in error && error.status === 401) return reply({ message: "Zaloguj sie ponownie do Wystawiacza." }, 401);
     if (error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name)) return reply({ message: "Przekroczono czas odczytu Ovoko. Nie ponawiamy automatycznie; nie zmieniono ofert." }, 504);
     return reply({ message: "Nie udalo sie wykonac testu Ovoko. Sprawdz dostep konta i polaczenie sieciowe. Nie zmieniono ofert." }, 503);

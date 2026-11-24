@@ -30,7 +30,7 @@ try {
     assert.equal(url.origin, "https://prepare.test", "No HTML/script/iframe or arbitrary photo fetches");
     if (!url.pathname.startsWith("/api/")) return route.fulfill({ contentType: "text/html", body: '<html><body style="background:#0d1117;color:white"><main id="root" style="max-width:1100px;margin:auto;padding:20px"></main></body></html>' });
     calls.push({ path: url.pathname, method: request.method() });
-    if (url.pathname === "/api/account/me") { assert.equal(request.method(), "GET"); return route.fulfill({ json: { isAdmin: admin } }); }
+    if (url.pathname === "/api/account/me") { assert.equal(request.method(), "GET"); return route.fulfill({ json: { isAdmin: admin, access: { allowed: true } } }); }
     if (url.pathname === `/api/allegro/own-offers/${id}`) {
       assert.equal(request.method(), "GET");
       if (failure) return route.fulfill({ status: 404, json: { message: "Oferta nie nalezy do polaczonego konta." } });
@@ -218,7 +218,8 @@ try {
   await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="30"]').waitFor({ state: "attached" });
   assert.equal(await page.getByLabel("Marka auta Ovoko").inputValue(), "3", "Reported Land Rover title selects the full make without a click");
   assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "30");
-  assert.equal(await page.getByLabel("Numer katalogowy - opcjonalny").inputValue(), "JPLA14D617BA");
+  assert.equal(await page.getByLabel("Numer katalogowy - opcjonalny").inputValue(), "JPLA-14D617-BA");
+  assert.ok((await page.getByLabel("Dodatkowe numery czesci").inputValue()).split("\n").includes("JPLA14D617BA"));
   await page.getByLabel("Kategoria Ovoko", { exact: true }).selectOption("");
   const beforeBlocked = calls.filter(call => ["/api/ovoko/create-car", "/api/ovoko/publish"].includes(call.path)).length;
   await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).click();
@@ -232,7 +233,8 @@ try {
   assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "42", "Several recognized models still produce a reproducible best draft choice");
   assert.equal(await page.getByLabel("Model auta Ovoko").locator('optgroup[label="Pasujace slowa z tytulu"] option').count(), 4);
   await page.getByRole("status").filter({ hasText: "Rozpoznano pasujace warianty: 4" }).waitFor();
-  assert.equal(await page.getByLabel("Numer katalogowy - opcjonalny").inputValue(), "EM2T14F014AA");
+  assert.equal(await page.getByLabel("Numer katalogowy - opcjonalny").inputValue(), "EM2T-14F014-AA");
+  assert.ok((await page.getByLabel("Dodatkowe numery czesci").inputValue()).split("\n").includes("EM2T14F014AA"));
   await page.getByLabel("Model auta Ovoko").selectOption("42");
   assert.equal(await page.getByLabel("Model auta Ovoko").inputValue(), "42", "A found model remains available for explicit selection");
   await page.getByText(/Brak zapisanego auta dla tego modelu/).waitFor();
@@ -302,9 +304,9 @@ try {
   savedCars = []; currency = "CZK"; await mount(); await page.getByText(/Brak zapisanego auta dla tego modelu/).waitFor(); assert.equal(await page.getByLabel("Cena robocza").inputValue(), "");
   assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "", "Draft never persists across reloads");
   failure = true; await mount(); await page.getByRole("alert").filter({ hasText: "Oferta nie nalezy" }).waitFor(); assert.equal(await page.getByLabel("Nazwa robocza", { exact: true }).count(), 0);
-  admin = false; const beforeDenied = calls.filter(call => call.path.includes("own-offers")).length;
-  await mount(); await page.getByRole("alert").filter({ hasText: "administratora" }).waitFor(); assert.equal(calls.filter(call => call.path.includes("own-offers")).length, beforeDenied);
-  admin = true; const beforeInvalid = calls.length; await mount("offerId=123&offerId=456"); await page.getByRole("alert").filter({ hasText: "Wybierz jedna" }).waitFor(); assert.equal(calls.length, beforeInvalid);
+  admin = false; failure = false; const beforeNormal = calls.filter(call => call.path.includes("own-offers")).length;
+  await mount(); await page.getByLabel("Nazwa robocza", { exact: true }).waitFor(); assert.equal(calls.filter(call => call.path.includes("own-offers")).length, beforeNormal + 1, "Normal active accounts can prepare their own listings");
+  admin = true; await page.goto("about:blank"); const beforeInvalid = calls.length; await mount("offerId=123&offerId=456"); await page.getByRole("alert").filter({ hasText: "Wybierz jedna" }).waitFor(); assert.equal(calls.length, beforeInvalid);
   assert.equal(await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage })), "{}"); assert.deepEqual(errors, []);
   console.log("Ovoko preparation browser: autofill, no writes on mount, no checkbox confirmations, one-click car+part flow, double-click/no-retry guards, donor separation, inert HTML, roles and desktop/mobile passed. No live services.");
 } finally { await browser.close(); }

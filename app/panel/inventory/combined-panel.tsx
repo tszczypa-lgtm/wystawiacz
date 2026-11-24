@@ -7,6 +7,7 @@ import { suggestPartNumbers } from "@/lib/ovoko-suggestions";
 import { OvokoBulkLauncher } from "./ovoko-bulk-launcher";
 import { ManualWithdrawal } from "./manual-withdrawal";
 import { BulkInventoryActions } from "./bulk-inventory-actions";
+import { ManualOvokoLauncher } from "./manual-ovoko-launcher";
 
 const initial: CombinedFilter = { allegro: true, ovoko: true, coverage: "all", query: "", priceFrom: "", priceTo: "", allStatuses: false, transfer: "all", lifecycle: "available" };
 const field = "h-7 min-w-0 rounded border border-white/15 bg-[#0d1117] px-2 text-xs";
@@ -81,6 +82,6 @@ function PartRow({ row, snapshot, selected, onSelect }: { row: CombinedPart; sna
     <td className="px-1 py-1"><div className="truncate font-medium" title={row.name}>{a ? <a href={`https://allegro.pl/oferta/${a.id}`} target="_blank" rel="noopener noreferrer" className="hover:text-orange-300">{row.name}</a> : row.name || "Czesc Ovoko"}</div><div className="truncate text-[10px] text-white/45" title={`Numer: ${number || "brak"}; Allegro: ${a?.id || "brak"}; Ovoko: ${o?.id || "brak"}`}><span className="text-white/70">{number || "Bez numeru"}</span>{a && ` · A: ${a.id}`}{o && ` · O: ${o.id}`}{row.conflict && <span className="text-amber-200"> · Niejednoznaczne powiazanie, nie scalono</span>}</div></td>
     <td className="p-1"><div className="flex flex-nowrap gap-1"><span aria-label={`Allegro: ${a ? aActive ? "aktywna" : a.status : snapshot.allegroComplete ? "brak" : "nieustalone"}`} className={`max-w-[76px] shrink-0 truncate rounded px-1 py-0.5 text-[10px] ${aActive ? "bg-orange-500/15 text-orange-300" : "bg-white/5 text-white/40"}`} title={a ? `Oferta Allegro ${a.id}: ${a.status}` : "Brak w odczytanych danych"}>Allegro {a ? aActive ? "aktywna" : a.status : snapshot.allegroComplete ? "—" : "?"}</span><span aria-label={`Ovoko: ${o ? oStock ? "na stanie" : snapshot.statuses[o.status || ""] || "status nieustalony" : snapshot.ovokoComplete ? "brak" : "nieustalone"}`} className={`max-w-[72px] shrink-0 truncate rounded px-1 py-0.5 text-[10px] ${oStock ? "bg-cyan-500/15 text-cyan-300" : "bg-white/5 text-white/40"}`} title={o ? `Rekord Ovoko ${o.id}. ${snapshot.statuses[o.status || ""] || "Status nieustalony"}. Widocznosc w sklepie niepotwierdzona.` : "Brak w odczytanych danych; historia transferu nie potwierdza obecnosci"}>Ovoko {o ? oStock ? "na stanie" : snapshot.statuses[o.status || ""] || "?" : snapshot.ovokoComplete ? "—" : "?"}</span></div></td>
     <td className="p-1 font-medium">{a?.price ? `${a.price.amount} ${a.price.currency}` : "—"}</td><td className="p-1 font-medium">{o?.price ? `${o.price} *` : "—"}</td><td className="p-1 text-white/60">{a?.stock ?? "—"}</td>
-    <td className="p-1">{a && snapshot.admin && !row.conflict && <ManualWithdrawal offerId={a.id} partId={o?.id} name={row.name} />}</td>
+    <td className="p-1">{a && snapshot.admin && <ManualOvokoLauncher offerId={a.id} />}{a && snapshot.admin && !row.conflict && <ManualWithdrawal offerId={a.id} partId={o?.id} name={row.name} />}</td>
   </tr>;
 }

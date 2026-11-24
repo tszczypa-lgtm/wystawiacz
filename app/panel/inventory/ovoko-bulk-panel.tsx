@@ -7,9 +7,11 @@ import { adjustedOvokoPrice, sameOvokoMoney, type OvokoPriceAdjustment } from "@
 import { offerDescriptionText, ovokoSourcePreview } from "@/lib/ovoko-preparation";
 import { OvokoFallbackVehicle, type FallbackVehicle } from "./ovoko-fallback-vehicle";
 import { OvokoJobRepair, type OvokoCorrections } from "./ovoko-job-repair";
+import type { OvokoRepairHint } from "@/lib/ovoko-read";
+import { ManualOvokoLauncher } from "./manual-ovoko-launcher";
 
 export type BulkOffer = { id: string; name: string; price: { amount: string; currency: string } | null };
-type Job = { id: string; name: string; price: string; currency: string; state: "waiting" | "sending" | "done" | "skipped" | "error"; message: string; retryable: boolean; rule: OvokoPriceAdjustment; technical: boolean };
+type Job = { id: string; name: string; price: string; currency: string; state: "waiting" | "sending" | "done" | "skipped" | "error"; message: string; retryable: boolean; repair?: OvokoRepairHint; rule: OvokoPriceAdjustment; technical: boolean };
 type Binding = { sellerId: string; fingerprint: string };
 type Outcome = { ok: boolean; partId: string; alreadyCreated: boolean; price?: string; currency?: string; prepared?: Record<string, string> };
 const field = "rounded-lg border border-white/20 bg-[#0d1117] px-3 py-1.5";
@@ -69,10 +71,10 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
     return true;
   }
   function failure(id: string, error: unknown) {
-    const retryable = error instanceof OvokoBulkClientError && error.status === 400;
-    update(id, { state: "error", retryable, message: error instanceof Error ? error.message : "Niepotwierdzony wynik." });
+    const retryable = error instanceof OvokoBulkClientError && error.status === 400 && (!error.repair || error.repair.needsVehicle || error.repair.needsCategory);
+    update(id, { state: "error", retryable, repair: error instanceof OvokoBulkClientError ? error.repair : undefined, message: error instanceof Error ? error.message : "Niepotwierdzony wynik." });
     // Pre-existing reservations block only this item; preparation made no new part write.
-    return retryable || error instanceof OvokoBulkClientError && error.status === 409 && ["vehicle_creation_locked", "publication_locked"].includes(error.code || "");
+    return error instanceof OvokoBulkClientError && ![401, 403, 429].includes(error.status) && (error.status === 400 || [502, 504].includes(error.status) || error.code === "item_transport" || error.status === 409 && ["vehicle_creation_locked", "publication_locked"].includes(error.code || ""));
   }
   function finish() { lock.current = false; if (mounted.current) { setJobs(previous => previous.map(job => job.state === "waiting" ? { ...job, message: "Nie wyslano w tej partii" } : job)); setRunning(false); onFinished(); } }
   async function start() {
@@ -82,10 +84,15 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
     setJobs(snapshot.map(offer => ({ id: offer.id, name: offer.name, price: price(offer, rule), currency: offer.price?.currency || "", state: "waiting", retryable: false, message: "Oczekuje", rule, technical })));
     try {
       const session = await begin(rule);
+      let transportFailures = 0;
       for (const offer of snapshot) {
         if (stop.current) break;
-        try { if (!await transfer(offer, rule, session, technical, fallback)) break; }
-        catch (error) { if (!failure(offer.id, error)) throw error; }
+        try { if (!await transfer(offer, rule, session, technical, fallback)) break; transportFailures = 0; }
+        catch (error) {
+          if (!failure(offer.id, error)) throw error;
+          transportFailures = error instanceof OvokoBulkClientError && (error.code === "item_transport" || [502, 504].includes(error.status)) ? transportFailures + 1 : 0;
+          if (transportFailures >= 3) throw new Error("Trzy kolejne bledy odpowiedzi serwera. Wstrzymano pozostale pozycje do czasu przywrocenia polaczenia.");
+        }
       }
       if (mounted.current) setMessage(stop.current ? "Zatrzymano. Pozostale pozycje nie zostaly wyslane." : "Partia zakonczona.");
     } catch (error) {
@@ -121,7 +128,8 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
     {!!jobs.length && <div className="max-h-[calc(100vh-330px)] min-h-48 divide-y divide-white/10 overflow-auto rounded border border-white/10 text-sm" aria-live="polite">{jobs.map(job => <div key={job.id} className="px-2 py-1.5" data-offer-id={job.id}>
       <div className="flex items-start justify-between gap-3"><a href={`/panel/inventory/prepare-ovoko?offerId=${job.id}`} target="_blank" rel="noopener noreferrer" className="min-w-0 font-semibold underline">{job.name}</a><span className="shrink-0 whitespace-nowrap text-xs text-white/70">{job.state === "skipped" ? "Cena istniejacej czesci bez zmian." : `${job.state === "done" ? "Cena wyslana" : "Cena planowana"}: ${job.price} ${job.currency}`}</span></div>
       <p className={`text-xs leading-5 ${job.state === "done" || job.state === "skipped" ? "text-emerald-300" : job.state === "error" ? "text-amber-200" : "text-white/60"}`}>{job.message}</p>
-      {job.retryable && <OvokoJobRepair id={job.id} disabled={running} onTransfer={(vehicle, corrections) => void retry(job, vehicle, corrections)} />}
+      {job.retryable && <OvokoJobRepair key={`${job.id}:${JSON.stringify(job.repair)}`} id={job.id} hint={job.repair} disabled={running} onTransfer={(vehicle, corrections) => void retry(job, vehicle, corrections)} />}
+      {job.state === "error" && !running && <ManualOvokoLauncher offerId={job.id} />}
     </div>)}</div>}
   </section>;
 }
