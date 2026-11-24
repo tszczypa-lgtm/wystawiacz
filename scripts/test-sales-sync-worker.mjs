@@ -22,12 +22,12 @@ const mf = new Miniflare({ port: 19877, modules, compatibilityDate: "2026-05-15"
     if (url.pathname === "/rest/v1/customer_accounts") return Response.json([{ owner_id: owner, suspended, access_mode: active ? "free" : "standard", free_until: null }]);
     if (url.pathname === "/rest/v1/account_admins") return Response.json(admin ? [{ owner_id: owner }] : []);
     if (url.pathname === "/rest/v1/allegro_connections") return Response.json([{ sealed }]);
-    assert.ok(["/rest/v1/sales_sync", "/rest/v1/sales_sync_actions", "/rest/v1/sales_sync_reverse", "/rest/v1/sales_sync_reverse_actions", "/rest/v1/inventory_operations"].includes(url.pathname)); return Response.json([]);
+    assert.ok(["/rest/v1/sales_sync", "/rest/v1/sales_sync_actions", "/rest/v1/sales_sync_reverse", "/rest/v1/sales_sync_reverse_actions", "/rest/v1/inventory_operations", "/rest/v1/inventory_link_recovery"].includes(url.pathname)); return Response.json([]);
   } });
 try {
   const response = await mf.dispatchFetch("https://fixture.test/api/ovoko/sales-sync", { method: "POST", headers: { Authorization: "Bearer fixture", Origin: "https://fixture.test", "Content-Type": "application/json" }, body: JSON.stringify({ operation: "status" }) });
   const body = await response.json(); assert.equal(response.status, 200, JSON.stringify(body)); assert.equal(body.enabled, false);
-  for (const [endpoint, operation] of [["reverse-sales-sync", "status"], ["inventory-actions", "list"]]) {
+  for (const [endpoint, operation] of [["reverse-sales-sync", "status"], ["inventory-actions", "list"], ["link-recovery", "plans"]]) {
     const checked = await mf.dispatchFetch(`https://fixture.test/api/ovoko/${endpoint}`, { method: "POST", headers: { Authorization: "Bearer fixture", Origin: "https://fixture.test", "Content-Type": "application/json" }, body: JSON.stringify({ operation }) });
     assert.equal(checked.status, 200, await checked.text());
     const foreign = await mf.dispatchFetch(`https://fixture.test/api/ovoko/${endpoint}`, { method: "POST", headers: { Authorization: "Bearer fixture", Origin: "https://foreign.test", "Content-Type": "application/json" }, body: JSON.stringify({ operation: "execute", confirm: true }) });
@@ -40,7 +40,7 @@ try {
   admin = false;
   const invalidWithdrawal = await mf.dispatchFetch("https://fixture.test/api/allegro/inventory-withdrawal", { method: "POST", headers: { Authorization: "Bearer fixture", Origin: "https://fixture.test", "Content-Type": "application/json" }, body: "{}" });
   assert.equal(invalidWithdrawal.status, 400, await invalidWithdrawal.text()); // Reaches the real dynamic account guard/validator, never provider writes.
-  for (const [endpoint, operation] of [["sales-sync", "status"], ["reverse-sales-sync", "status"], ["inventory-actions", "list"]]) {
+  for (const [endpoint, operation] of [["sales-sync", "status"], ["reverse-sales-sync", "status"], ["inventory-actions", "list"], ["link-recovery", "plans"]]) {
     const request = () => mf.dispatchFetch(`https://fixture.test/api/ovoko/${endpoint}`, { method: "POST", headers: { Authorization: "Bearer fixture", Origin: "https://fixture.test", "Content-Type": "application/json" }, body: JSON.stringify({ operation }) });
     const regular = await request(); assert.equal(regular.status, 200, "Active normal accounts have access to their own operations");
     active = false; assert.equal((await request()).status, 403, "Expired ordinary account is denied"); active = true;

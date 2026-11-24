@@ -1,0 +1,35 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
+const { PGlite }=await import(pathToFileURL(process.env.PGLITE_MODULE).href),db=new PGlite();
+const owner="00000000-0000-4000-8000-000000000001",other="00000000-0000-4000-8000-000000000002",account="a".repeat(64),hash="b".repeat(64);
+try{
+ await db.exec("create schema auth;create table auth.users(id uuid primary key);create role anon;create role authenticated;create role service_role;create table public.allegro_connections(owner_id uuid primary key,sealed text not null);create table public.ovoko_connections(owner_id uuid primary key,sealed text not null);");
+ for(const id of[owner,other])await db.query("insert into auth.users values($1)",[id]);
+ await db.query("insert into public.allegro_connections values($1,'a-sealed');",[owner]);await db.query("insert into public.ovoko_connections values($1,'o-sealed');",[owner]);
+ for(const file of["012_ovoko_single_publications.sql","016_sales_sync.sql","017_inventory_operations.sql","018_reverse_sales_sync.sql","019_sync_ownership_reservations.sql","020_inventory_link_recovery.sql","020_inventory_link_recovery.sql"])await db.exec(await readFile(new URL(`../supabase/${file}`,import.meta.url),"utf8"));
+ await db.query("insert into public.sales_sync(owner_id,epoch,enabled,seller_id,ovoko_account,fingerprint,client_id,armed_at) values($1,gen_random_uuid(),true,'555',$2,'fingerprint','client',now())",[owner,account]);
+ const prepare=async(offer="10",part="20")=>(await db.query("select * from public.prepare_inventory_link_recovery($1,'555',$2,'fingerprint','client',$3,$4,$5,'a-sealed','o-sealed')",[owner,account,offer,part,hash])).rows[0];
+ const apply=(id,who=owner,fingerprint="fingerprint",a="a-sealed")=>db.query("select public.apply_inventory_link_recovery($1,$2,$3,'o-sealed',$4,'client') as ok",[who,id,a,fingerprint]);
+ await assert.rejects(prepare());assert.equal((await db.query("select * from public.inventory_link_recovery")).rows.length,0);
+ await db.query("update public.sales_sync set enabled=false,lease_until=now()+interval '5 minutes' where owner_id=$1",[owner]);await assert.rejects(prepare());
+ await db.query("update public.sales_sync set lease_until=null where owner_id=$1",[owner]);
+ const p=await prepare();assert.equal((await prepare()).id,p.id,"Repeated preview reuses the pending plan");
+ assert.equal((await db.query("select * from public.ovoko_single_publications")).rows.length,0,"Preview does not create a publication mapping");
+ await assert.rejects(db.query("update public.sales_sync set enabled=true where owner_id=$1",[owner]));
+ await assert.rejects(db.query("insert into public.sales_sync_reverse(owner_id,epoch,enabled,seller_id,ovoko_account,fingerprint,client_id,armed_at,baseline,watch) values($1,gen_random_uuid(),true,'555',$2,'fingerprint','client',now(),'[]','[]')",[owner,account]));
+ await assert.rejects(db.query("select public.sync_account_lock($1,null,null,'release')",[owner]));
+ await assert.rejects(apply(p.id,other));await assert.rejects(apply(p.id,owner,"changed"));await assert.rejects(apply(p.id,owner,"fingerprint","changed"));
+ assert.equal((await apply(p.id)).rows[0].ok,true);assert.equal((await apply(p.id)).rows[0].ok,true);
+ const linked=(await db.query("select * from public.ovoko_single_publications")).rows;assert.equal(linked.length,1);assert.equal(linked[0].origin,"recovered");assert.equal(linked[0].state,"created");assert.equal(linked[0].owner_id,owner);
+ assert.equal((await db.query("select enabled from public.sales_sync where owner_id=$1",[owner])).rows[0].enabled,false,"Recovery never re-enables synchronization");
+ await assert.rejects(prepare("10","21"));await assert.rejects(prepare("11","20"));
+ const expired=await prepare("11","21");await db.query("update public.inventory_link_recovery set expires_at=now()-interval '1 second' where id=$1",[expired.id]);await assert.rejects(apply(expired.id));
+ await db.query("update public.sales_sync set enabled=true where owner_id=$1",[owner]);await db.query("update public.sales_sync set enabled=false where owner_id=$1",[owner]);
+ const conflict=await prepare("12","22");
+ await db.query("insert into public.ovoko_single_publications(owner_id,ovoko_account,allegro_seller_id,allegro_offer_id,part_id,request_hash,state) values($1,$2,'555','12',null,$3,'uncertain')",[owner,account,hash]);
+ await assert.rejects(apply(conflict.id));assert.equal((await db.query("select state from public.ovoko_single_publications where allegro_offer_id='12'")).rows[0].state,"uncertain");
+ await db.query("update public.inventory_link_recovery set state='cancelled' where id=$1",[conflict.id]);
+ await db.exec("set role anon");await assert.rejects(db.query("select * from public.inventory_link_recovery"));await assert.rejects(apply(p.id));await db.exec("reset role;set role authenticated");await assert.rejects(db.query("select * from public.inventory_link_recovery"));await db.exec("reset role");
+ console.log("Local PostgreSQL/WASM: recovery migration/rerun, missing journal reconstruction/provenance, plan reuse/idempotence, pause/lease/ownership/connection guards, enable/release interlocks, expiry, no uncertain-journal overwrite and browser-role denial passed. No production DB or provider writes; parallel Supabase verification remains a deployment gate.");
+}catch(e){console.error(e.message,e.query||"");process.exitCode=1;}finally{await db.close();}
