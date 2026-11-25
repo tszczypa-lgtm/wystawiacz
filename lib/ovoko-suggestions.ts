@@ -133,7 +133,7 @@ export function automaticOvokoBrand(title: string, parameters: { name: string; v
   return combined.length === 1 ? combined[0] : "";
 }
 function vehicleTokens(value: string): string[] {
-  return fold(value).replace(/\b(?:(?:ml|m)[-\s]*(?:class|klasse|klasa)|(?:class|klasse|klasa)[-\s]*m|ml)\b/g, "mclass").replace(/\b([sc])[\s\-\u2010-\u2014]+max\b/g, "$1max").replace(/\b(mk|mark|gen)\s+([1-9]\d?|[ivx]+)\b/g, "$1$2").replace(/\b([a-z0-9]+)[-\u2010-\u2014]([a-z0-9]+)\b/g, "$1$2").match(/[a-z0-9]+/g) || [];
+  return fold(value).replace(/\b(golf|polo|passat|clio|megane|scenic|kangoo|focus|mondeo|fiesta)\s+([1-9])(?=$|[\s(])/g, "$1 gen$2").replace(/\b(?:(?:ml|m)[-\s]*(?:class|klasse|klasa)|(?:class|klasse|klasa)[-\s]*m|ml)\b/g, "mclass").replace(/\b([sc])[\s\-\u2010-\u2014]+max\b/g, "$1max").replace(/\b(mk|mark|gen)\s+([1-9]\d?|[ivx]+)\b/g, "$1$2").replace(/\b([a-z0-9]+)[-\u2010-\u2014]([a-z0-9]+)\b/g, "$1$2").match(/[a-z0-9]+/g) || [];
 }
 const romanGenerations: Record<string, string> = { i: "1", ii: "2", iii: "3", iv: "4", v: "5", vi: "6", vii: "7", viii: "8", ix: "9", x: "10" };
 function vehicleGenerations(value: string) {

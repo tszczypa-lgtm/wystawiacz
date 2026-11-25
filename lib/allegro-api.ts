@@ -139,6 +139,10 @@ export async function readOvokoFitment(offer: Record<string, any>, number: strin
       if (typeof item.text !== "string" || item.text.length > 2000) throw new ApiError(502, "Nieprawidlowy opis modelu Pasuje do.");
       const text = item.text.trim();
       if (text && !seen.has(text) && rows.length < 200) { seen.add(text); rows.push({ text, origin }); }
+      else if (text && origin.startsWith("catalog")) {
+        const existing = rows.find(row => row.text === text);
+        if (existing && !existing.origin.startsWith("catalog")) existing.origin = origin;
+      }
     }
   }
   append(offer.compatibilityList, "offer");

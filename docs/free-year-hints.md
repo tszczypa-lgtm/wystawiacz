@@ -2,6 +2,16 @@
 
 No database migration or paid catalogue key is required.
 
+Bulk preparation checks the full manufacturer code even when a title already
+suggests a model. Accepted exact-code catalogue compatibility can override a
+misleading title generation. Catalogue model matching must be unambiguous within
+each compatibility row; a bare family name does not identify its generation.
+The matched code and compatibility text appear in the transfer result. Numeric
+generation names such as `Golf 7` match Roman names such as `Golf VII`, but digits
+inside an OE code such as `5G0907044BF` are not generation markers. A manual
+vehicle selection remains authoritative. A model selected by exact-code data
+uses that compatibility context for year lookup, not the conflicting title.
+
 When the source offer and Ovoko model dictionary have no usable year and no saved
 Ovoko car can be reused, preparation checks these account-scoped sources:
 
