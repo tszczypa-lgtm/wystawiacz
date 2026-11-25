@@ -4,6 +4,7 @@ export type OvokoSourcePreview = {
   id: string; title: string; description: string; images: string[]; skippedImages: number; rejectedImages: number; duplicateImages: number;
   price: string; currency: string; stock: number | null; status: string; categoryId: string;
   shippingRateId: string; externalId: string; parameters: Parameter[]; suggestedCode: string; bundle: boolean; condition: OvokoSourceCondition;
+  stockUnit?: string;
 };
 const object = (value: unknown): Record<string, any> => value && typeof value === "object" && !Array.isArray(value) ? value : {};
 const text = (value: unknown, limit = 1000) => typeof value === "string" ? value.slice(0, limit) : "";
@@ -58,7 +59,7 @@ export function ovokoSourcePreview(input: unknown, expectedId: string, toText: (
     price: typeof price.amount === "string" && price.amount.length <= 30 && /^\d+(\.\d+)?$/.test(price.amount) ? price.amount : "", currency: typeof price.currency === "string" && /^[A-Z]{3}$/.test(price.currency) ? price.currency : "",
     stock: Number.isSafeInteger(stock) && stock >= 0 ? stock : null, status: text(object(source.publication).status, 40), categoryId: text(object(source.category).id, 40),
     shippingRateId: text(object(object(source.delivery).shippingRates).id, 100), externalId: text(object(source.external).id, 1000), parameters, suggestedCode: candidates.length === 1 ? candidates[0] : "",
-    bundle: products.length !== 1 || Number(object(object(products[0]).quantity).value ?? 1) !== 1, condition };
+    bundle: products.length !== 1 || Number(object(object(products[0]).quantity).value ?? 1) !== 1, condition, ...(typeof object(source.stock).unit==="string"?{stockUnit:source.stock.unit}:{}) };
 }
 export type OvokoPreparationDraft = { title: string; notes: string; manufacturerCode: string; additionalCodes: string; price: string; currency: string; categoryId: string; donorId: string; qualityId: string; statusId: string; shippingPlan: string };
 export const validOvokoCode = (value: string) => /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(value) && /^[A-Z0-9]{6,32}$/.test(value.replace(/-/g, ""));

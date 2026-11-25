@@ -79,6 +79,7 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
     if (!sameOvokoMoney(source.price, offer.price?.amount) || source.currency !== offer.price?.currency) throw new OvokoBulkClientError(`Cena Allegro zmienila sie od zaznaczenia (${offer.price?.amount} ${offer.price?.currency} -> ${source.price} ${source.currency}). Odswiez oferte.`, 400);
     if (stop.current) { update(offer.id, { state: "waiting", message: "Nie wyslano" }); return false; }
     const item = { offerId: offer.id, binding: session, adjustment: rule, stockMode: selectedStockMode, notes: source.description, expectedSource: { title: source.title, price: source.price, currency: source.currency, stock: source.stock, status: source.status, condition: source.condition, images: source.images } };
+    Object.assign(item.expectedSource,{stockUnit:source.stockUnit});
     type Preparation = Outcome & { category?: { id: string; name: string }; vehicle?: { brand: string; model: string; usedFallback: boolean; evidence?: string; sourceUrl?: string } };
     const prepareInput = { ...item, operation: "prepare", allowTechnicalModel: useTechnical, ...(fallback ? { fallbackVehicle: fallback } : {}), ...(manualVehicle ? { manualVehicle: true } : {}), ...(overrides ? { overrides } : {}) };
     let preparation = await ovokoBulkRequest<Preparation>(prepareInput);

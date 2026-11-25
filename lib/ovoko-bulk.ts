@@ -17,9 +17,11 @@ import { publicationStockMode, readStockPublication, checkStockPublication, stoc
 import { cachedOvokoYearEvidence, yearAllegroReader } from "./ovoko-year-suggestion";
 import type { YearEvidence } from "./ovoko-year-evidence";
 import { lookupWebFitment, selectWebVehicle, webVehicleMismatchMessage } from "./ovoko-web-fitment";
+import {validateWheelInput} from "./ovoko-wheel-fields";
 
 type Context = Awaited<ReturnType<typeof accountContext>>;
 export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, context: Context, input: Record<string, unknown>, nativeSource?: OvokoSourcePreview) {
+  const {wheel,...rest}=input;input=rest;validateWheelInput(wheel);
   if(nativeSource&&input.operation!=="prepare")throw new OvokoError(400,"Szkic obsluguje tylko przygotowanie auta i kategorii.");
   if (env.OVOKO_PUBLISH_ENABLED !== "true") throw new OvokoError(503, "Publikacja Ovoko jest wylaczona.");
   if (!["start", "prepare", "item"].includes(String(input.operation)) || Object.keys(input).some(key => !["operation", "offerId", "adjustment", "binding", "notes", "expectedSource", "prepared", "fallbackVehicle", "overrides", "allowTechnicalModel", "manualVehicle", "stockMode", "workspaceVehicleId"].includes(key))) throw new OvokoError(400, "Nieprawidlowa operacja przenoszenia.");
@@ -54,6 +56,7 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
   if (!binding || binding.sellerId !== owned.sellerId || binding.fingerprint !== fingerprint) throw new OvokoError(409, "Polaczone konto zmienilo sie. Zatrzymano partie; rozpocznij ja ponownie po sprawdzeniu kont.", "account_changed");
   const source = nativeSource || ovokoSourcePreview(owned.offer, input.offerId as string, () => input.notes as string);
   const expected = input.expectedSource as Record<string, unknown> | null;
+  if(expected?.stockUnit!==undefined&&expected.stockUnit!==source.stockUnit)throw new OvokoError(409,"Zmienila sie jednostka sprzedazy Allegro. Odswiez dane.");
   if (!expected || !sameOvokoMoney(expected.price, source.price) || ["title", "currency", "stock", "status", "condition"].some(key => expected[key] !== source[key as keyof typeof source]) || JSON.stringify(expected.images) !== JSON.stringify(source.images)) throw new OvokoError(409, "Oferta Allegro zmienila sie. Sprawdz dane przed ponownym przeniesieniem.");
   let price: string;
   try { price = adjustedOvokoPrice(source.price, source.currency, input.adjustment); } catch (error) { throw new OvokoError(400, (error as Error).message); }
@@ -66,7 +69,7 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
       if (prepared.donorId !== workspaceCar.carId || prepared.brandId !== workspaceCar.brandId || prepared.modelId !== workspaceCar.modelId) throw new OvokoError(409, "Czesc nie jest przypisana do wybranego samochodu.");
     }
     // Publication owns the item precheck; do not page a large group twice in one Worker request.
-    const result = await publishOvokoPart(request, env, context, { ...prepared, offerId: source.id, price, currency: source.currency, notes: source.description, confirmSingle: true, expectedSource: input.expectedSource, stockMode }, { sellerId: owned.sellerId, fingerprint });
+    const result = await publishOvokoPart(request, env, context, { ...prepared, offerId: source.id, price, currency: source.currency, notes: source.description, confirmSingle: true, expectedSource: input.expectedSource, stockMode, ...(wheel?{wheel}:{}) }, { sellerId: owned.sellerId, fingerprint });
     return { ...result, price, currency: source.currency };
   }
   // Look up the durable source-to-target key before creating even a vehicle record.
@@ -220,7 +223,6 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
   const category = dictionaries.categories.find(row => row.id === draft.categoryId);
   const categoryNames: string[] = []; let current = category;
   for (let i = 0; current && i < 4; i++) { categoryNames.push(current.name); current = dictionaries.categories.find(row => row.id === current!.parentId); }
-  if (/opon|felg|tires|rims/i.test(categoryNames.join(" "))) blockers.push("Opony i felgi nie sa jeszcze obslugiwane.");
   if (blockers.length) throw new OvokoError(400, blockers.join(" "), "preparation_incomplete", { needsVehicle: !model || !year && !savedCar, needsYear: !!model && !year && !savedCar, needsCategory: !category || category.level !== "3", brandId, categoryId: category?.level === "3" ? category.id : "", ...(model ? { vehicle: { brandId, modelId, year } } : {}) });
   let car: { carId: string };
   try { car = savedCar ? { carId: savedCar.id } : await createOvokoCar(request, env, context, { brandId, modelId, year, confirmCreate: true }, fingerprint); }

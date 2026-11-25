@@ -9,6 +9,7 @@ import { sameOvokoMoney } from "./ovoko-bulk-price";
 import { requireOvokoAccess } from "./ovoko-access";
 import { createdPublication, ovokoPublicationPresent, publicationCas, type CreatedPublication } from "./ovoko-publication-presence";
 import { publicationStockMode, readStockPublication, checkStockPublication, stockPublicationResult, prepareStockPublication, publishStockUnit } from "./ovoko-stock-publication";
+import {ovokoWheelFields,validateWheelInput} from "./ovoko-wheel-fields";
 
 type Context = Awaited<ReturnType<typeof accountContext>>;
 export type OvokoPublishEnv = AccountEnv & OvokoKeyEnv & Parameters<typeof handleAllegroApi>[1] & { OVOKO_PUBLISH_ENABLED?: string; OPENAI_API_KEY?: string; OVOKO_WEB_YEAR_ENABLED?: string; OVOKO_WEB_YEAR_MODEL?: string };
@@ -20,7 +21,8 @@ function text(input: Record<string, unknown>, key: string, pattern: RegExp, max 
 export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, context: Context, input: Record<string, unknown>, binding?: { sellerId: string; fingerprint: string }) {
   if (env.OVOKO_PUBLISH_ENABLED !== "true") throw new OvokoError(503, "Publikacja pojedyncza jest wylaczona. Wykonaj migracje 012 i ustaw OVOKO_PUBLISH_ENABLED=true w Cloudflare.");
   if (input.confirmSingle !== true) throw new OvokoError(400, "Uruchom pojedyncza wysylke przyciskiem Wystaw.");
-  if (Object.keys(input).some(key => !["offerId", "brandId", "modelId", "donorId", "categoryId", "qualityId", "statusId", "manufacturerCode", "additionalCodes", "price", "currency", "notes", "confirmSingle", "shippingConfirmed", "donorConfirmed", "expectedSource", "stockMode", "binding"].includes(key))) throw new OvokoError(400, "Nieobslugiwane pole publikacji.");
+  if (Object.keys(input).some(key => !["offerId", "brandId", "modelId", "donorId", "categoryId", "qualityId", "statusId", "manufacturerCode", "additionalCodes", "price", "currency", "notes", "confirmSingle", "shippingConfirmed", "donorConfirmed", "expectedSource", "stockMode", "binding", "wheel"].includes(key))) throw new OvokoError(400, "Nieobslugiwane pole publikacji.");
+  validateWheelInput(input.wheel);
   const submittedBinding = input.binding as { sellerId: string; fingerprint: string } | undefined;
   if (submittedBinding !== undefined && (!submittedBinding || typeof submittedBinding !== "object" || Array.isArray(submittedBinding) || Object.keys(submittedBinding).some(key => !["sellerId", "fingerprint"].includes(key)) || !/^\d{1,30}$/.test(submittedBinding.sellerId) || !/^[a-f0-9]{64}$/.test(submittedBinding.fingerprint))) throw new OvokoError(400, "Nieprawidlowe powiazanie kont transferu.");
   if (binding && submittedBinding && (binding.sellerId !== submittedBinding.sellerId || binding.fingerprint !== submittedBinding.fingerprint)) throw new OvokoError(409, "Konto transferu zmienilo sie.", "account_changed");
@@ -53,6 +55,7 @@ export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, c
   if (optionalCodes.length > 20) throw new OvokoError(400, "Maksymalnie 20 numerow dodatkowych.");
   if (source.status !== "ACTIVE" || !Number.isInteger(source.stock) || source.stock! < 1 || source.stock! > 10000 || source.bundle) throw new OvokoError(409, "Wymagana aktywna oferta z 1-10000 sztuk, bez zestawu. Nie wyslano czesci.");
   const expected = input.expectedSource as Record<string, unknown> | null;
+  if(expected?.stockUnit!==undefined&&expected.stockUnit!==source.stockUnit)throw new OvokoError(409,"Zmienila sie jednostka sprzedazy Allegro. Odswiez dane.");
   if (!expected || !sameOvokoMoney(expected.price, source.price) || ["title", "currency", "stock", "status", "condition"].some(key => expected[key] !== source[key as keyof typeof source]) || JSON.stringify(expected.images) !== JSON.stringify(source.images)) throw new OvokoError(409, "Oferta Allegro zmienila sie od otwarcia podgladu. Odswiez dane i sprawdz ponownie.");
   if (!source.images.length || source.rejectedImages) throw new OvokoError(400, "Zdjecia sa niepelne lub zawieraja nieobslugiwane adresy. Sprawdz oferte przed pierwsza proba.");
   const credentials = await loadOvokoConnection(context, await ovokoConnectionKey(env));
@@ -87,7 +90,7 @@ export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, c
     if (!category) throw new OvokoError(400, "Niepotwierdzona kategoria Ovoko poziomu 3.");
     const categoryNames = [category.name]; let parent = category.parentId;
     for (let i = 0; parent && parent !== "0" && i < 3; i++) { const row = categories.find(item => item.id === parent); if (!row) break; categoryNames.push(row.name); parent = row.parentId; }
-    if (/opon|felg|tires|rims/i.test(categoryNames.join(" "))) throw new OvokoError(400, "Opony i felgi wymagaja dodatkowych parametrow. Nie sa obslugiwane w pierwszej probie.");
+    const wheel=await ovokoWheelFields(source,categories,categoryId,remote,input.wheel);
     const qualities = parseOvokoRead("qualities", await remote("/get/part_quality")).rows;
     if (!qualities.some(row => row.id === qualityId)) throw new OvokoError(400, "Niepotwierdzony stan czesci Ovoko.");
     const statuses = parseOvokoRead("statuses", await remote("/get/part_status")).rows;
@@ -99,6 +102,7 @@ export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, c
     const duplicates = ovokoPageData(await remote(`/v2/get/parts?external_ids=${encodeURIComponent(externalId)}&page=1&limit=1`), { page: 1, limit: 1 }, "part-external");
     if (duplicates.data.length || duplicates.pagination.total !== 0) throw new OvokoError(409, "Ovoko ma juz czesc z tym powiazaniem albo nie potwierdzilo pustego wyniku. Niczego nie nadpisujemy.", multi ? "stock_publication_locked" : undefined);
     const form = new URLSearchParams({ category_id: categoryId, car_id: donorId, quality: qualityId, status: statusId, ...(code ? { manufacturer_code: code } : {}), price, original_currency: currency, notes: input.notes, external_id: externalId, photo: source.images[0] });
+    for(const [field,value] of Object.entries(wheel))form.set(field,value);
     source.images.forEach((url, index) => form.append(`photos[${index}]`, url));
     optionalCodes.forEach((value, index) => form.append(`optional_codes[${index}]`, value));
     if (retransfer && await ovokoPublicationPresent(remote, retransfer.part_id, externalId)) throw new OvokoError(409, "Czesc ponownie pojawila sie w Ovoko. Nie ponowiono wysylki.");
@@ -106,6 +110,7 @@ export async function publishOvokoPart(request: Request, env: OvokoPublishEnv, c
     if (!latestResponse.ok) throw new OvokoError(409, "Nie potwierdzono oferty Allegro bezposrednio przed wysylka.");
     const latest = await latestResponse.json() as typeof owned;
     const fresh = ovokoSourcePreview(latest.offer, offerId, () => "");
+    if(fresh.stockUnit!==source.stockUnit)throw new OvokoError(409,"Zmienila sie jednostka sprzedazy przed wysylka. Nie wyslano czesci.");
     if (latest.sellerId !== seller || fresh.status !== "ACTIVE" || fresh.stock !== source.stock || fresh.bundle || JSON.stringify(fresh.images) !== JSON.stringify(source.images) || fresh.rejectedImages || !sameOvokoMoney(fresh.price, source.price) || ["title", "currency", "condition"].some(key => fresh[key as keyof typeof fresh] !== source[key as keyof typeof source])) throw new OvokoError(409, "Oferta lub konto Allegro zmienily sie podczas sprawdzania. Nie wyslano czesci.", multi ? "stock_changed" : undefined);
     const permission = await accountContext(request, env);
     requireOvokoAccess(permission, env);

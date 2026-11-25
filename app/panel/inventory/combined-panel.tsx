@@ -8,6 +8,7 @@ import { OvokoBulkLauncher } from "./ovoko-bulk-launcher";
 import { ManualWithdrawal } from "./manual-withdrawal";
 import { BulkInventoryActions } from "./bulk-inventory-actions";
 import { ManualOvokoLauncher } from "./manual-ovoko-launcher";
+import {OvokoEditButton} from "./ovoko-edit-button";
 
 const initial: CombinedFilter = { allegro: true, ovoko: true, coverage: "all", query: "", priceFrom: "", priceTo: "", allStatuses: false, transfer: "all", lifecycle: "available" };
 const field = "h-7 min-w-0 rounded border border-white/15 bg-[#0d1117] px-2 text-xs";
@@ -82,6 +83,16 @@ function PartRow({ row, snapshot, selected, onSelect }: { row: CombinedPart; sna
     <td className="px-1 py-1"><div className="truncate font-medium" title={row.name}>{a ? <a href={`https://allegro.pl/oferta/${a.id}`} target="_blank" rel="noopener noreferrer" className="hover:text-orange-300">{row.name}</a> : row.name || "Czesc Ovoko"}</div><div className="truncate text-[10px] text-white/45" title={`Numer: ${number || "brak"}; Allegro: ${a?.id || "brak"}; Ovoko: ${o?.id || "brak"}`}><span className="text-white/70">{number || "Bez numeru"}</span>{a && ` · A: ${a.id}`}{o && ` · O: ${o.id}`}{row.conflict && <span className="text-amber-200"> · Niejednoznaczne powiazanie, nie scalono</span>}</div></td>
     <td className="p-1"><div className="flex flex-nowrap gap-1"><span aria-label={`Allegro: ${a ? aActive ? "aktywna" : a.status : snapshot.allegroComplete ? "brak" : "nieustalone"}`} className={`max-w-[76px] shrink-0 truncate rounded px-1 py-0.5 text-[10px] ${aActive ? "bg-orange-500/15 text-orange-300" : "bg-white/5 text-white/40"}`} title={a ? `Oferta Allegro ${a.id}: ${a.status}` : "Brak w odczytanych danych"}>Allegro {a ? aActive ? "aktywna" : a.status : snapshot.allegroComplete ? "—" : "?"}</span><span aria-label={`Ovoko: ${o ? oStock ? "na stanie" : snapshot.statuses[o.status || ""] || "status nieustalony" : snapshot.ovokoComplete ? "brak" : "nieustalone"}`} className={`max-w-[72px] shrink-0 truncate rounded px-1 py-0.5 text-[10px] ${oStock ? "bg-cyan-500/15 text-cyan-300" : "bg-white/5 text-white/40"}`} title={o ? `Rekord Ovoko ${o.id}. ${snapshot.statuses[o.status || ""] || "Status nieustalony"}. Widocznosc w sklepie niepotwierdzona.` : "Brak w odczytanych danych; historia transferu nie potwierdza obecnosci"}>Ovoko {o ? oStock ? "na stanie" : snapshot.statuses[o.status || ""] || "?" : snapshot.ovokoComplete ? "—" : "?"}</span></div></td>
     <td className="p-1 font-medium">{a?.price ? `${a.price.amount} ${a.price.currency}` : "—"}</td><td className="p-1 font-medium">{o?.price ? `${o.price} *` : "—"}{isStockGroup(row) && <div className="text-[10px] text-cyan-300">Ovoko {row.transfer?.completedUnits ?? "?"}/{row.transfer?.totalUnits ?? "?"} {row.transfer?.stockMode === "shared" ? "wspolna pozycja" : "osobne pozycje"}; na stanie {(row.ovokoUnits || []).filter(unit => ovokoInStock(unit, snapshot.statuses)).length}{!snapshot.ovokoComplete && " (odczyt niepelny)"}</div>}</td><td className="p-1 text-white/60">{a?.stock ?? "—"}</td>
-    <td className="p-1">{a && snapshot.admin && <ManualOvokoLauncher offerId={a.id} />}{a && snapshot.admin && !row.conflict && !isStockGroup(row) && <ManualWithdrawal offerId={a.id} partId={o?.id} name={row.name} />}{isStockGroup(row) && <span className="text-[10px] text-white/50">Wycofanie: zaznacz grupe</span>}</td>
+    <td className="p-1">
+      <details className="inline-block text-[10px]" onToggle={event=>{const details=event.currentTarget,panel=details.querySelector<HTMLElement>("[data-edit-menu]");if(details.open&&panel){const rect=details.getBoundingClientRect();panel.style.left=`${Math.max(8,Math.min(innerWidth-188,rect.right-180))}px`;panel.style.top=`${Math.max(8,Math.min(innerHeight-150,rect.bottom+4))}px`;}}}>
+        <summary className="list-none cursor-pointer text-white/75 underline">Edytuj</summary>
+        <div data-edit-menu className="fixed z-50 grid w-44 gap-2 rounded border border-white/20 bg-[#14223a] p-3 shadow-xl">
+          {a&&<a className="text-orange-200 underline" href={`https://allegro.pl/offer/${a.id}/edit`} target="_blank" rel="noopener noreferrer">Edytuj w Allegro</a>}
+          {(a||o)&&<a className="text-white/85 underline" href={a?`/panel/offers?editAllegro=${a.id}${o?`&ovokoPartId=${o.id}`:""}`:`/panel/offers?editOvoko=${o!.id}`} target="_blank" rel="noopener noreferrer">Edytuj w Wystawiaczu</a>}
+          {o&&<OvokoEditButton partIds={(row.ovokoUnits?.length?row.ovokoUnits:[o]).map(item=>item.id)}/>}
+          {a && snapshot.admin && !row.conflict && !isStockGroup(row) && <ManualWithdrawal offerId={a.id} partId={o?.id} name={row.name} />}
+        </div>
+      </details>{a && snapshot.admin && <ManualOvokoLauncher offerId={a.id} />}{isStockGroup(row) && <span className="text-[10px] text-white/50">Wycofanie: zaznacz grupe</span>}
+    </td>
   </tr>;
 }

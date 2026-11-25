@@ -81,6 +81,9 @@ try {
   await batch.getByRole("button", { name: "Potwierdz wycofanie zaznaczonych", exact: true }).waitFor();
   assert.equal(operations.filter(p => p === "/api/ovoko/inventory-actions").length, 0, "Opening batch scope never mutates or prepares records");
   await batch.getByRole("button", { name: "Zamknij", exact: true }).click();
+  await table.locator('[data-part-key="a:1"]').locator("summary").click();
+  assert.equal(await table.locator('[data-part-key="a:1"]').getByRole("link",{name:"Edytuj w Allegro",exact:true}).getAttribute("href"),"https://allegro.pl/offer/1/edit");
+  assert.match(await table.locator('[data-part-key="a:1"]').getByRole("link",{name:"Edytuj w Wystawiaczu",exact:true}).getAttribute("href"),/editAllegro=1/);
   await table.locator('[data-part-key="a:1"]').getByRole("button", { name: "Wycofaj", exact: true }).click();
   const withdraw = page.getByRole("dialog", { name: "Wycofaj ze sprzedazy" });
   await withdraw.getByLabel("Zakres wycofania").selectOption("both");

@@ -116,6 +116,7 @@ let allegroLoginTimer;
 let categoryLookupTimer;
 let categoryParents = [];
 let activeProductId = "";
+let editingPublishedLocally = false;
 let previewPhotoName = "";
 let categoryLocked = false;
 let allegroManufacturerOptions = [];
@@ -223,7 +224,7 @@ const titleSuggestions = window.TitleSuggestions.mount({
 const ownOffers = window.OwnOffers.mount({ numberInput: partNumber, connected: () => state.allegroConnected, request: apiRequest, apply: applyOwnOffer, notify: showToast });
 window.PriceSearch.mount({ number: () => partNumber.value, title: getTitleWithoutPartNumber, notify: showToast });
 
-async function applyOwnOffer(offer, number) {
+async function applyOwnOffer(offer, number, editExisting = false) {
   const selectedPhotos = [...state.selectedPhotoNames];
   const vehicleId = state.selectedVehicleId;
   const item = offer.productSet?.[0];
@@ -258,6 +259,12 @@ async function applyOwnOffer(offer, number) {
     vehicleDescriptionBlock: vehicleBlock ? { start: vehicleBlock.start, end: vehicleBlock.end, text: vehicleBlock.text } : null
   };
   if (activeProductId) saveActiveProductDraft();
+  if(editExisting){
+    product.allegroOfferId=String(offer.id);product.publishStatus="WYSTAWIONO";
+    const partId=new URLSearchParams(location.search).get("ovokoPartId");
+    if(partId&&/^[1-9]\d{0,11}$/.test(partId))product.ovokoResult={done:true,partId,partIds:[partId]};
+    state.products.push(product);editProduct(product.id,true);return;
+  }
   state.products.push(product); editProduct(product.id); state.products.pop();
   activeProductId = ""; addButton.textContent = "Dodaj do listy";
   state.sourceVehicleTitle = offer.name || "";
@@ -512,6 +519,7 @@ addButton.addEventListener("click", () => addCurrentProductToList());
 marketedBeforeGpsrInput.addEventListener("change", () => { gpsrDetails.open = !marketedBeforeGpsrInput.checked; });
 publishCurrentButton.addEventListener("click", () => publishCurrentTarget("allegro"));
 async function publishCurrentTarget(target) {
+  if(editingPublishedLocally){showToast("Zapisz zmiany lokalnie przyciskiem Zapisz w Wystawiaczu. Portale maja osobne przyciski edycji.");return;}
   if (publishCurrentButton.disabled) return;
   publishCurrentButton.disabled = true;
   addButton.disabled = true;
@@ -527,7 +535,7 @@ async function publishCurrentTarget(target) {
 }
 
 function addCurrentProductToList() {
-  if(activeProductId&&state.products.find(item=>item.id===activeProductId)?.ovokoNativeStarted){showToast("Rozpoczety szkic Ovoko ma zapisane dane. Sprawdz wynik lub ponow Ovoko.");return;}
+  if(activeProductId&&state.products.find(item=>item.id===activeProductId)?.ovokoNativeStarted&&!editingPublishedLocally){showToast("Rozpoczety szkic Ovoko ma zapisane dane. Sprawdz wynik lub ponow Ovoko.");return;}
   if (activeProductId && publishingProducts.has(activeProductId)) {
     showToast("Ta aukcja jest w trakcie wystawiania. Poczekaj na wynik.");
     return;
@@ -600,7 +608,9 @@ function addCurrentProductToList() {
       ovokoResult: state.products[existingIndex]?.ovokoResult,
       ovokoNotes: state.products[existingIndex]?.ovokoNotes,
       ovokoStatus: state.products[existingIndex]?.ovokoStatus,
-      ovokoError: state.products[existingIndex]?.ovokoError
+      ovokoError: state.products[existingIndex]?.ovokoError,
+      ovokoNativeStarted: state.products[existingIndex]?.ovokoNativeStarted,
+      ovokoNativeSource: state.products[existingIndex]?.ovokoNativeSource
     });
     state.products[existingIndex] = product;
     showToast("Zapisano zmiany aukcji.");
@@ -704,7 +714,9 @@ function renderProducts() {
           <button class="ovoko-button" type="button" data-ovoko-target="ovoko" data-ovoko-product-id="${escapeHtml(product.id)}" ${publishingProducts.has(product.id)||product.ovokoResult?.done?"disabled":""}>${product.ovokoNativeStarted||product.allegroOfferId?"Ponow Ovoko":"Wystaw Ovoko"}</button>
           ${!product.allegroOfferId&&!product.ovokoNativeStarted?`<button class="ovoko-button" type="button" data-ovoko-target="both" data-ovoko-product-id="${escapeHtml(product.id)}" ${publishingProducts.has(product.id)?"disabled":""}>Wystaw Allegro i Ovoko</button>`:""}
           ${!product.ovokoResult?.done ? `<button class="ovoko-button" type="button" data-edit-ovoko-product-id="${escapeHtml(product.id)}" ${publishingProducts.has(product.id)||product.ovokoNativeStarted ? "disabled" : ""}>Popraw Ovoko</button>` : ""}
-          <button class="edit-button" type="button" data-product-id="${escapeHtml(product.id)}" ${publishingProducts.has(product.id) ? "disabled" : ""}>${product.allegroOfferId ? "Edytuj w Allegro" : "Edytuj"}</button>
+          ${product.allegroOfferId?`<button type="button" data-edit-allegro-id="${escapeHtml(product.id)}">Edytuj w Allegro</button>`:""}
+          ${product.ovokoResult?.partId?`<button class="ovoko-button" type="button" data-edit-ovoko-id="${escapeHtml(product.id)}">Edytuj w Ovoko</button>`:""}
+          <button class="edit-button" type="button" data-product-id="${escapeHtml(product.id)}" ${publishingProducts.has(product.id) ? "disabled" : ""}>Edytuj w Wystawiaczu</button>
           <button class="remove-product-button" type="button" data-remove-product-id="${escapeHtml(product.id)}" aria-label="Usuń z listy: ${escapeHtml(product.title)}" title="Usuń tylko z listy Wystawiacza, nie z Allegro" ${batchPublishing || publishingProducts.has(product.id) ? "disabled" : ""}>Usuń</button>
         </div>
       </article>
@@ -735,9 +747,11 @@ function renderProducts() {
   productList.querySelectorAll(".edit-button").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
-      editProduct(button.dataset.productId);
+      editProduct(button.dataset.productId,true);
     });
   });
+  productList.querySelectorAll("[data-edit-allegro-id]").forEach(button=>button.addEventListener("click",event=>{event.stopPropagation();openPublishedOffer(state.products.find(item=>item.id===button.dataset.editAllegroId));}));
+  productList.querySelectorAll("[data-edit-ovoko-id]").forEach(button=>button.addEventListener("click",event=>{event.stopPropagation();window.ListingOvoko.openEditor(state.products.find(item=>item.id===button.dataset.editOvokoId));}));
   productList.querySelectorAll(".remove-product-button").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -794,6 +808,7 @@ function removeProductsFromList(ids) {
 }
 
 function finishProductEntry() {
+  if(editingPublishedLocally){resetForm();document.dispatchEvent(new Event("wystawiacz-session-change"));return;}
   if (afterProductMode === "keep") {
     activeProductId = "";
     state.appendedPartNumber = partNumber.value.trim() || state.appendedPartNumber;
@@ -819,6 +834,8 @@ function restoreShippingPreference(current = "") {
 }
 
 function resetForm() {
+  editingPublishedLocally=false;
+  window.ListingOvoko?.localEditing(false);
   ownOffers.clear();
   catalogLink.restore(null);
   state.selectedPhotos = [];
@@ -1351,6 +1368,11 @@ async function checkConnectionStatus() {
     await loadShippingRates();
     await loadAfterSalesServices();
     await loadComplianceData();
+    const editId=new URLSearchParams(location.search).get("editAllegro");
+    if(editId&&/^\d{1,30}$/.test(editId)&&state.importedLocalOffer!==editId){
+      state.importedLocalOffer=editId;
+      try{await applyOwnOffer(await apiRequest(`/api/own-offers/${editId}`),"",true);}catch(error){state.importedLocalOffer="";showToast(error.message);}
+    }
   } catch (error) {
     connectionDescription.textContent = error.message;
   }
@@ -2428,12 +2450,14 @@ function findPhotoUrl(name) {
   return state.localPhotosByName.get(name)?.url || "";
 }
 
-function editProduct(id) {
+function editProduct(id, local = false) {
   const product = state.products.find((item) => item.id === id);
   if (!product) return;
   if (publishingProducts.has(id)) return;
-  if(product.ovokoNativeStarted){showToast("Rozpoczety szkic Ovoko: sprawdz wynik lub ponow tylko Ovoko.");return;}
-  if (product.allegroOfferId) { openPublishedOffer(product); return; }
+  if(product.ovokoNativeStarted&&!product.ovokoResult?.done){showToast("Rozpoczety szkic Ovoko: sprawdz wynik lub ponow tylko Ovoko.");return;}
+  if (product.allegroOfferId&&!local) { openPublishedOffer(product); return; }
+  editingPublishedLocally=local&&!!(product.allegroOfferId||product.ovokoResult?.done);
+  window.ListingOvoko?.localEditing(editingPublishedLocally);
   ownOffers.clear();
   activeProductId = id;
   partNumber.value = product.enteredPartNumber || "";
@@ -2469,7 +2493,7 @@ function editProduct(id) {
   descriptionTextInput.value = state.descriptionText;
   suggestionPanel.classList.remove("hidden");
   summaryCard.classList.remove("hidden");
-  addButton.textContent = "Zapisz zmiany";
+  addButton.textContent = editingPublishedLocally ? "Zapisz w Wystawiaczu" : "Zapisz zmiany";
   updateSummary();
   if (state.categoryId) loadCategoryDetails(state.categoryId);
   renderPhotos();
@@ -2490,7 +2514,7 @@ function navigateProduct(direction) {
 function saveActiveProductDraft() {
   const product = state.products.find((item) => item.id === activeProductId);
   if (!product) return;
-  if(product.ovokoNativeStarted)return;
+  if(product.ovokoNativeStarted&&!editingPublishedLocally)return;
   Object.assign(product, getFormProduct(product.id));
   renderProducts();
 }
@@ -2568,6 +2592,10 @@ window.ListingOvoko?.mount({
   toast: showToast,
   upload: product => uploadProductImages(product),
   publishCurrent: publishCurrentTarget,
+  importOvoko(partId,draft){
+    const product={id:crypto.randomUUID(),title:draft.title||"Czesc Ovoko",enteredPartNumber:draft.number||"",price:"",stock:1,stockUnit:"UNIT",photoNames:[],parameterValues:{},descriptionText:draft.notes||"",ovokoNativeStarted:true,ovokoResult:{done:true,native:true,partId,partIds:[partId]},ovokoListing:{enabled:true,target:"ovoko",price:draft.price||"",currency:draft.currency||"",stockMode:"shared",categoryId:draft.categoryId||"",vehicleId:"",vehicleName:""},referenceImages:draft.images||[]};
+    state.products.push(product);editProduct(product.id,true);
+  },
   useHistory(vehicle) { useVehicle(vehicle.id,vehicle); }
 });
 

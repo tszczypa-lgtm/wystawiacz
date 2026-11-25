@@ -318,6 +318,7 @@ export function OvokoPreparationPanel({ popup=false }: { popup?:boolean }) {
       if (!data.session) throw new Error("Zaloguj sie ponownie. Nie potwierdzono wysylki.");
       publicationSent.current = true; setAttempted(true);
       const payload = { offerId: source.id, brandId, modelId, donorId, categoryId: draft.categoryId, qualityId: draft.qualityId, statusId: draft.statusId, manufacturerCode: draft.manufacturerCode, additionalCodes: draft.additionalCodes, price: draft.price, currency: draft.currency, notes: draft.notes, confirmSingle: true, stockMode, expectedSource: { title: source.title, price: source.price, currency: source.currency, stock: source.stock, status: source.status, condition: source.condition, images: source.images } };
+      Object.assign(payload.expectedSource,{stockUnit:source.stockUnit});
       let continuationBinding: { sellerId: string; fingerprint: string } | undefined;
       do {
         if (!publicationMounted.current) break;
@@ -426,7 +427,7 @@ export function OvokoPreparationPanel({ popup=false }: { popup?:boolean }) {
       </div>
       {dictionaryError && <p role="alert" className="rounded-xl border border-amber-400/30 p-4">{dictionaryError} Dane robocze pozostaly bez zmian.</p>}
       <section ref={publicationPanel} className="scroll-mt-5 rounded-xl border border-amber-400/30 p-4"><h2 className="font-bold">Wysylka do Ovoko</h2><ul className="mt-3 list-disc space-y-2 pl-5 text-sm" aria-label="Braki przygotowania">{ovokoPreparationIssues(source, draft).map(issue => <li key={issue}>{issue}</li>)}</ul>
-        <p className="my-3 text-sm">Aktywna oferta z 1-10000 sztuk, bez zestawu i brakujacych zdjec. Wybierz zapisany rekord z Moich samochodow Ovoko; jego ID wypelni sie samo. Opony i felgi nie sa jeszcze obslugiwane. Zmiana zapasu podczas niedokonczonego transferu zatrzymuje wysylke.</p>
+        <p className="my-3 text-sm">Aktywna oferta z 1-10000 sztuk, bez zestawu i brakujacych zdjec. Wybierz zapisany rekord z Moich samochodow Ovoko; jego ID wypelni sie samo. Parametry opon i felg pobieramy z danych oferty. Zmiana zapasu podczas niedokonczonego transferu zatrzymuje wysylke.</p>
         <button type="button" className={button} disabled={publishing || attempted || creatingCar} onClick={openPublicationReview}>Sprawdz wysylke</button>
         <button type="button" className={`${button} ml-2 bg-orange-600`} disabled={busy || dictionaryBusy || modelsBusy || carsBusy || publishing || attempted || creatingCar || yearLookupBlocksPublish} onClick={() => void publishSingle()}>{publishing ? "Wystawiam..." : "Wyslij do Ovoko"}</button>
         {publicationBlockers.length > 0 && <div className="mt-3 rounded-lg border border-amber-400/30 p-3 text-sm text-amber-200"><p className="font-bold">Co blokuje wystawienie:</p><ul className="mt-2 list-disc space-y-1 pl-5" aria-label="Blokady wystawienia">{publicationBlockers.map(issue => <li key={issue}>{issue}</li>)}</ul></div>}

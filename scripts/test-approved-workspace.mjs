@@ -73,7 +73,7 @@ try {
   await page.locator("#publishSelectedProducts").click();
   await page.waitForFunction(() => !batchPublishing && window.published.length === 2);
   assert.equal(await page.evaluate(() => window.maxFlight), 1);
-  await page.locator(".edit-button").first().click();
+  await page.locator("[data-edit-allegro-id]").first().click();
   assert.match(await page.evaluate(() => window.opened.at(-1)[0]), /offer\/123456789\/edit$/);
   assert.equal(await page.evaluate(() => activeProductId), "");
   await page.evaluate(() => { state.products = []; resetForm(); state.vehicles = [{ id: "a", manufacturer: "BMW", short: "BMW F40", full: "BMW F40\n2019\n2.0 diesel" }, { id: "b", manufacturer: "Volkswagen", short: "VW Golf", full: "VW Golf\n2020\n1.6 TDI" }]; renderVehicles(); });

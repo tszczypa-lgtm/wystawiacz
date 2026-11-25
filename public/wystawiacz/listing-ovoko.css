@@ -21,3 +21,4 @@ dialog.workspace-ovoko-panel, #workspaceCarsDialog { margin: auto; width: min(70
 #workspaceCarsSearch { width: 100%; }
 #workspaceCarsDialog { border: 1px solid var(--line); background: #fff; color: var(--ink); box-shadow: 0 24px 80px #14213d33; }
 #workspaceCarsDialog::backdrop { background: #14213d88; }
+.summary-actions [hidden], #listingWheelFields[hidden] { display: none !important; }

@@ -5,6 +5,7 @@ window.ListingOvoko = (() => {
   let hooks, library=[], loading=false, modelsRun=0, pendingVehicleId="", restoredVehicle=null, listingTarget="allegro", stockMode="shared", categoryTimer, categoryTitle="", categoryRun=0;
   const sleep = ms => new Promise(resolve=>setTimeout(resolve,ms));
   const carKeys=["brandId","modelId","year","vin","engineCode","capacity","power","mileage","color","place"];
+  const wheelKeys=["quantity","width","height","treadDepth","fixingPoints","spacing","centralDiameter"];
   async function request(path,body,method="POST") {
     const token=await window.getWystawiaczToken();
     if(!token)throw new Error("Zaloguj sie ponownie do Wystawiacza.");
@@ -71,11 +72,14 @@ window.ListingOvoko = (() => {
     const category=document.createElement("label");category.className="ovoko-field ovoko-category";
     category.innerHTML='<span>Kategoria Ovoko</span><select id="listingOvokoCategory" aria-label="Kategoria Ovoko"><option value="">Automatycznie</option></select>';
     $("categoryInput").after(category);
+    const wheels=document.createElement("details");wheels.id="listingWheelFields";wheels.className="workspace-ovoko-panel";wheels.hidden=true;
+    wheels.innerHTML='<summary>Opony / felgi - uzupelnienie</summary><div class="workspace-ovoko-grid">'+[["quantity","Sztuk w komplecie (nie zapas)"],["width","Szerokosc opony, np. 205"],["height","Profil opony, np. 55"],["treadDepth","Bieznik mm"],["fixingPoints","Liczba otworow, np. 5"],["spacing","Rozstaw srub, np. 112"],["centralDiameter","Otwor centralny mm"]].map(([key,label])=>`<label>${label}<input id="listingWheel_${key}" type="text" maxlength="32" placeholder="Automatycznie"></label>`).join("")+"</div>";
+    category.after(wheels);
     $("listingOvokoCategory").onfocus=async()=>{
       if($("listingOvokoCategory").dataset.loaded)return;
       try{const value=$("listingOvokoCategory").dataset.manual||"";options($("listingOvokoCategory"),(await read("categories")).filter(row=>row.level==="3"),"Automatycznie",value);$("listingOvokoCategory").dataset.loaded="true";}catch(error){hooks.toast(error.message);}
     };
-    $("listingOvokoCategory").onchange=()=>{$("listingOvokoCategory").dataset.manual=$("listingOvokoCategory").value;if(!$("listingOvokoCategory").value){categoryTitle="";scheduleCategory();}};
+    $("listingOvokoCategory").onchange=()=>{$("listingOvokoCategory").dataset.manual=$("listingOvokoCategory").value;refreshWheels();if(!$("listingOvokoCategory").value){categoryTitle="";scheduleCategory();}};
     $("titleInput").addEventListener("input",scheduleCategory);
     const actions=$("publishCurrentButton").parentElement;
     $("publishCurrentButton").textContent="Wystaw Allegro";
@@ -96,6 +100,8 @@ window.ListingOvoko = (() => {
     $("addVehicleButton").before(form);
     form.ontoggle=()=>{if(form.open)brands().catch(showError);};
     $("workspaceCarBrandId").onchange=()=>models().catch(showError);
+    const editId=new URLSearchParams(location.search).get("editOvoko");
+    if(editId&&/^[1-9]\d{0,11}$/.test(editId))request("/api/ovoko/editor",{partId:editId,includeDraft:true}).then(result=>{if(result.draft)hooks.importOvoko(editId,result.draft);}).catch(error=>hooks.toast(error.message));
   }
   function editorReset(){
     pendingVehicleId="";
@@ -133,7 +139,7 @@ window.ListingOvoko = (() => {
   }
   function capture(vehicle){
     if(!$("listingOvokoPrice"))return undefined;
-    return {enabled:listingTarget!=="allegro",target:listingTarget,price:$("listingOvokoPrice").value.trim(),stockMode,categoryId:$("listingOvokoCategory").dataset.manual||"",vehicleId:vehicle?vehicle.ovoko&&vehicle.libraryId||"":restoredVehicle?.vehicleId||"",vehicleName:vehicle?vehicle.short||"":restoredVehicle?.vehicleName||""};
+    return {enabled:listingTarget!=="allegro",target:listingTarget,price:$("listingOvokoPrice").value.trim(),stockMode,categoryId:$("listingOvokoCategory").dataset.manual||"",vehicleId:vehicle?vehicle.ovoko&&vehicle.libraryId||"":restoredVehicle?.vehicleId||"",vehicleName:vehicle?vehicle.short||"":restoredVehicle?.vehicleName||"",wheel:$("listingWheelFields").hidden?{}:Object.fromEntries(wheelKeys.map(key=>[key,$("listingWheel_"+key).value.trim()])),...(restoredVehicle&&Object.hasOwn(restoredVehicle,"currency")?{currency:typeof restoredVehicle.currency==="string"?restoredVehicle.currency:""}:{})};
   }
   function restore(product){
     if(!$("listingOvokoPrice"))return;
@@ -141,6 +147,8 @@ window.ListingOvoko = (() => {
     restoredVehicle=product?.ovokoListing||null;
     listingTarget=data.target||(data.enabled?"both":"allegro");stockMode=data.stockMode||"shared";
     $("listingOvokoPrice").value=data.price||"";
+    $("listingOvokoPrice").closest(".suffix-input").querySelector("b").textContent=Object.hasOwn(data,"currency")?data.currency||"wg konta":"PLN";
+    for(const key of wheelKeys)$("listingWheel_"+key).value=data.wheel?.[key]||"";
     if(data.categoryId&&!Array.from($("listingOvokoCategory").options).some(row=>row.value===data.categoryId))$("listingOvokoCategory").add(new Option(`Kategoria ${data.categoryId}`,data.categoryId));
     $("listingOvokoCategory").value=data.categoryId||"";$("listingOvokoCategory").dataset.manual=data.categoryId||"";categoryTitle="";scheduleCategory();
   }
@@ -150,11 +158,12 @@ window.ListingOvoko = (() => {
     $("listingOvokoVehicle").textContent=name?`Samochod: ${name}`:"Wybierz auto z listy sesji. Uzupelnij jego dane Ovoko w oknie samochodow.";
   }
   function scheduleCategory(){
+    refreshWheels();
     if(!$("listingOvokoCategory")||$("listingOvokoCategory").dataset.manual)return;
     const title=$("titleInput").value.trim();if(title===categoryTitle)return;categoryTitle=title;clearTimeout(categoryTimer);const run=++categoryRun;
     if(title.length<3){$("listingOvokoCategory").options[0].textContent="Automatycznie";return;}
     categoryTimer=setTimeout(async()=>{
-      try{const result=await request("/api/ovoko/workspace-category",{title});if(run!==categoryRun||$("listingOvokoCategory").dataset.manual)return;$("listingOvokoCategory").value="";$("listingOvokoCategory").options[0].textContent=result.category?`Auto: ${result.category.name}`:"Automatycznie przy wystawianiu";}
+      try{const result=await request("/api/ovoko/workspace-category",{title});if(run!==categoryRun||$("listingOvokoCategory").dataset.manual)return;$("listingOvokoCategory").value="";$("listingOvokoCategory").options[0].textContent=result.category?`Auto: ${result.category.name}`:"Automatycznie przy wystawianiu";refreshWheels();}
       catch{if(run===categoryRun)$("listingOvokoCategory").options[0].textContent="Automatycznie przy wystawianiu";}
     },1100);
   }
@@ -174,7 +183,7 @@ window.ListingOvoko = (() => {
       const binding=(await request("/api/ovoko/bulk",{operation:"start",adjustment:{mode:"none",value:"0"}})).binding;
       // The server re-reads the owned Allegro offer; this is plain description text only.
       const notes=String(product.ovokoNotes||product.descriptionText||"").slice(0,40000);
-      const base={offerId:String(product.allegroOfferId),vehicleId:data.vehicleId,price:data.price,stockMode:data.stockMode,categoryId:data.categoryId||"",notes,binding};
+      const base={offerId:String(product.allegroOfferId),vehicleId:data.vehicleId,price:data.price,stockMode:data.stockMode,categoryId:data.categoryId||"",notes,binding,...(Object.values(data.wheel||{}).some(Boolean)?{wheel:data.wheel}:{})};
       let result;
       do{result=await request("/api/ovoko/workspace-listing",{...base,operation:"prepare"});if(result.webPending){product.ovokoStatus="Dopasowuje auto...";render();await sleep((result.retryAfter||5)*1000);}}while(result.webPending);
       if(!result.alreadyCreated){
@@ -200,9 +209,9 @@ window.ListingOvoko = (() => {
         const images=await hooks.upload(product),conditionValues=product.parameterValues?.["11323"];
         const values=Array.isArray(conditionValues)?conditionValues:[conditionValues];
         const condition=values.includes("11323_1")?"new":values.some(value=>value&&value!=="11323_2")?"":"used";
-        product.ovokoNativeSource={title:product.title,notes:notes(product.description),images,stock:product.stock,condition,number:product.enteredPartNumber||"",price:product.ovokoListing.price,currency:"PLN"};
+        product.ovokoNativeSource={title:product.title,notes:notes(product.description),images,stock:product.stock,condition,number:product.enteredPartNumber||"",price:product.ovokoListing.price,currency:"PLN",stockUnit:product.stockUnit||"UNIT"};
       }
-      const data=product.ovokoListing,base={productId:product.id,source:product.ovokoNativeSource,vehicleId:data.vehicleId||"",categoryId:data.categoryId||""};
+      const data=product.ovokoListing,base={productId:product.id,source:product.ovokoNativeSource,vehicleId:data.vehicleId||"",categoryId:data.categoryId||"",...(Object.values(data.wheel||{}).some(Boolean)?{wheel:data.wheel}:{})};
       let result;
       do{result=await request("/api/ovoko/workspace-native",{...base,operation:"prepare"});if(result.webPending){product.ovokoStatus="Dopasowuje auto...";render();await sleep((result.retryAfter||5)*1000);}}while(result.webPending);
       if(!result.alreadyCreated){
@@ -250,5 +259,12 @@ window.ListingOvoko = (() => {
       };
     }catch(error){status.textContent=error.message;}
   }
-  return {mount,capture,restore,refreshVehicle,editorReset,editorRestore,saveVehicle,preflight,publish,publishNative,notes,editPublished,scheduleCategory};
+  function refreshWheels(){if($("listingWheelFields"))$("listingWheelFields").hidden=!/opon|felg|\btire|\btyre|\brim/i.test($("titleInput").value+" "+$("listingOvokoCategory").selectedOptions[0]?.textContent);}
+  function localEditing(enabled){
+    for(const id of ["publishCurrentButton","publishOvokoCurrentButton","publishBothCurrentButton"])if($(id))$(id).hidden=enabled;
+    let notice=$("listingLocalEditNotice");if(!notice){notice=document.createElement("small");notice.id="listingLocalEditNotice";$("addButton").before(notice);}
+    notice.textContent=enabled?"Zapis lokalny. Portale edytujesz osobnymi przyciskami.":"";notice.hidden=!enabled;
+  }
+  function openEditor(product){if(product)window.OvokoEditor.open({partIds:product.ovokoResult?.partIds||[product.ovokoResult?.partId],request,notify:hooks.toast});}
+  return {mount,capture,restore,refreshVehicle,editorReset,editorRestore,saveVehicle,preflight,publish,publishNative,notes,editPublished,scheduleCategory,localEditing,openEditor};
 })();

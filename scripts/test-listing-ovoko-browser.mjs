@@ -4,7 +4,7 @@ import {createServer} from "node:http";
 import {pathToFileURL,fileURLToPath} from "node:url";
 const {chromium}=await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href);
 const root=new URL("../public/wystawiacz/",import.meta.url),library=new Map();
-let carCreates=0,allegroWrites=0,partWrites=0,nativeWrites=0,failPart=true,requests=[];
+let carCreates=0,allegroWrites=0,partWrites=0,nativeWrites=0,failPart=true,connected=false,requests=[];
 const oldCar={id:"old-session-car",manufacturer:"BMW",short:"BMW F40",full:"BMW F40 2020",buttonLabel:"Stare BMW"};
 const server=createServer(async(req,res)=>{
  const url=new URL(req.url,"http://fixture.test"),path=url.pathname;
@@ -12,6 +12,9 @@ const server=createServer(async(req,res)=>{
   res.setHeader("Content-Type","application/json");let raw="";for await(const chunk of req)raw+=chunk;const body=raw?JSON.parse(raw):{};
   requests.push({path,body});
   let data={connected:false,categories:[],parameters:[],build:"2026-06-02.35"};
+  if(path==="/api/allegro/health")data={...data,connected};
+  if(path==="/api/allegro/own-offers/555")data={id:"555",name:"Imported Allegro 1234567",category:{id:"123"},stock:{available:1,unit:"UNIT"},sellingMode:{price:{amount:"88.00"}},productSet:[{product:{parameters:[]}}],description:{sections:[{items:[{type:"TEXT",content:"<p>Imported opis</p>"}]}]}};
+  if(path==="/api/ovoko/editor")data={partId:body.partId,accountKey:"a".repeat(64),...(body.includeDraft?{draft:{title:"Imported Ovoko",notes:"Opis Ovoko",price:"91.00",currency:"",number:"ABC123456",categoryId:"3",images:[]}}:{})};
   if(path==="/api/workspace/vehicles"){
    if(req.method==="PUT"){
     const row={id:body.id,revision:body.revision+1,payload:body.payload};library.set(row.id,row);data={vehicle:row};
@@ -110,6 +113,26 @@ try{
  assert.equal(nativeWrites,2);assert.equal(await page.evaluate(()=>window.allegroWrites),1,"Native Ovoko must not create a hidden Allegro offer");
  assert.equal(await page.evaluate(()=>state.products[1].ovokoResult.native),true);
  await page.evaluate(()=>publishProduct("50000000-0000-4000-8000-000000000001","both"));assert.equal(await page.evaluate(()=>window.allegroWrites),1);
+ await page.locator('[data-product-id="part1"] .edit-button').click();
+ assert.equal(await page.locator("#addButton").textContent(),"Zapisz w Wystawiaczu");
+ assert.equal(await page.locator("#publishCurrentButton").isVisible(),false);
+ await page.locator("#titleInput").fill("Poprawiony lokalny tytul");
+ await page.locator("#addButton").click();
+ assert.equal(await page.evaluate(()=>state.products[0].allegroOfferId),"555");
+ assert.equal(await page.evaluate(()=>state.products[0].ovokoResult.partId),"222");
+ assert.match(await page.evaluate(()=>state.products[0].title),/lokalny/i);
+ assert.equal(await page.evaluate(()=>window.allegroWrites),1);assert.equal(nativeWrites,2);assert.equal(partWrites,2);
+ await page.evaluate(()=>{
+  window.editorTabs=[];window.open=()=>{const tab={location:{href:""},opener:null,closed:false,close(){this.closed=true;}};editorTabs.push(tab);return tab;};
+  window.prompt=()=>"https://fixture.rrr.lt/v2/parts/view/1";
+ });
+ await page.locator('[data-edit-ovoko-id="part1"]').click();
+ await page.waitForFunction(()=>window.editorTabs.at(-1).location.href.includes("/222"));
+ assert.equal(await page.evaluate(()=>editorTabs.at(-1).location.href),"https://fixture.rrr.lt/v2/parts/view/222");
+ await page.evaluate(()=>{localStorage.removeItem("wystawiacz-ovoko-panel:"+"a".repeat(64));window.prompt=()=>"https://evil.test";});
+ await page.locator('[data-edit-ovoko-id="part1"]').click();
+ await page.waitForFunction(()=>window.editorTabs.at(-1).closed);
+ assert.equal(await page.evaluate(()=>editorTabs.at(-1).location.href),"");
  const roundtrip=await page.evaluate(()=>{const saved=sessionSnapshot();resetForm();state.vehicles=[];renderVehicles();ListingOvoko.restore(saved.products[0]);return {saved,value:ListingOvoko.capture(null)};});
  assert.equal(roundtrip.saved.products[0].ovokoListing.vehicleId,id);assert.equal(roundtrip.value.enabled,true);assert.equal(roundtrip.value.price,"120.00");
  assert.equal(library.size,1,"New session does not delete the persistent library");
@@ -129,5 +152,21 @@ try{
  await page.locator("#workspaceCarsClose").click();
  await page.setViewportSize({width:390,height:844});
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2),"No horizontal overflow on mobile");
+ await page.setViewportSize({width:1500,height:1050});connected=true;
+ await page.goto(`http://127.0.0.1:${server.address().port}/?editAllegro=555&ovokoPartId=222`);
+ await page.waitForFunction(()=>document.querySelector("#addButton").textContent==="Zapisz w Wystawiaczu");
+ assert.equal(await page.evaluate(()=>state.products[0].allegroOfferId),"555");
+ assert.equal(await page.evaluate(()=>state.products[0].ovokoResult.partId),"222");
+ assert.deepEqual(errors,[]);
+ connected=false;
+ await page.goto(`http://127.0.0.1:${server.address().port}/?editOvoko=222`);
+ await page.waitForFunction(()=>document.querySelector("#addButton").textContent==="Zapisz w Wystawiaczu");
+ assert.equal(await page.evaluate(()=>state.products[0].allegroOfferId),undefined);
+ assert.equal(await page.evaluate(()=>state.products[0].ovokoResult.partId),"222");
+ assert.equal(await page.locator("#listingOvokoPrice").inputValue(),"91.00");
+ assert.equal(await page.locator("#publishOvokoCurrentButton").isVisible(),false);
+ await page.locator("#titleInput").fill("Ovoko lokalnie");await page.locator("#addButton").click();
+ assert.equal(await page.evaluate(()=>state.products[0].ovokoListing.currency),"");
+ assert.deepEqual(errors,[]);
  console.log("Listing Ovoko browser: compact navy fields, automatic category, full paged history, direct selection without session-list edits, standalone Ovoko/no Allegro offer, multi-unit progress and dual-channel retry passed. No live publications.");
 }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}

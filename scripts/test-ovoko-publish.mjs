@@ -22,6 +22,7 @@ const env = { BILLING_ENFORCED: "true", SUPABASE_SERVICE_ROLE_KEY: "fixture", AL
 const credentials = { username: "fixture-account", password: "private-password", user_token: "private-token" };
 let user = 1, admin, suspended, owns, stock, bundle, mode, donorModel, duplicate, failDb, sourceReads, lateStock, writes, categoryName, revokeAfterRead, imageMode, extraCodes, bulk, expectedPrice, credentialReads, rotateAt, ordinaryAccess = false;
 let providerPresent, inventoryReads;
+let wheelSent={};
 const owner = () => `00000000-0000-0000-0000-${String(user).padStart(12, "0")}`;
 const records = new Map(), calls = [];
 let stockGroup = null, stockUnits = [], missingStockSchema = false, nativeRow=null;
@@ -29,6 +30,7 @@ const snapshot = { title: "AUDI A4 POMPA 0281010038", price: "100.00", currency:
 const payload = () => ({ offerId: "101", brandId: "1", modelId: "11", donorId: "13", categoryId: "3", qualityId: "0", statusId: "0", manufacturerCode: "0281010038", additionalCodes: extraCodes, price: "100.00", currency: "PLN", notes: "Opis & uwagi + numer", confirmSingle: true, expectedSource: { ...snapshot } });
 const req = (body = payload(), headers = {}) => new Request("https://publish.test/api/ovoko/publish", { method: "POST", headers: { Authorization: "Bearer fixture", Origin: "https://publish.test", "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
 function reset() {
+  wheelSent={};
   nativeRow=null;
   stockGroup = null; stockUnits = []; missingStockSchema = false;
   providerPresent = false; inventoryReads = 0;
@@ -146,6 +148,10 @@ globalThis.fetch = async (input, options = {}) => {
   for (const [key, value] of Object.entries(credentials)) assert.equal(form.get(key), value);
   if(url.pathname==="/get/car/13")return Response.json({status_code:"R200",list:[[{id:"13",car_model:"11",car_years:"2005",car_body_number:workspaceCar.ovoko.vin}]]});
   if (url.pathname === "/get/categories") return Response.json({ status_code: "R200", list: [{ id: "3", parent_id: "0", level: "3", pl: categoryName }] });
+  if(url.pathname==="/get/part/77")return Response.json({status_code:"R200",list:[[{id:"77",notes:"private-provider-note"}]]});
+  if(url.pathname==="/get/part/99")return Response.json({status_code:"R200",list:[]});
+  if(url.pathname==="/get/wheels_width")return Response.json({status_code:"R200",list:{"8":{pl:"205"}}});
+  if(url.pathname==="/get/wheels_height")return Response.json({status_code:"R200",list:{"6":{pl:"55"}}});
   if (url.pathname === "/get/car_brands") return Response.json({ status_code: "R200", list: [{ id: "1", name: "Audi" }, { id: "2", name: "Volkswagen" }] });
   if (url.pathname === "/get/part_quality") return Response.json({ status_code: "R200", list: { "0": { pl: "Używany" } } });
   if (url.pathname === "/get/part_status") return Response.json({ status_code: "R200", list: { "0": { pl: "Na stanie" }, "2": { pl: "Sprzedano" } } });
@@ -182,6 +188,7 @@ globalThis.fetch = async (input, options = {}) => {
     assert.match(form.get("external_id"), /^tymo:555:101:u:\d+$/);
   } else { assert.equal(records.size, 1); assert.equal([...records.values()][0].state, "sending", "Durable reservation precedes every mutation"); }
   writes++;
+  wheelSent=Object.fromEntries([...form].filter(([key])=>key==="rims"||key==="tires"||key.startsWith("rims_")||key.startsWith("tires_")));
   assert.equal(form.get("manufacturer_code"), expectedCode || null); assert.equal(form.get("car_id"), "13"); assert.equal(form.get("quality"), "0"); assert.equal(form.get("status"), "0");
   assert.equal(form.get("photo"), form.get("photos[0]")); assert.equal(form.get("original_currency"), "PLN"); assert.equal(form.get("price"), expectedPrice);
   assert.deepEqual([...form.entries()].filter(([name]) => /^photos\[\d+\]$/.test(name)).map(([, url]) => url), snapshot.images, "Transfer the complete gallery in source order, not just the thumbnail");
@@ -216,7 +223,7 @@ try {
   reset(); const changedSnapshot = payload(); changedSnapshot.expectedSource.price = "99.00"; assert.equal((await handleOvokoApi(req(changedSnapshot), env)).status, 409); assert.equal(writes, 0);
   reset(); donorModel = "12"; assert.equal((await handleOvokoApi(req(), env)).status, 400); assert.equal(writes, 0);
   reset(); duplicate = true; assert.equal((await handleOvokoApi(req(), env)).status, 409); assert.equal(writes, 0);
-  reset(); categoryName = "Felgi"; assert.equal((await handleOvokoApi(req(), env)).status, 400); assert.equal(writes, 0);
+  reset(); categoryName = "Felgi"; assert.equal((await handleOvokoApi(req(), env)).status, 200); assert.equal(writes, 1);assert.deepEqual(wheelSent,{tires:"0",rims:"1",rims_quantity:"1"});
   reset(); lateStock = true; assert.equal((await handleOvokoApi(req(), env)).status, 409); assert.equal(writes, 0, "Availability rechecked immediately before reservation");
   reset(); revokeAfterRead = true; assert.equal((await handleOvokoApi(req(), env)).status, 403); assert.equal(writes, 0, "Revoked admin privileges stop a pending publication");
   for (const method of ["GET", "POST"]) { reset(); failDb = method; assert.equal((await handleOvokoApi(req(), env)).status, 503); assert.equal(writes, 0, "Unavailable durable lock fails closed"); }
@@ -434,7 +441,7 @@ try {
   assert.equal((await handleOvokoApi(bulkReq(wrongBinding), env)).status, 409); assert.equal(writes, 0);
   reset(); bulk = true; const badPrice = await bulkPlan({ mode: "amount", value: "-100" }); assert.equal((await handleOvokoApi(bulkReq(badPrice), env)).status, 400); assert.equal(writes, 0); assert.equal(calls.some(call => call.url.includes("api.rrr.lt")), false);
   reset(); bulk = true; const outdated = await bulkPlan({ mode: "none", value: "0" }); outdated.expectedSource.price = "99.00"; assert.equal((await handleOvokoApi(bulkReq(outdated), env)).status, 409); assert.equal(writes, 0);
-  reset(); bulk = true; categoryName = "Felgi"; const wheels = await bulkPlan({ mode: "none", value: "0" }); assert.equal((await bulkSend(wheels)).status, 400); assert.equal(writes, 0);
+  reset(); bulk = true; categoryName = "Felgi"; const wheels = {...await bulkPlan({ mode: "none", value: "0" }),overrides:{categoryId:"3"},wheel:{quantity:"4"}}; const wheelResult=await bulkSend(wheels);assert.equal(wheelResult.status, 200,await wheelResult.clone().text()); assert.equal(writes, 1);assert.equal(wheelSent.rims_quantity,"4");
   reset(); bulk = true; const uncertain = await bulkPlan({ mode: "none", value: "0" }); mode = "timeout";
   assert.equal((await bulkSend(uncertain)).status, 409); assert.equal(writes, 1);
   const lockedPublication = await bulkSend(uncertain);
@@ -588,6 +595,15 @@ try {
   assert.notEqual(nativeRow.snapshot_hash,cleanPlan.hash);assert.equal(writes,0,"Unsent drafts can be corrected without manual unlocking");
   assert.equal((await native({...nativeBody,operation:"item",ticket:cleanTicket})).status,409,"Old preparation cannot send after correction");assert.equal(writes,0);
   console.log("Native Ovoko: shared transfer matching, no Allegro offers, signed preparation, snapshot fencing, multi-unit progress, replay and uncertain no-retry passed.");
+  reset();bulk=true;categoryName="Opony";
+  const tireBody={...nativeBody,vehicleId:workspaceCarId,categoryId:"3",source:{...nativeBody.source,title:"Opona 205/55 R16",stock:1}};
+  const tirePrepare=await native(tireBody);assert.equal(tirePrepare.status,200,await tirePrepare.clone().text());
+  const tirePublished=await native({...tireBody,operation:"item",ticket:(await tirePrepare.json()).ticket});assert.equal(tirePublished.status,200,await tirePublished.clone().text());
+  assert.equal(wheelSent.tires,"1");assert.equal(wheelSent.tires_width,"8");assert.equal(wheelSent.tires_height,"6");assert.equal(wheelSent.tires_quantity,"1");
+  reset();
+  const editor=partId=>handleOvokoApi(new Request("https://publish.test/api/ovoko/editor",{method:"POST",headers:{Authorization:"Bearer fixture",Origin:"https://publish.test","Content-Type":"application/json"},body:JSON.stringify({partId})}),env);
+  const editorResponse=await editor("77");assert.equal(editorResponse.status,200);const editorValue=await editorResponse.json();assert.equal(editorValue.partId,"77");assert.match(editorValue.accountKey,/^[a-f0-9]{64}$/);assert.ok(!JSON.stringify(editorValue).includes("private-"));
+  assert.equal((await editor("99")).status,404);assert.equal((await editor("../77")).status,400);assert.equal(writes,0,"Opening editor is read-only");
   }
   console.log("Ovoko single + bulk publication: guards, source/target binding, prices, multi-make model lookup, constrained fallback and generation/brand conflicts, car reuse, full photos, durable duplicate locks and uncertain no-retry passed. All services mocked; nothing published live.");
 } finally { globalThis.fetch = originalFetch; Date.now = originalNow; }

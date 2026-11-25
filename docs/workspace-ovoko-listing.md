@@ -35,7 +35,28 @@
 - Polaczenie ofert korzysta z dotychczasowego trwalego SKU i rejestru publikacji.
   Samo wystawienie nie wlacza synchronizacji sprzedazy; ma ona osobne przelaczniki.
 
-## Trwalosc i ograniczenia
+## Edycja i Kola
+
+- W liscie aukcji sa osobne akcje Edytuj w Allegro, Edytuj w Ovoko i Edytuj
+  w Wystawiaczu. W Moich czesciach sa w zwartym menu Edytuj.
+- Edycja w Wystawiaczu jest lokalna. Zapis zachowuje identyfikatory publikacji
+  i nie uruchamia ponownego wystawiania ani automatycznej aktualizacji portali.
+  Pola istniejacej oferty mozna otworzyc takze z Moich czesci.
+- Allegro otwiera swoj edytor, a Ovoko potwierdza ID przez API i otwiera karte
+  czesci z przyciskami edycji w panelu sprzedawcy. Przy pierwszym uzyciu trzeba
+  podac adres panelu https://...rrr.lt. Jest zapamietywany osobno dla konta.
+  Nie zgadujemy adresu panelu na podstawie loginu API.
+- Opony i felgi nie maja juz ogolnej blokady publikacji. Flagi typu oraz dane
+  rozmiaru sa przenoszone zgodnie ze slownikami API Ovoko, bez zgadywania ID.
+- Szerokosc/profil opony, bieznik, otwory/rozstaw srub i otwor centralny sa
+  pobierane z danych oferty, gdy sa jednoznaczne. Formularz ma male zwijane
+  uzupelnienie dla tych kategorii. Akcesoria (np. czujniki cisnienia) nie sa
+  blednie oznaczane jako opona przez sama nadrzedna kategorie.
+- Liczba opon/felg w komplecie nie jest stanem magazynowym. Para to 2 sztuki;
+  nieokreslonemu kompletowi nie dopisujemy automatycznie 4 sztuk. Brakujace
+  opcjonalne parametry pomijamy, a nieznana wartosc wpisana recznie wymaga poprawy.
+
+## Trwalosc
 
 Samochod jest identyfikowany UUID biblioteki, nie samym modelem/rokiem. Dwa auta
 tego samego modelu nie sa automatycznie scalane. Serwer sprawdza wlasciciela,

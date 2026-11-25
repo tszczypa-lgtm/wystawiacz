@@ -8,6 +8,12 @@ import { LogoutButton } from "./logout-button";
 export function OriginalWystawiacz() {
   const frame = useRef<HTMLIFrameElement>(null);
   const [navigation, setNavigation] = useState<HTMLElement | null>(null);
+  const [frameSrc,setFrameSrc]=useState("/wystawiacz/index.html");
+  useEffect(()=>{
+    const query=new URLSearchParams(window.location.search),id=query.get("editAllegro"),partId=query.get("ovokoPartId"),ovoko=query.get("editOvoko");
+    if(id&&/^\d{1,30}$/.test(id))setFrameSrc(`/wystawiacz/index.html?editAllegro=${id}${partId&&/^[1-9]\d{0,11}$/.test(partId)?`&ovokoPartId=${partId}`:""}`);
+    else if(ovoko&&/^[1-9]\d{0,11}$/.test(ovoko))setFrameSrc(`/wystawiacz/index.html?editOvoko=${ovoko}`);
+  },[]);
 
   useEffect(() => {
     const client = createSupabaseBrowserClient();
@@ -29,7 +35,7 @@ export function OriginalWystawiacz() {
         }}>Powrót do panelu konta</a>
         <LogoutButton />
       </>, navigation)}
-      <iframe ref={frame} onLoad={() => setNavigation(frame.current?.contentDocument?.getElementById("accountNavigation") ?? null)} src="/wystawiacz/index.html" title="Wystawiacz Allegro" className="block h-screen w-full border-0" />
+      <iframe ref={frame} onLoad={() => setNavigation(frame.current?.contentDocument?.getElementById("accountNavigation") ?? null)} src={frameSrc} title="Wystawiacz Allegro" className="block h-screen w-full border-0" />
     </main>
   );
 }
