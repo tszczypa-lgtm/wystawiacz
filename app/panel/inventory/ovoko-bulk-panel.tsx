@@ -20,7 +20,7 @@ function vehicleKey(job: Job) {
   return job.state === "error" && job.code === "vehicle_creation_locked" && vehicle?.brandId && vehicle.modelId && /^[12]\d{3}$/.test(vehicle.year) ? `${vehicle.brandId}:${vehicle.modelId}:${vehicle.year}` : "";
 }
 type Binding = { sellerId: string; fingerprint: string };
-type Outcome = { ok: boolean; partId: string; alreadyCreated: boolean; completedUnits?: number; totalUnits?: number; initialStock?: number; moreUnits?: boolean; message?: string; price?: string; currency?: string; prepared?: Record<string, string> };
+type Outcome = { ok: boolean; partId: string; alreadyCreated: boolean; completedUnits?: number; totalUnits?: number; initialStock?: number; moreUnits?: boolean; message?: string; price?: string; currency?: string; prepared?: Record<string, string>; webPending?: boolean; retryAfter?: number };
 const field = "rounded-lg border border-white/20 bg-[#0d1117] px-3 py-1.5";
 const button = "rounded-lg border border-white/20 px-3 py-1.5 text-sm font-bold disabled:opacity-40";
 function recordTransferAttempt(lastAttempt: { current: number }) {
@@ -79,7 +79,19 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
     if (!sameOvokoMoney(source.price, offer.price?.amount) || source.currency !== offer.price?.currency) throw new OvokoBulkClientError(`Cena Allegro zmienila sie od zaznaczenia (${offer.price?.amount} ${offer.price?.currency} -> ${source.price} ${source.currency}). Odswiez oferte.`, 400);
     if (stop.current) { update(offer.id, { state: "waiting", message: "Nie wyslano" }); return false; }
     const item = { offerId: offer.id, binding: session, adjustment: rule, stockMode: selectedStockMode, notes: source.description, expectedSource: { title: source.title, price: source.price, currency: source.currency, stock: source.stock, status: source.status, condition: source.condition, images: source.images } };
-    const preparation = await ovokoBulkRequest<Outcome & { category?: { id: string; name: string }; vehicle?: { brand: string; model: string; usedFallback: boolean; evidence?: string; sourceUrl?: string } }>({ ...item, operation: "prepare", allowTechnicalModel: useTechnical, ...(fallback ? { fallbackVehicle: fallback } : {}), ...(manualVehicle ? { manualVehicle: true } : {}), ...(overrides ? { overrides } : {}) });
+    type Preparation = Outcome & { category?: { id: string; name: string }; vehicle?: { brand: string; model: string; usedFallback: boolean; evidence?: string; sourceUrl?: string } };
+    const prepareInput = { ...item, operation: "prepare", allowTechnicalModel: useTechnical, ...(fallback ? { fallbackVehicle: fallback } : {}), ...(manualVehicle ? { manualVehicle: true } : {}), ...(overrides ? { overrides } : {}) };
+    let preparation = await ovokoBulkRequest<Preparation>(prepareInput);
+    const waitingSince=Date.now();
+    while(preparation.webPending){
+      update(offer.id,{message:preparation.message||"Trwa wyszukiwanie internetowe. Czekam na wynik OpenAI..."});
+      if(Date.now()-waitingSince>600000)throw new OvokoBulkClientError("OpenAI nie zakonczylo wyszukiwania w 10 minut. Czesc nie zostala wyslana; pozostale pozycje ida dalej.",400);
+      const delay=Math.max(3,Math.min(15,preparation.retryAfter||5))*1000;
+      for(let elapsed=0;elapsed<delay&&!stop.current;elapsed+=250)await new Promise(resolve=>setTimeout(resolve,250));
+      if(stop.current){update(offer.id,{state:"waiting",message:"Zatrzymano oczekiwanie na OpenAI. Czesc nie zostala wyslana."});return false;}
+      // Read-only preparation polling never retries importPart/importCar after an uncertain write.
+      preparation=await ovokoBulkRequest<Preparation>(prepareInput);
+    }
     try { const sourceUrl = new URL(preparation.vehicle?.sourceUrl || ""); if (sourceUrl.protocol === "https:" && !sourceUrl.username && !sourceUrl.password) update(offer.id, {sourceUrl:sourceUrl.href}); } catch { /* Optional citation only. */ }
     if (!preparation.alreadyCreated && stop.current) { update(offer.id, { state: "waiting", message: "Auto przygotowane. Czesc nie zostala wyslana." }); return false; }
     // Never cancel, repeat or unlock an uncertain write.

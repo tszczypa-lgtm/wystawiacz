@@ -9,8 +9,8 @@ It is enabled when that key exists unless `OVOKO_WEB_YEAR_ENABLED=false` is set.
 `BETA_AI_ENABLED` does not govern this inventory feature.
 
 Default model: `gpt-5.4-mini`, configurable via `OVOKO_WEB_YEAR_MODEL`. The provider
-request forces web search and a structured response, uses at most two tool calls,
-and has a 55-second timeout. Only the complete public part number and a make hint
+request forces web search and a structured response, uses at most four tool calls,
+and allows 8192 output/reasoning tokens. Only the complete public part number and a make hint
 are transmitted, not user identities, photos, prices, stock or offer descriptions.
 
 A match needs the exact code including its suffix, model, year, and an HTTPS URL
@@ -20,10 +20,26 @@ as a technical year, never a verified donor year or universal compatibility clai
 Web evidence can replace the initially guessed model; manual choices are retained.
 Both single-offer and bulk screens display a clickable source.
 
+Searches run in OpenAI background mode with `store=true` so the same response ID
+can be retrieved. This stores the public number/hint and generated search result
+with OpenAI under its Responses data controls. User account data is not sent.
+Each HTTP start/status request has a 20-second timeout. Queued/running jobs are
+kept in the Worker cache and polled every five seconds; neither screen treats a
+running search as a missing year. Preparation polling cannot publish a part or
+create a car until the lookup completes. Stopping the batch stops local polling,
+not the already accepted provider job. The UI bounds waiting to ten minutes.
+
 Identical in-flight requests coalesce. Positive results are cached for seven days
 in the Worker Cache API and local memory, scoped to owner, number, provider key
 and model. Empty results cache for 30 minutes; errors for five minutes. No automatic
-provider retry is performed. The 200-new-lookups/hour limit is an isolate-local
+paid search resubmission is performed. Read-only status GETs may be repeated;
+temporary status errors retain the same response ID. Explicit diagnostic codes
+distinguish output-token exhaustion, missing search/output, invalid JSON/schema,
+transport timeouts and HTTP errors. The cache version changed to avoid replaying
+old generic failures. Preparation/year-read limits allow 30 reads/minute for
+polling; the part-import phase remains limited to ten/minute.
+
+The 200-new-lookups/hour limit is an isolate-local
 abuse guard, NOT a global financial spending cap. Cache eviction, another Cloudflare
 location or simultaneous isolates can cause another paid call. Set the OpenAI
 project budget/alerts separately and use the feature flag as a kill switch.

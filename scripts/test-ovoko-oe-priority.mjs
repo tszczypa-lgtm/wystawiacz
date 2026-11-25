@@ -67,10 +67,14 @@ const result=await bulkOvokoPart(request,{OVOKO_PUBLISH_ENABLED:"true"},{user:{i
 assert.equal(result.prepared.modelId,"21");assert.equal(created[0].year,"2005");
 assert.equal(calls.some(p=>p.startsWith("/api/allegro/ovoko-fitment/")),false);
 // Last-resort web search may replace the initial Golf with a sourced Touran.
-const originalFetch=globalThis.fetch;let charged=0;
+const originalFetch=globalThis.fetch,originalNow=Date.now;let charged=0,background=false,clockOffset=0;
+Date.now=()=>originalNow()+clockOffset;
 globalThis.fetch=async(url,options)=>{
- assert.equal(url,"https://api.openai.com/v1/responses");charged++;const request=JSON.parse(options.body);
- assert.equal(JSON.parse(request.input).manufacturerNumber,"5G0907044CH");
+ if(options.method==="POST"){
+  assert.equal(url,"https://api.openai.com/v1/responses");charged++;const request=JSON.parse(options.body);
+  assert.equal(JSON.parse(request.input).manufacturerNumber,"5G0907044CH");
+  if(background)return Response.json({id:"resp_job123",status:"queued"});
+ }else assert.match(url,/\/responses\/resp_job123\?/);
  const sourceUrl="https://ovoko.fr/les-pieces/test-5g0907044ch-touran-iii";
  return Response.json({status:"completed",output:[{type:"web_search_call",status:"completed",action:{type:"search",sources:[{url:sourceUrl}]}},{type:"message",status:"completed",content:[{type:"output_text",annotations:[],text:JSON.stringify({number:"5G0907044CH",matches:[{number:"5G0907044CH",make:"Volkswagen",model:"Touran III",year:"2019",sourceUrl,evidence:"5G0907044CH Volkswagen Touran III 2019"}]})}]}]});
 };
@@ -78,5 +82,13 @@ try{
  catalog=false;number="5G0907044CH";sourceTitle=`PANEL VOLKSWAGEN GOLF 5 ${number}`;created=[];
  const answer=await bulkOvokoPart(request,{OVOKO_PUBLISH_ENABLED:"true",OPENAI_API_KEY:"fake-key"},{user:{id:String(++owner)},db:async()=>[]},{operation:"prepare",offerId:"101",binding:{sellerId:"555",fingerprint:"fingerprint"},notes:"",overrides:{categoryId:"3"},adjustment:{mode:"none",value:"0"},expectedSource:{title:sourceTitle,price:"50.00",currency:"PLN",stock:1,status:"ACTIVE",condition:"used",images:["https://a.allegroimg.com/photo.jpg"]}});
  assert.equal(charged,1);assert.equal(answer.prepared.modelId,"23");assert.equal(created[0].year,"2019");assert.equal(answer.vehicle.yearSource,"web-search");assert.match(answer.vehicle.sourceUrl,/^https:\/\/ovoko.fr\//);
-}finally{globalThis.fetch=originalFetch;}
+ background=true;created=[];const context={user:{id:String(++owner)},db:async()=>[]};
+ const input={operation:"prepare",offerId:"101",binding:{sellerId:"555",fingerprint:"fingerprint"},notes:"",overrides:{categoryId:"3"},adjustment:{mode:"none",value:"0"},expectedSource:{title:sourceTitle,price:"50.00",currency:"PLN",stock:1,status:"ACTIVE",condition:"used",images:["https://a.allegroimg.com/photo.jpg"]}};
+ const pending=await bulkOvokoPart(request,{OVOKO_PUBLISH_ENABLED:"true",OPENAI_API_KEY:"fake-key"},context,input);
+ assert.equal(pending.webPending,true);assert.equal(created.length,0,"Pending lookup must not create an Ovoko car");
+ await bulkOvokoPart(request,{OVOKO_PUBLISH_ENABLED:"true",OPENAI_API_KEY:"fake-key"},context,input);assert.equal(charged,2,"Polling the pending preparation must not create another paid job");
+ clockOffset=6000;
+ const finished=await bulkOvokoPart(request,{OVOKO_PUBLISH_ENABLED:"true",OPENAI_API_KEY:"fake-key"},context,input);
+ assert.equal(charged,2);assert.equal(finished.prepared.modelId,"23");assert.equal(created.length,1);assert.equal(created[0].year,"2019");
+}finally{globalThis.fetch=originalFetch;Date.now=originalNow;}
 console.log("OE priority: full BF/CH code lookup despite recognized title, numeric/Roman generation, exact-catalogue model override, catalogue year range, one lookup and manual selection passed. Providers mocked; no live publication.");

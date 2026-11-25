@@ -32,7 +32,10 @@ try {
       return route.fulfill({ json: { ok: true, readOnly: true, operation: body.operation, rows } });
     }
     if (url.pathname === "/api/ovoko/bulk" && body.operation === "start") return route.fulfill({ json: { ok: true, binding: { sellerId: "555", fingerprint: "fixture" } } });
-    if (url.pathname === "/api/ovoko/bulk" && body.operation === "prepare") return route.fulfill({ json: scenario === "already" ? { ok: true, alreadyCreated: true, partId: "78", completedUnits: 2, totalUnits: 2, moreUnits: false, initialStock: 2 } : { ok: true, prepared } });
+    if (url.pathname === "/api/ovoko/bulk" && body.operation === "prepare") {
+      if(scenario==="pending-stop" || scenario==="pending" && calls.filter(call=>call.body?.operation==="prepare").length===1)return route.fulfill({json:{ok:true,webPending:true,retryAfter:3,message:"Trwa wyszukiwanie modelu i roku w internecie."}});
+      return route.fulfill({ json: scenario === "already" ? { ok: true, alreadyCreated: true, partId: "78", completedUnits: 2, totalUnits: 2, moreUnits: false, initialStock: 2 } : { ok: true, prepared,vehicle:{brand:"Audi",model:"A4 B9",usedFallback:false,sourceUrl:"https://example.com/source"} } });
+    }
     assert.ok(url.pathname === "/api/ovoko/publish" || url.pathname === "/api/ovoko/bulk" && body.operation === "item", `Unexpected ${url.pathname}`);
     sent++;
     if (scenario === "uncertain" && sent === 2) return route.fulfill({ status: 409, json: { message: "Niepewny wynik; potwierdzono 1/2", code: "stock_publication_locked" } });
@@ -85,6 +88,13 @@ try {
   await mount(true); await page.getByRole("button", { name: "Wystaw w Ovoko", exact: true }).click();
   await page.getByRole("status").filter({ hasText: /rekordy Ovoko: 1\/1/ }).waitFor(); assert.equal(sent, 1);
   assert.equal(calls.find(call => call.path === "/api/ovoko/publish").body.stockMode, "shared");
+  scenario="pending";await mount();await bulkStart();await row.getByText("Trwa wyszukiwanie modelu i roku w internecie.",{exact:true}).waitFor();
+  assert.equal(sent,0,"No part import while the web lookup is pending");
+  await page.getByRole("status").filter({hasText:"Partia zakonczona"}).waitFor({timeout:15000});
+  assert.equal(sent,1);assert.equal(calls.filter(call=>call.body?.operation==="prepare").length,2);assert.equal(items().length,1,"Only read-only preparation is polled");
+  assert.equal(await row.getByRole("link",{name:"Zrodlo modelu i roku"}).getAttribute("href"),"https://example.com/source");
+  scenario="pending-stop";await mount();await bulkStart();await row.getByText("Trwa wyszukiwanie modelu i roku w internecie.",{exact:true}).waitFor();
+  await page.getByRole("button",{name:"Zatrzymaj po biezacej"}).click();await page.getByRole("status").filter({hasText:"Zatrzymano"}).waitFor();assert.equal(sent,0);
   assert.deepEqual(errors, []);
   console.log("Stock publication UI: both mode defaults/selectors, stable prepared item/snapshot/price, paced partial continuation, shared 1/1, already-created short circuits and no legacy unlock for uncertain units passed. All APIs mocked.");
 } finally { await browser.close(); }

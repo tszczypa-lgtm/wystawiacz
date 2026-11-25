@@ -192,10 +192,22 @@ export function OvokoPreparationPanel({ popup=false }: { popup?:boolean }) {
         const { data } = await createSupabaseBrowserClient().auth.getSession();
         if (controller.signal.aborted || currentEvidenceBinding.current !== binding) return;
         if (!data.session) throw new Error("Zaloguj sie ponownie.");
-        const response = await fetch("/api/ovoko/year-suggestion", { method: "POST", signal: controller.signal, cache: "no-store", headers: { Authorization: `Bearer ${data.session.access_token}`, "Content-Type": "application/json" }, body: JSON.stringify({ offerId: source.id, brandId, modelId, ...(draft?.manufacturerCode ? { number: draft.manufacturerCode } : {}) }) });
-        const result = await response.json() as { ok?: boolean; readOnly?: boolean; offerId?: string; brandId?: string; modelId?: string; number?: string; year?: string; reason?: string; technical?: boolean; sourceUrl?: string; message?: string; vehicleSuggestion?: {brandId?:string;modelId?:string;year?:string} };
+        type Lookup = { ok?: boolean; readOnly?: boolean; offerId?: string; brandId?: string; modelId?: string; number?: string; year?: string; reason?: string; technical?: boolean; sourceUrl?: string; message?: string; pending?:boolean;retryAfter?:number;vehicleSuggestion?: {brandId?:string;modelId?:string;year?:string} };
+        const options={method:"POST",signal:controller.signal,cache:"no-store" as RequestCache,headers:{Authorization:`Bearer ${data.session.access_token}`,"Content-Type":"application/json"},body:JSON.stringify({offerId:source.id,brandId,modelId,...(draft?.manufacturerCode?{number:draft.manufacturerCode}:{})})};
+        const readYear=async()=>{const response=await fetch("/api/ovoko/year-suggestion",options);const result=await response.json() as Lookup;if(!response.ok)throw new Error(result.message||"Nie udalo sie wyszukac roku.");return result;};
+        let result=await readYear();
+        const waitingSince=Date.now();
+        while(result.pending){
+          if(controller.signal.aborted||currentEvidenceBinding.current!==binding)return;
+          if(result.ok!==true||result.readOnly!==true||result.offerId!==source.id||result.brandId!==brandId||result.modelId!==modelId)throw new Error("Niepotwierdzone zadanie wyszukiwania roku.");
+          if(Date.now()-waitingSince>600000)throw new Error("OpenAI nie zakonczylo wyszukiwania w 10 minut. Nie wyslano czesci.");
+          setYearEvidence({binding,pending:true,year:"",reason:result.reason||"Trwa wyszukiwanie internetowe...",technical:true});
+          const delay=Math.max(3,Math.min(15,result.retryAfter||5))*1000;
+          for(let elapsed=0;elapsed<delay&&!controller.signal.aborted;elapsed+=250)await new Promise(resolve=>setTimeout(resolve,250));
+          if(controller.signal.aborted||currentEvidenceBinding.current!==binding)return;
+          result=await readYear();
+        }
         if (controller.signal.aborted || currentEvidenceBinding.current !== binding) return;
-        if (!response.ok) throw new Error(result.message || "Nie udalo sie wyszukac roku.");
         if (result.ok !== true || result.readOnly !== true || result.technical !== true || result.offerId !== source.id || result.brandId !== brandId || result.modelId !== modelId || typeof result.year !== "string" || typeof result.reason !== "string" || (result.year !== "" && (!/^\d{4}$/.test(result.year) || Number(result.year) < 1886 || Number(result.year) > new Date().getUTCFullYear() + 1))) throw new Error("Niepotwierdzony format podpowiedzi roku.");
         let sourceUrl: string | undefined;
         try { const url = new URL(result.sourceUrl || ""); if (url.protocol === "https:" && !url.username && !url.password) sourceUrl = url.href; } catch { /* Optional evidence link only. */ }
@@ -399,7 +411,7 @@ export function OvokoPreparationPanel({ popup=false }: { popup?:boolean }) {
             {modelId && <button type="button" className={button} disabled={carsBusy} onClick={() => setCarsRefresh(value => value + 1)}>Odswiez moje samochody</button>}{carsError && <p role="alert" className="text-xs text-amber-200">{carsError}</p>}
           </div>
           {modelId && <div className="space-y-2 rounded-xl border border-violet-400/30 p-3"><p className="text-sm font-bold">Auto uzupelni sie automatycznie przy Wystaw.</p><p className="text-sm">Model: {dictionaries.models?.find(row => row.id === modelId)?.name}; rok nowego rekordu: {carYear || "do uzupelnienia"}.</p><p className="text-xs text-amber-200">{manualCarYear.current.binding === carYearBinding && manualCarYear.current.touched ? "Rok wpisany recznie." : yearSuggestion.reason} Nie dopisujemy VIN-u ani danych zakupu.</p>
-            {yearLookupPending && <p role="status" className="text-xs text-violet-200">Szukam roku w istniejacych ofertach...</p>}
+            {yearLookupPending && <p role="status" className="text-xs text-violet-200">{evidence?.reason || "Szukam roku w istniejacych ofertach..."}</p>}
             {evidence && !evidence.pending && <p className="text-xs text-amber-200">{evidence.year ? "Rok techniczny z istniejacych ofert, nie potwierdza rocznika dawcy. " : ""}{evidence.reason}{evidence.sourceUrl && <> <a href={evidence.sourceUrl} target="_blank" rel="noopener noreferrer" className="underline">Zrodlo podpowiedzi roku</a></>}</p>}
           </div>}
           {modelId && <details className="space-y-3 rounded-xl border border-violet-400/30 p-3"><summary className="cursor-pointer text-sm font-bold">Dodaj brakujacy rekord auta do Ovoko</summary><p className="text-sm">Model: {dictionaries.models?.find(row => row.id === modelId)?.name}. Powstanie rekord katalogowy, bez VIN-u, silnika i danych zakupu. Nie tworzymy go przy samym wyborze modelu.</p>

@@ -66,7 +66,7 @@ export async function handleOvokoApi(request: Request, env: OvokoEnv): Promise<R
     const values = input as Record<string, unknown>;
     if (url.pathname === "/api/ovoko/year-suggestion") {
       const now = Date.now(), key = `${context.user.id}:year-suggestion`, recent = (attempts.get(key) || []).filter(t => now - t < 60000);
-      if (recent.length >= 10) throw new OvokoError(429, "Maksymalnie 10 podpowiedzi roku na minute.");
+      if (recent.length >= 30) throw new OvokoError(429, "Maksymalnie 30 odczytow podpowiedzi roku na minute.");
       if (attempts.size >= 1000 && !attempts.has(key)) attempts.delete(attempts.keys().next().value!);
       attempts.set(key, [...recent, now]);
       return reply(await ovokoYearSuggestion(request, env, context, values));
@@ -115,7 +115,8 @@ export async function handleOvokoApi(request: Request, env: OvokoEnv): Promise<R
     if (url.pathname === "/api/ovoko/bulk") {
       const phase = ["start", "prepare", "item"].includes(String(values.operation)) ? String(values.operation) : "invalid";
       const now = Date.now(), key = `${context.user.id}:bulk:${phase}`, recent = (attempts.get(key) || []).filter(time => now - time < 60000);
-      if (recent.length >= 10) throw new OvokoError(429, "Maksymalnie 10 pozycji partii na minute. Odczekaj przed kolejna partia.");
+      const limit = values.operation === "prepare" ? 30 : 10;
+      if (recent.length >= limit) throw new OvokoError(429, `Maksymalnie ${limit} operacji ${values.operation === "prepare" ? "przygotowania lub odczytu wyniku" : "partii"} na minute. Odczekaj przed kolejna proba.`);
       if (attempts.size >= 1000 && !attempts.has(key)) attempts.delete(attempts.keys().next().value!);
       attempts.set(key, [...recent, now]);
       return reply(await bulkOvokoPart(request, env, context, values));

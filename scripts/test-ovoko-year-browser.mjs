@@ -14,7 +14,7 @@ const bundle = await build({
 const browser = await chromium.launch({ headless: true, channel: "chrome" });
 const errors = [];
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
-async function fixture({ saved = false, known = "", failSource = false, holdSource, holdCars, holdEvidence, year = "2018", responseBinding = {}, webCorrection = false } = {}) {
+async function fixture({ saved = false, known = "", failSource = false, holdSource, holdCars, holdEvidence, year = "2018", responseBinding = {}, webCorrection = false, pendingRounds = 0 } = {}) {
   const page = await browser.newPage(), calls = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.addInitScript(() => {
@@ -49,6 +49,7 @@ async function fixture({ saved = false, known = "", failSource = false, holdSour
       assert.deepEqual(Object.keys(body).sort(), ["brandId", "modelId", "number", "offerId"]);
       assert.ok(["EM2T-14F014-AA", "EM2T-14F014-AB"].includes(body.number));
       await holdEvidence?.promise;
+      if(calls.filter(call=>call.path==="/api/ovoko/year-suggestion").length<=pendingRounds)return route.fulfill({json:{ok:true,readOnly:true,...body,year:"",reason:"Trwa zadanie OpenAI.",technical:true,pending:true,retryAfter:3}});
       return route.fulfill({ json: { ok: true, readOnly: true, ...body, number: body.number.replaceAll("-", ""), year: body.modelId === "41" || body.number.endsWith("AB") ? "2021" : year, reason: "Dopasowanie numeru w istniejacej ofercie.", technical: true, source: "ovoko-part", sourceUrl: "https://example.com/part", ...(webCorrection && body.modelId === "42" ? {vehicleSuggestion:{brandId:"5",modelId:"41",year}} : {}), ...responseBinding } }).catch(() => {});
     }
     throw new Error(`Unexpected endpoint: ${path}`);
@@ -162,6 +163,11 @@ try {
     await f.page.getByRole("status").filter({hasText:"Szukam roku"}).waitFor();await f.openYear();await f.input.fill("20");
     held.resolve();await f.page.getByText(/Reczny model pozostawiono bez zmian/).waitFor();
     assert.equal(await f.page.getByLabel("Model auta Ovoko").inputValue(),"42");assert.equal(await f.input.inputValue(),"20","Manual year edit prevents late model replacement");await f.page.close();
+  }
+  {
+    const f=await fixture({pendingRounds:2});await f.page.getByRole("status").filter({hasText:"Trwa zadanie OpenAI"}).waitFor();
+    await f.openYear();await f.page.waitForFunction(()=>document.querySelector('input[maxlength="4"]')?.value==="2018",null,{timeout:20000});
+    assert.equal(f.lookupCalls().length,3);assert.deepEqual(f.lookupCalls().map(call=>call.body),Array(3).fill(f.lookupCalls()[0].body));await f.page.close();
   }
   assert.deepEqual(errors, []);
   console.log("Single year evidence browser: saved/known/manual skips, ownership/cars gates, technical autofill, manual edit priority, model/number cancellation/reset and stale response rejection passed. Mock services only.");

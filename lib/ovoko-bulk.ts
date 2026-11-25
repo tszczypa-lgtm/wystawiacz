@@ -185,6 +185,7 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
   const readyForVehicleLookup = ovokoPublicationBlockers(source, draft, brandId || "1", modelId || "1").length === 0;
   if (input.manualVehicle !== true && lookupNumber && readyForVehicleLookup && (!model || !year && !savedCar || fitmentOrigin === "technical")) {
     const web = await lookupWebFitment(env, context.user.id, lookupNumber, brand?.name);
+    if (web.pending) return {ok:true,webPending:true,retryAfter:web.retryAfter||5,message:web.message};
     const matched = await selectWebVehicle(web.matches, dictionaries.brands, allowedBrands.map(row => row.id), loadModels, modelId);
     if (matched) {
       brandId = matched.brandId; modelId = matched.modelId; models = await loadModels(brandId);

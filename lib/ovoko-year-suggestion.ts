@@ -59,6 +59,7 @@ export async function ovokoYearSuggestion(request: Request, env: OvokoPublishEnv
   const evidence = await cachedOvokoYearEvidence(`${context.user.id}:${owned.sellerId}:${fingerprint}:${source.id}:${source.categoryId}:${number}:${input.brandId}:${model.id}`, { source, number, brand: { id: String(brand.id), name: brand.name }, model, models, allegro: yearAllegroReader(request, env), ovoko: remote });
   if (evidence) return { ...reply, ...evidence };
   const web = await lookupWebFitment(env, context.user.id, number, brand.name);
+  if (web.pending) return {...reply,year:"",reason:web.message,pending:true,retryAfter:web.retryAfter||5};
   const matched = await selectWebVehicle(web.matches, [{id:String(brand.id),name:brand.name}], [String(brand.id)], async()=>models, model.id);
   if (matched) return { ...reply, year: matched.year, reason: `Internet / OpenAI: pelny numer ${number}, ${matched.make} ${matched.model}, rok techniczny ${matched.year}. Publiczna oferta, nie potwierdza rocznika dawcy ani pelnej zgodnosci.`, source: "web-search", sourceUrl: matched.sourceUrl, ...(matched.modelId !== model.id ? { vehicleSuggestion: {brandId:matched.brandId,modelId:matched.modelId,year:matched.year} } : {}) };
   return { ...reply, year: "", reason: web.message || "Internet znalazl dane, ale modelu nie mozna jednoznacznie przypisac do slownika Ovoko. Podaj rok recznie." };
