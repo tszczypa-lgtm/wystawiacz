@@ -38,6 +38,7 @@ async function inspect(c:Awaited<ReturnType<typeof syncConnections>>,p:Proof,bra
  if(range&&(range[1]&&Number(p.year)<Number(range[1])||range[2]&&Number(p.year)>Number(range[2])))throw new OvokoError(400,"Rok nie pasuje do modelu.");
  const rows=parseOvokoRead("cars",await c.ovoko(`/v2/get/cars?model_ids=${p.model}&page=1&limit=20`),p.model).rows;
  const found=preferredOvokoCar(rows,p.year);
+ if(found&&!positive(found.id))throw new OvokoError(502,"Ovoko zwrocilo nieprawidlowe ID auta. Nie odblokowano zapisu i nie wyslano czesci.");
  return found?.id||null;
 }
 export async function manualOvokoOverride(owner:string,env:SalesSyncEnv,input:Data){
