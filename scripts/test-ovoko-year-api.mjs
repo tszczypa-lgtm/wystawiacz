@@ -1,0 +1,30 @@
+import assert from "node:assert/strict";
+import {readFileSync} from "node:fs";
+import ts from "typescript";
+function load(name,require=()=>{throw new Error("dependency");}){const m={exports:{}};new Function("require","module","exports",ts.transpileModule(readFileSync(new URL(`../lib/${name}.ts`,import.meta.url),"utf8"),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(require,m,m.exports);return m.exports;}
+const read=load("ovoko-read"),selection=load("ovoko-car-selection"),preparation=load("ovoko-preparation");
+let calls=[],owned=true,mode="normal",lookups=0;
+const source={id:"10",name:"AUDI A4 B8 MODUL 8K0959793R",parameters:[],category:{id:"3"},stock:{available:1},publication:{status:"ACTIVE"},productSet:[{quantity:{value:1},product:{}}]};
+const evidence={year:"2013",technical:true,source:"allegro-offer",reason:"Rok techniczny z innej oferty Allegro; rocznik dawcy niepotwierdzony.",sourceUrl:"https://allegro.pl/oferta/11"};
+const module=load("ovoko-year-suggestion",name=>{
+ if(name==="./allegro-api")return{handleAllegroApi:async request=>{calls.push(request.url);assert.equal(request.method,"GET");assert.equal(request.headers.get("Authorization"),"Bearer fixture");return owned?Response.json({offer:source,sellerId:"555"}):Response.json({message:"other owner"},{status:404});}};
+ if(name==="./ovoko-connection")return{loadOvokoConnection:async()=>({username:"own-account"}),ovokoConnectionKey:async()=>"key"};
+ if(name==="./ovoko-write-client")return{ovokoWriteDigest:async()=>"a".repeat(64),ovokoWriteClient:()=>async path=>{calls.push(path);if(path.startsWith("/get/car_models/"))return{list:[{id:"31",brand:"7",name:"A4 B8",year_start:mode==="known"?"2008":"",year_end:""}]};assert.equal(path,"/get/car_brands");return{list:[{id:7,name:"Audi"}]};}};
+ if(name==="./ovoko-year-evidence")return{suggestOvokoYearEvidence:async input=>{lookups++;assert.equal(input.number,"8K0959793R");assert.equal(input.brand.id,"7");assert.equal(input.model.id,"31");return evidence;}};
+ if(name==="./ovoko-read")return read;if(name==="./ovoko-car-selection")return selection;if(name==="./ovoko-preparation")return preparation;
+ if(name==="./ovoko-suggestions")return{ovokoAutomaticFields:()=>({manufacturerCode:"8K0959793R"})};throw new Error(name);
+});
+const request=new Request("https://fixture.test/api/ovoko/year-suggestion",{headers:{Authorization:"Bearer fixture"}}),context={user:{id:"owner"}};
+const input={offerId:"10",brandId:"7",modelId:"31",number:"8K0-959-793-R"};
+for(const invalid of [{},{...input,modelId:"url"},{...input,number:"http://local/"},{...input,extra:true}])await assert.rejects(module.ovokoYearSuggestion(request,{},context,invalid));
+owned=false;calls=[];await assert.rejects(module.ovokoYearSuggestion(request,{},context,input),e=>e.status===404);assert.equal(calls.length,1,"No provider reads before source ownership");owned=true;
+calls=[];const result=await module.ovokoYearSuggestion(request,{},context,input);assert.equal(result.year,"2013");assert.equal(result.technical,true);assert.equal(result.number,"8K0959793R");assert.equal(result.readOnly,true);assert.equal(result.modelId,"31");assert.equal(lookups,1);
+await module.ovokoYearSuggestion(request,{},context,input);assert.equal(lookups,1,"Owner/physical binding cache avoids repeated lookup");
+await module.ovokoYearSuggestion(request,{}, {user:{id:"other"}},input);assert.equal(lookups,2,"Year evidence cache is not shared across owners");
+mode="known";const known=await module.ovokoYearSuggestion(request,{},context,input);assert.equal(known.year,"2008");assert.equal(lookups,2,"Existing source/dictionary year takes priority");
+await assert.rejects(module.ovokoYearSuggestion(request,{},context,{...input,modelId:"99"}),e=>e.status===400);
+const adapter=module.yearAllegroReader(request,{});calls=[];
+await adapter("/sale/offers?name=8K0959793R&limit=5");await adapter("/sale/product-offers/11");await adapter("/ovoko-fitment/10?expand=1&number=8K0959793R");
+assert.ok(calls[0].includes("/year-offers?number=8K0959793R"));assert.ok(calls[1].endsWith("/own-offers/11"));
+for(const path of["https://other.test/","/sale/offers?name=URL&limit=5","/sale/product-offers/not-id","/sale/offer-publication-commands/id"])await assert.rejects(adapter(path));
+console.log("Free year API: input/ownership, model-brand scope, source precedence, technical provenance, owner-bound cache and read-only route adapter passed. Providers mocked.");

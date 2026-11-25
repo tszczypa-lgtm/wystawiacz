@@ -28,6 +28,9 @@ export function OvokoPreparationPanel({ popup=false }: { popup?:boolean }) {
   const [carsBusy, setCarsBusy] = useState(false), [carsError, setCarsError] = useState(""), [carsRefresh, setCarsRefresh] = useState(0);
   const [carYear, setCarYear] = useState(""), [creatingCar, setCreatingCar] = useState(false), [carAttempted, setCarAttempted] = useState(false), [carMessage, setCarMessage] = useState("");
   const lastCarModel = useRef("");
+  const manualCarYear = useRef({ binding: "", touched: false });
+  const [carsReadBinding, setCarsReadBinding] = useState("");
+  const [yearEvidence, setYearEvidence] = useState<{ binding: string; pending: boolean; year: string; reason: string; technical: true; sourceUrl?: string } | null>(null);
   const carWriteLocks = useRef(new Set<string>());
   const publicationLock = useRef(false), publicationSent = useRef(false);
   const [overrideBusy, setOverrideBusy] = useState(false);
@@ -44,7 +47,17 @@ export function OvokoPreparationPanel({ popup=false }: { popup?:boolean }) {
   const modelSuggestions = useMemo(() => suggestOvokoModels(vehicleText, dictionaries.models || []), [vehicleText, dictionaries.models]);
   const numberSuggestions = useMemo(() => source ? suggestPartNumbers(source.title, source.parameters) : [], [source]);
   const categorySuggestions = useMemo(() => source ? suggestOvokoCategories(source.title, dictionaries.categories || []) : [], [source, dictionaries.categories]);
-  const yearSuggestion = useMemo(() => source ? ovokoCarYear(source, dictionaries.models?.find(row => row.id === modelId)) : { year: "", reason: "", technical: false }, [source, modelId, dictionaries.models]);
+  const sourceYearSuggestion = useMemo(() => source ? ovokoCarYear(source, dictionaries.models?.find(row => row.id === modelId)) : { year: "", reason: "", technical: false }, [source, modelId, dictionaries.models]);
+  const carYearBinding = JSON.stringify([source?.id, brandId, modelId]);
+  const carsBinding = JSON.stringify([carYearBinding, sourceYearSuggestion.year, carsRefresh]);
+  const evidenceBinding = JSON.stringify([carYearBinding, draft?.manufacturerCode || ""]);
+  const currentEvidenceBinding = useRef(evidenceBinding);
+  currentEvidenceBinding.current = evidenceBinding;
+  const evidence = yearEvidence?.binding === evidenceBinding ? yearEvidence : null;
+  const yearSuggestion = sourceYearSuggestion.year ? sourceYearSuggestion : evidence?.year ? evidence : sourceYearSuggestion;
+  const manualYearValid = manualCarYear.current.binding === carYearBinding && manualCarYear.current.touched && /^\d{4}$/.test(carYear) && Number(carYear) >= 1886 && Number(carYear) <= new Date().getUTCFullYear() + 1;
+  const yearLookupPending = !!evidence?.pending;
+  const yearLookupBlocksPublish = yearLookupPending && !draft?.donorId && !/^\d{4}$/.test(carYear);
   const active = useRef<AbortController | null>(null);
   const publicationPanel = useRef<HTMLElement | null>(null);
   const feedbackPanel = useRef<HTMLParagraphElement | null>(null);
@@ -143,7 +156,7 @@ export function OvokoPreparationPanel({ popup=false }: { popup?:boolean }) {
   }, [brandId, vehicleText]);
   useEffect(() => {
     const controller = new AbortController();
-    setDictionaries(previous => ({ ...previous, cars: [] })); setCarsError("");
+    setDictionaries(previous => ({ ...previous, cars: [] })); setCarsError(""); setCarsReadBinding("");
     if (lastCarModel.current !== modelId) {
       lastCarModel.current = modelId;
       setDraft(previous => previous ? { ...previous, donorId: "" } : previous);
@@ -153,13 +166,45 @@ export function OvokoPreparationPanel({ popup=false }: { popup?:boolean }) {
     void readOvoko("cars", controller.signal, modelId).then(rows => {
       if (controller.signal.aborted) return;
       setDictionaries(previous => ({ ...previous, cars: rows }));
-      const preferred = preferredOvokoCar(rows, yearSuggestion.year);
+      const preferred = preferredOvokoCar(rows, sourceYearSuggestion.year);
       if (preferred) setDraft(previous => previous && !previous.donorId ? { ...previous, donorId: preferred.id } : previous);
+      setCarsReadBinding(carsBinding);
     }).catch(error => { if (!controller.signal.aborted) setCarsError(error instanceof Error ? error.message : "Nie udalo sie odczytac aut Ovoko."); })
       .finally(() => { if (!controller.signal.aborted) setCarsBusy(false); });
     return () => controller.abort();
-  }, [modelId, carsRefresh, yearSuggestion.year]);
-  useEffect(() => { setCarYear(yearSuggestion.year); setCarAttempted(false); setCarMessage(""); }, [modelId, yearSuggestion.year]);
+  }, [modelId, carsRefresh, sourceYearSuggestion.year, carsBinding]);
+  useEffect(() => {
+    if (manualCarYear.current.binding !== carYearBinding) manualCarYear.current = { binding: carYearBinding, touched: false };
+    if (!manualCarYear.current.touched) setCarYear(yearSuggestion.year);
+    setCarAttempted(false); setCarMessage("");
+  }, [carYearBinding, yearSuggestion.year]);
+  useEffect(() => {
+    const controller = new AbortController();
+    if (busy || !source || !brandId || !modelId || modelsBusy || !dictionaries.models?.some(row => row.id === modelId) || sourceYearSuggestion.year || carsReadBinding !== carsBinding || carsBusy || carsError || preferredOvokoCar(dictionaries.cars || [], "") || draft?.donorId || manualYearValid) {
+      setYearEvidence(previous => previous?.binding === evidenceBinding && !previous.pending && !sourceYearSuggestion.year ? previous : null);
+      return () => controller.abort();
+    }
+    const binding = evidenceBinding;
+    setYearEvidence({ binding, pending: true, year: "", reason: "", technical: true });
+    void (async () => {
+      try {
+        const { data } = await createSupabaseBrowserClient().auth.getSession();
+        if (controller.signal.aborted || currentEvidenceBinding.current !== binding) return;
+        if (!data.session) throw new Error("Zaloguj sie ponownie.");
+        const response = await fetch("/api/ovoko/year-suggestion", { method: "POST", signal: controller.signal, cache: "no-store", headers: { Authorization: `Bearer ${data.session.access_token}`, "Content-Type": "application/json" }, body: JSON.stringify({ offerId: source.id, brandId, modelId, ...(draft?.manufacturerCode ? { number: draft.manufacturerCode } : {}) }) });
+        const result = await response.json() as { ok?: boolean; readOnly?: boolean; offerId?: string; brandId?: string; modelId?: string; number?: string; year?: string; reason?: string; technical?: boolean; sourceUrl?: string; message?: string };
+        if (controller.signal.aborted || currentEvidenceBinding.current !== binding) return;
+        if (!response.ok) throw new Error(result.message || "Nie udalo sie wyszukac roku.");
+        if (result.ok !== true || result.readOnly !== true || result.technical !== true || result.offerId !== source.id || result.brandId !== brandId || result.modelId !== modelId || typeof result.year !== "string" || typeof result.reason !== "string" || (result.year !== "" && (!/^\d{4}$/.test(result.year) || Number(result.year) < 1886 || Number(result.year) > new Date().getUTCFullYear() + 1))) throw new Error("Niepotwierdzony format podpowiedzi roku.");
+        let sourceUrl: string | undefined;
+        try { const url = new URL(result.sourceUrl || ""); if (url.protocol === "https:" && !url.username && !url.password) sourceUrl = url.href; } catch { /* Optional evidence link only. */ }
+        setYearEvidence({ binding, pending: false, year: result.year, reason: result.reason, technical: true, sourceUrl });
+      } catch (error) {
+        if (!controller.signal.aborted && currentEvidenceBinding.current === binding) setYearEvidence({ binding, pending: false, year: "", reason: error instanceof Error ? error.message : "Nie udalo sie wyszukac roku.", technical: true });
+      }
+    })();
+    return () => controller.abort();
+  }, [busy, source, brandId, modelId, modelsBusy, dictionaries.models, sourceYearSuggestion.year, carsReadBinding, carsBinding, carsBusy, carsError, dictionaries.cars, draft?.donorId, draft?.manufacturerCode, manualYearValid, evidenceBinding]);
   useEffect(() => { setReview(false); }, [brandId, modelId]);
   function change(name: keyof OvokoPreparationDraft, value: string) {
     setReview(false);
@@ -187,6 +232,7 @@ export function OvokoPreparationPanel({ popup=false }: { popup?:boolean }) {
     ...(modelsBusy ? ["Trwa pobieranie modeli wybranej marki."] : []),
     ...(carsBusy ? ["Trwa odczyt Moich samochodow Ovoko dla wybranego modelu."] : []),
     ...(creatingCar ? ["Trwa automatyczne przygotowanie rekordu auta Ovoko."] : []),
+    ...(yearLookupBlocksPublish ? ["Szukam roku w istniejacych ofertach..."] : []),
     ...(draft.statusId && dictionaries.statuses && !dictionaries.statuses.some(row => row.id === draft.statusId && ["na stanie", "in stock"].includes(row.name.trim().toLowerCase())) ? ["Pierwsza proba wymaga dostepnosci Na stanie, nie Sprzedano ani Zarezerwowano."] : []),
   ] : [];
   const otherCodes = draft ? additionalOvokoCodes(draft.additionalCodes, draft.manufacturerCode) : [];
@@ -228,7 +274,7 @@ export function OvokoPreparationPanel({ popup=false }: { popup?:boolean }) {
   }
   async function publishSingle() {
     if (overrideBusy) return;
-    if (!source || !draft || publishing || attempted || publicationLock.current || publicationSent.current || creatingCar || carsBusy || modelsBusy || dictionaryBusy) return;
+    if (!source || !draft || publishing || attempted || publicationLock.current || publicationSent.current || creatingCar || carsBusy || modelsBusy || dictionaryBusy || yearLookupBlocksPublish) return;
     if (!brandId || !modelId || modelError || source.status !== "ACTIVE" || !Number.isInteger(source.stock) || source.stock! < 1 || source.stock! > 10000 || source.bundle) {
       setPublicationMessage(modelError || "Przygotowanie auta wymaga marki, modelu i aktywnej oferty Allegro z 1-10000 sztuk, bez zestawu.");
       openPublicationReview(); return;
@@ -273,7 +319,7 @@ export function OvokoPreparationPanel({ popup=false }: { popup?:boolean }) {
     } finally { setPublishing(false); publicationLock.current = false; }
   }
   return <section className="space-y-5">
-    <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-3xl font-black">Przygotuj do Ovoko</h1><div className="flex gap-2">{popup&&<button type="button" className={button} disabled={publishing||creatingCar} onClick={()=>window.close()}>Zamknij okno</button>}<button type="button" className={`${button} bg-orange-600`} disabled={!source || busy || dictionaryBusy || modelsBusy || carsBusy || publishing || attempted || creatingCar} onClick={() => void publishSingle()}>{publishing ? "Wystawiam..." : "Wystaw w Ovoko"}</button></div></div>
+    <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-3xl font-black">Przygotuj do Ovoko</h1><div className="flex gap-2">{popup&&<button type="button" className={button} disabled={publishing||creatingCar} onClick={()=>window.close()}>Zamknij okno</button>}<button type="button" className={`${button} bg-orange-600`} disabled={!source || busy || dictionaryBusy || modelsBusy || carsBusy || publishing || attempted || creatingCar || yearLookupBlocksPublish} onClick={() => void publishSingle()}>{publishing ? "Wystawiam..." : "Wystaw w Ovoko"}</button></div></div>
     {publicationMessage && <p ref={feedbackPanel} role={partId || publishing ? "status" : "alert"} className={`rounded-lg border p-3 ${partId ? "border-emerald-400/40 text-emerald-200" : "border-amber-400/40 text-amber-200"}`}>{publicationMessage}</p>}
     {source && source.stock === 1 && !stockError && <ManualOvokoOverride key={`${source.id}:${brandId}:${modelId}:${carYear}`} offerId={source.id} brandId={brandId} modelId={modelId} year={carYear} disabled={publishing || creatingCar} onBusyChange={setOverrideBusy} onResolved={result => {
       setReview(false); setPublicationMessage(result.message);
@@ -341,9 +387,12 @@ export function OvokoPreparationPanel({ popup=false }: { popup?:boolean }) {
             {modelId && !carsBusy && (dictionaries.cars || []).length > 0 && <p className="text-xs text-emerald-200">Wykorzystujemy zapisane auto tego modelu, najpierw z pasujacym rokiem; nie tworzymy kolejnego. Sprawdz przypisanie. Reczny wybor pozostaje bez zmian.</p>}
             {modelId && <button type="button" className={button} disabled={carsBusy} onClick={() => setCarsRefresh(value => value + 1)}>Odswiez moje samochody</button>}{carsError && <p role="alert" className="text-xs text-amber-200">{carsError}</p>}
           </div>
-          {modelId && <div className="space-y-2 rounded-xl border border-violet-400/30 p-3"><p className="text-sm font-bold">Auto uzupelni sie automatycznie przy Wystaw.</p><p className="text-sm">Model: {dictionaries.models?.find(row => row.id === modelId)?.name}; rok nowego rekordu: {carYear || "do uzupelnienia"}.</p><p className="text-xs text-amber-200">{carYear === yearSuggestion.year ? yearSuggestion.reason : "Rok wpisany recznie."} Nie dopisujemy VIN-u ani danych zakupu.</p></div>}
+          {modelId && <div className="space-y-2 rounded-xl border border-violet-400/30 p-3"><p className="text-sm font-bold">Auto uzupelni sie automatycznie przy Wystaw.</p><p className="text-sm">Model: {dictionaries.models?.find(row => row.id === modelId)?.name}; rok nowego rekordu: {carYear || "do uzupelnienia"}.</p><p className="text-xs text-amber-200">{manualCarYear.current.binding === carYearBinding && manualCarYear.current.touched ? "Rok wpisany recznie." : yearSuggestion.reason} Nie dopisujemy VIN-u ani danych zakupu.</p>
+            {yearLookupPending && <p role="status" className="text-xs text-violet-200">Szukam roku w istniejacych ofertach...</p>}
+            {evidence && !evidence.pending && <p className="text-xs text-amber-200">{evidence.year ? "Rok techniczny z istniejacych ofert, nie potwierdza rocznika dawcy. " : ""}{evidence.reason}{evidence.sourceUrl && <> <a href={evidence.sourceUrl} target="_blank" rel="noopener noreferrer" className="underline">Zrodlo podpowiedzi roku</a></>}</p>}
+          </div>}
           {modelId && <details className="space-y-3 rounded-xl border border-violet-400/30 p-3"><summary className="cursor-pointer text-sm font-bold">Dodaj brakujacy rekord auta do Ovoko</summary><p className="text-sm">Model: {dictionaries.models?.find(row => row.id === modelId)?.name}. Powstanie rekord katalogowy, bez VIN-u, silnika i danych zakupu. Nie tworzymy go przy samym wyborze modelu.</p>
-            <label className="block text-sm">Rok nowego rekordu auta<input className={field} value={carYear} maxLength={4} inputMode="numeric" disabled={carAttempted} onChange={event => setCarYear(event.target.value)} /></label>
+            <label className="block text-sm">Rok nowego rekordu auta<input className={field} value={carYear} maxLength={4} inputMode="numeric" disabled={carAttempted} onChange={event => { manualCarYear.current = { binding: carYearBinding, touched: true }; setCarYear(event.target.value); }} /></label>
             <button type="button" className={button} disabled={!/^\d{4}$/.test(carYear) || carAttempted || creatingCar || modelsBusy || carsBusy || dictionaryBusy} onClick={() => void createCar()}>Utworz rekord auta i uzupelnij ID</button>
           </details>}
           {carMessage && <p role="status" className="text-sm text-amber-200">{carMessage}</p>}
@@ -356,7 +405,7 @@ export function OvokoPreparationPanel({ popup=false }: { popup?:boolean }) {
       <section ref={publicationPanel} className="scroll-mt-5 rounded-xl border border-amber-400/30 p-4"><h2 className="font-bold">Wysylka do Ovoko</h2><ul className="mt-3 list-disc space-y-2 pl-5 text-sm" aria-label="Braki przygotowania">{ovokoPreparationIssues(source, draft).map(issue => <li key={issue}>{issue}</li>)}</ul>
         <p className="my-3 text-sm">Aktywna oferta z 1-10000 sztuk, bez zestawu i brakujacych zdjec. Wybierz zapisany rekord z Moich samochodow Ovoko; jego ID wypelni sie samo. Opony i felgi nie sa jeszcze obslugiwane. Zmiana zapasu podczas niedokonczonego transferu zatrzymuje wysylke.</p>
         <button type="button" className={button} disabled={publishing || attempted || creatingCar} onClick={openPublicationReview}>Sprawdz wysylke</button>
-        <button type="button" className={`${button} ml-2 bg-orange-600`} disabled={busy || dictionaryBusy || modelsBusy || carsBusy || publishing || attempted || creatingCar} onClick={() => void publishSingle()}>{publishing ? "Wystawiam..." : "Wyslij do Ovoko"}</button>
+        <button type="button" className={`${button} ml-2 bg-orange-600`} disabled={busy || dictionaryBusy || modelsBusy || carsBusy || publishing || attempted || creatingCar || yearLookupBlocksPublish} onClick={() => void publishSingle()}>{publishing ? "Wystawiam..." : "Wyslij do Ovoko"}</button>
         {publicationBlockers.length > 0 && <div className="mt-3 rounded-lg border border-amber-400/30 p-3 text-sm text-amber-200"><p className="font-bold">Co blokuje wystawienie:</p><ul className="mt-2 list-disc space-y-1 pl-5" aria-label="Blokady wystawienia">{publicationBlockers.map(issue => <li key={issue}>{issue}</li>)}</ul></div>}
         {review && <div className="mt-4 space-y-3 rounded-xl border border-orange-400/40 p-4"><h3 className="font-bold">Podsumowanie: {stockMode === "shared" ? 1 : source.stock} rekordow Ovoko; zapas: {source.stock}</h3><p>{source.title}</p><p>Numer: {draft.manufacturerCode}; cena za sztuke: {draft.price} {draft.currency}</p><p>Numery dodatkowe: {otherCodes?.join(", ") || "brak"}</p><p className="font-bold">Przenoszone zdjecia: {source.images.length} (identyczna cala galeria dla kazdego rekordu)</p><p>Kategoria: {dictionaries.categories?.find(row => row.id === draft.categoryId)?.name}; stan: {dictionaries.qualities?.find(row => row.id === draft.qualityId)?.name}; dostepnosc: {dictionaries.statuses?.find(row => row.id === draft.statusId)?.name}</p><p>Auto: {dictionaries.brands?.find(row => row.id === brandId)?.name} {dictionaries.models?.find(row => row.id === modelId)?.name}; rekord auta ID: {draft.donorId}</p>
           <p className="text-xs text-white/60">Nie zmieniamy istniejacych czesci ani Allegro. Po niepewnym wyniku nie ponawiamy automatycznie.</p>

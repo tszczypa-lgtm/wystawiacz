@@ -55,6 +55,12 @@ try {
       savedCars = [{ id: carId, name: `Auto ID ${carId}`, modelId: body.modelId, years: body.year }];
       return route.fulfill({ json: { ok: true, carId, modelId: body.modelId, year: body.year, reused: false } });
     }
+    if (url.pathname === "/api/ovoko/year-suggestion") {
+      assert.equal(request.method(), "POST");
+      const body = request.postDataJSON();
+      assert.equal(body.offerId, id);
+      return route.fulfill({ json: { ok: true, readOnly: true, ...body, year: "", reason: "Brak roku w dostepnych ofertach.", technical: true } });
+    }
     assert.ok(["/api/ovoko/read", "/api/ovoko/test"].includes(url.pathname), "Only dictionary reads, no publication or local save endpoints"); assert.equal(request.method(), "POST");
     const payload = request.postDataJSON(); assert.equal(payload.useSaved, true);
     if (url.pathname === "/api/ovoko/test") { assert.deepEqual(payload, { useSaved: true }); return route.fulfill({ json: { ok: true, readOnly: true, brands: [{ id: "1", name: "Audi" }, { id: "2", name: "Volkswagen" }, { id: "3", name: "Land Rover" }, { id: "4", name: "Rover" }, { id: "5", name: "Ford" }, { id: "6", name: "Mercedes-Benz" }, { id: "7", name: "Renault" }] } }); }

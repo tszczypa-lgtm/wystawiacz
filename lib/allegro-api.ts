@@ -389,8 +389,14 @@ export async function handleAllegroApi(request: Request, env: Env): Promise<Resp
     const url = new URL(request.url);
     const path = url.pathname.slice("/api/allegro".length);
     if (path === "/inventory" && request.method !== "GET") return json({ message: "Lista ofert jest tylko do odczytu." }, 405);
+    if (path === "/year-offers" && request.method !== "GET") return json({ message: "Podpowiedzi roku sa tylko do odczytu." }, 405);
     if (path.startsWith("/ovoko-fitment/") && request.method !== "GET") return json({ message: "Dopasowanie jest tylko do odczytu." }, 405);
     if (request.method === "GET") {
+      if (path === "/year-offers") {
+        const number = url.searchParams.get("number") || "";
+        if (!/^[A-Z0-9]{6,32}$/.test(number) || !/\d/.test(number) || [...url.searchParams.keys()].some(k => k !== "number") || url.searchParams.getAll("number").length !== 1) throw new ApiError(400, "Podaj pelny numer czesci.");
+        return json(await remote(`/sale/offers?name=${encodeURIComponent(number)}&limit=5`, { signal: AbortSignal.timeout(10000) }));
+      }
       if (path === "/coordination-snapshot") {
         const ids = (url.searchParams.get("offerIds") || "").split(",");
         if (ids.length > 5 || new Set(ids).size !== ids.length || ids.some(id => !/^\d{1,30}$/.test(id)) || [...url.searchParams.keys()].some(key => key !== "offerIds") || url.searchParams.getAll("offerIds").length !== 1) throw new ApiError(400, "Wybierz od 1 do 5 ofert do kontroli koordynacji.");

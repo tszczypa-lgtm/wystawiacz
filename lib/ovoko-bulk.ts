@@ -12,6 +12,8 @@ import { adjustedOvokoPrice, sameOvokoMoney, validateOvokoAdjustment } from "./o
 import { matchOvokoFitment, type FitmentRow } from "./ovoko-fitment";
 import { createdPublication, ovokoPublicationPresent } from "./ovoko-publication-presence";
 import { publicationStockMode, readStockPublication, checkStockPublication, stockPublicationResult } from "./ovoko-stock-publication";
+import { cachedOvokoYearEvidence, yearAllegroReader } from "./ovoko-year-suggestion";
+import type { YearEvidence } from "./ovoko-year-evidence";
 
 type Context = Awaited<ReturnType<typeof accountContext>>;
 export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, context: Context, input: Record<string, unknown>) {
@@ -123,10 +125,12 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
     else if (nextModels.some(row => ovokoModelHasConflict(vehicleText, row))) generationConflict = true;
   }
   let fitmentOrigin = input.manualVehicle === true ? "manual" : "";
+  let fitmentRows: FitmentRow[] | undefined;
   if (input.manualVehicle !== true && (!modelId || !draft.categoryId)) {
     const lookupCode = draft.manufacturerCode.replace(/-/g, "");
     const fitment = await allegro(`/ovoko-fitment/${source.id}?expand=1${lookupCode ? `&number=${encodeURIComponent(lookupCode)}` : ""}`);
     if (fitment.offerId !== source.id || fitment.number !== lookupCode || !Array.isArray(fitment.rows) || fitment.rows.length > 200 || fitment.rows.some((row: Record<string, unknown>) => typeof row?.text !== "string" || row.text.length > 2000 || !["offer", "suggestion", "catalog", "catalog-suggestion"].includes(String(row.origin))) || !Array.isArray(fitment.names) || fitment.names.some((name: unknown) => typeof name !== "string" || name.length > 500)) throw new OvokoError(502, "Niepotwierdzone dane automatycznego dopasowania.");
+    fitmentRows = fitment.rows as FitmentRow[];
     if (!modelId) {
       const candidates = [...fitment.rows as FitmentRow[], ...fitment.names.map((text: string) => ({ text, origin: "catalog" }))];
       const matched = await matchOvokoFitment(candidates, dictionaries.brands, allowedBrands.map(row => row.id), vehicleText, loadModels);
@@ -151,9 +155,18 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
     if (technical) { modelId = technical.id; fitmentOrigin = "technical"; }
   }
   const model = models.find(row => row.id === modelId);
-  const year = input.manualVehicle === true && fallback?.year ? fallback.year : ovokoCarYear(source, model).year;
+  let year = input.manualVehicle === true && fallback?.year ? fallback.year : ovokoCarYear(source, model).year;
   let savedCar: OvokoReadRow | undefined;
   if (model && !year) savedCar = parseOvokoRead("cars", await remote(`/v2/get/cars?model_ids=${modelId}&page=1&limit=20`), modelId).rows[0];
+  let yearEvidence: YearEvidence | null = null;
+  const lookupNumber = draft.manufacturerCode.replace(/-/g, "");
+  const brand = dictionaries.brands.find(row => row.id === brandId);
+  if (model && brand && !year && !savedCar && lookupNumber) {
+    try {
+      yearEvidence = await cachedOvokoYearEvidence(`${context.user.id}:${owned.sellerId}:${fingerprint}:${source.id}:${source.categoryId}:${lookupNumber}:${brandId}:${modelId}`, { source, number: lookupNumber, brand, model, models, fitmentRows, allegro: yearAllegroReader(request, env), ovoko: remote });
+      year = yearEvidence?.year || "";
+    } catch { /* Missing optional evidence never invents a year or stops unrelated batch rows. */ }
+  }
   const blockers = ovokoPublicationBlockers(source, draft, brandId, modelId);
   if (!model || !year && !savedCar) blockers.push(model ? "Wybrano model, ale slownik nie podaje roku i nie ma zapisanego auta. Podaj rok w uzupelnieniu tej pozycji." : "Nie rozpoznano modelu. Wybierz model ponizej; kategoria i cena zostaja bez zmian.");
   const category = dictionaries.categories.find(row => row.id === draft.categoryId);
@@ -165,5 +178,6 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
   try { car = savedCar ? { carId: savedCar.id } : await createOvokoCar(request, env, context, { brandId, modelId, year, confirmCreate: true }, fingerprint); }
   catch (e) { if (e instanceof OvokoError && e.code === "vehicle_creation_locked") e.repair = { needsVehicle: false, needsCategory: false, brandId, categoryId: draft.categoryId, vehicle: { brandId, modelId, year } }; throw e; }
   // Separate preparation (including car reuse/create) from part publication to bound Worker subrequests.
-  return { ok: true, category: { id: draft.categoryId, name: categoryNames.slice().reverse().join(" / ") }, vehicle: { brand: dictionaries.brands.find(row => row.id === brandId)?.name || brandId, model: model!.name, usedFallback, evidence: fitmentOrigin === "manual" ? "Wybor reczny" : fitmentOrigin === "technical" ? "Model roboczy marki - zgodnosc niepotwierdzona" : fitmentOrigin ? fitmentOrigin.startsWith("catalog") ? "Katalog Allegro - pelny MPN" : "Pasuje do Allegro" : "Dane oferty" }, prepared: { brandId, modelId, donorId: car.carId, categoryId: draft.categoryId, qualityId: draft.qualityId, statusId: draft.statusId, manufacturerCode: draft.manufacturerCode, additionalCodes: draft.additionalCodes || "" }, price, currency: source.currency };
+  const modelEvidence = fitmentOrigin === "manual" ? "Wybor reczny" : fitmentOrigin === "technical" ? "Model roboczy marki - zgodnosc niepotwierdzona" : fitmentOrigin ? fitmentOrigin.startsWith("catalog") ? "Katalog Allegro - pelny MPN" : "Pasuje do Allegro" : "Dane oferty";
+  return { ok: true, category: { id: draft.categoryId, name: categoryNames.slice().reverse().join(" / ") }, vehicle: { brand: brand?.name || brandId, model: model!.name, usedFallback, evidence: `${modelEvidence}${yearEvidence ? `. ${yearEvidence.reason}` : ""}`, ...(yearEvidence ? { year, yearSource: yearEvidence.source } : {}) }, prepared: { brandId, modelId, donorId: car.carId, categoryId: draft.categoryId, qualityId: draft.qualityId, statusId: draft.statusId, manufacturerCode: draft.manufacturerCode, additionalCodes: draft.additionalCodes || "" }, price, currency: source.currency };
 }
