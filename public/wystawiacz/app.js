@@ -510,20 +510,24 @@ categoryInput.addEventListener("change", () => {
 
 addButton.addEventListener("click", () => addCurrentProductToList());
 marketedBeforeGpsrInput.addEventListener("change", () => { gpsrDetails.open = !marketedBeforeGpsrInput.checked; });
-publishCurrentButton.addEventListener("click", async () => {
+publishCurrentButton.addEventListener("click", () => publishCurrentTarget("allegro"));
+async function publishCurrentTarget(target) {
   if (publishCurrentButton.disabled) return;
   publishCurrentButton.disabled = true;
   addButton.disabled = true;
+  for(const id of ["publishOvokoCurrentButton","publishBothCurrentButton"])if(document.getElementById(id))document.getElementById(id).disabled=true;
   try {
     const product = addCurrentProductToList();
-    if (product) await publishProduct(product.id);
+    if (product) await publishProduct(product.id, target);
   } finally {
     publishCurrentButton.disabled = false;
     addButton.disabled = false;
+    for(const id of ["publishOvokoCurrentButton","publishBothCurrentButton"])if(document.getElementById(id))document.getElementById(id).disabled=false;
   }
-});
+}
 
 function addCurrentProductToList() {
+  if(activeProductId&&state.products.find(item=>item.id===activeProductId)?.ovokoNativeStarted){showToast("Rozpoczety szkic Ovoko ma zapisane dane. Sprawdz wynik lub ponow Ovoko.");return;}
   if (activeProductId && publishingProducts.has(activeProductId)) {
     showToast("Ta aukcja jest w trakcie wystawiania. Poczekaj na wynik.");
     return;
@@ -578,6 +582,7 @@ function addCurrentProductToList() {
     vehicleDescriptionBlock: state.vehicleDescriptionBlock || null,
     sourceVehicleTitle: state.sourceVehicleTitle || "",
     selectedVehicleId: state.selectedVehicleId,
+    vehicleSnapshot: getSelectedVehicle() ? {...getSelectedVehicle()} : null,
     ovokoListing: window.ListingOvoko?.capture(getSelectedVehicle())
   };
 
@@ -660,6 +665,7 @@ function updateSummary() {
   ownOffers.refresh();
   renderDescriptionPreview();
   detectProductDetails();
+  window.ListingOvoko?.scheduleCategory();
   if (state.requiredParameters.length) {
     applyAutomaticParameterValues();
     syncRenderedParameterValues();
@@ -683,7 +689,7 @@ function renderProducts() {
           <p>Wysyłka: ${escapeHtml(product.shippingRateName || "profil do wybrania")}</p>
           <p>Zwrot: ${escapeHtml(product.returnPolicyName || "brak")} · Reklamacja: ${escapeHtml(product.impliedWarrantyName || "brak")}</p>
           ${product.publishError ? `<p class="publish-error">Błąd Allegro: ${escapeHtml(product.publishError)}</p>` : ""}
-          ${product.ovokoListing?.enabled ? `<p>Ovoko: ${escapeHtml(product.ovokoListing.price)} / ${escapeHtml(product.ovokoListing.vehicleName)}. ${escapeHtml(product.ovokoStatus || "Do wystawienia")}</p>${product.ovokoError ? `<p class="publish-error">${escapeHtml(product.ovokoError)}. Allegro nie bedzie wystawione ponownie.</p>` : ""}` : ""}
+          ${product.ovokoListing?.price || product.ovokoListing?.enabled ? `<p class="ovoko-field">Ovoko: ${escapeHtml(product.ovokoListing.price)} PLN. ${escapeHtml(product.ovokoStatus || "")}</p>${product.ovokoError ? `<p class="publish-error">${escapeHtml(product.ovokoError)}</p>` : ""}` : ""}
         </div>
         <div class="product-price">
           <label>
@@ -691,11 +697,13 @@ function renderProducts() {
           </label>
           <span>${escapeHtml(product.publishStatus || (product.allegroOfferId ? "WYSTAWIONO" : "GOTOWE"))}</span>
         </div>
-        <button class="publish-button" type="button" data-publish-product-id="${escapeHtml(product.id)}" ${publishingProducts.has(product.id) || product.allegroOfferId && (!product.ovokoListing?.enabled || product.ovokoResult?.done) ? "disabled" : ""}>
-          ${product.allegroOfferId ? product.ovokoListing?.enabled && !product.ovokoResult?.done ? "Ponow tylko Ovoko" : "Wystawiona" : product.ovokoListing?.enabled ? "Wystaw Allegro + Ovoko" : "Wystaw"}
+        <button class="publish-button" type="button" data-publish-product-id="${escapeHtml(product.id)}" ${publishingProducts.has(product.id) || product.ovokoNativeStarted || product.allegroOfferId ? "disabled" : ""}>
+          ${product.allegroOfferId ? "Wystawiona Allegro" : "Wystaw Allegro"}
         </button>
         <div class="product-row-actions">
-          ${product.allegroOfferId && product.ovokoListing?.enabled && !product.ovokoResult?.done ? `<button type="button" data-edit-ovoko-product-id="${escapeHtml(product.id)}" ${publishingProducts.has(product.id) ? "disabled" : ""}>Popraw Ovoko</button>` : ""}
+          <button class="ovoko-button" type="button" data-ovoko-target="ovoko" data-ovoko-product-id="${escapeHtml(product.id)}" ${publishingProducts.has(product.id)||product.ovokoResult?.done?"disabled":""}>${product.ovokoNativeStarted||product.allegroOfferId?"Ponow Ovoko":"Wystaw Ovoko"}</button>
+          ${!product.allegroOfferId&&!product.ovokoNativeStarted?`<button class="ovoko-button" type="button" data-ovoko-target="both" data-ovoko-product-id="${escapeHtml(product.id)}" ${publishingProducts.has(product.id)?"disabled":""}>Wystaw Allegro i Ovoko</button>`:""}
+          ${!product.ovokoResult?.done ? `<button class="ovoko-button" type="button" data-edit-ovoko-product-id="${escapeHtml(product.id)}" ${publishingProducts.has(product.id)||product.ovokoNativeStarted ? "disabled" : ""}>Popraw Ovoko</button>` : ""}
           <button class="edit-button" type="button" data-product-id="${escapeHtml(product.id)}" ${publishingProducts.has(product.id) ? "disabled" : ""}>${product.allegroOfferId ? "Edytuj w Allegro" : "Edytuj"}</button>
           <button class="remove-product-button" type="button" data-remove-product-id="${escapeHtml(product.id)}" aria-label="Usuń z listy: ${escapeHtml(product.title)}" title="Usuń tylko z listy Wystawiacza, nie z Allegro" ${batchPublishing || publishingProducts.has(product.id) ? "disabled" : ""}>Usuń</button>
         </div>
@@ -705,7 +713,7 @@ function renderProducts() {
   productList.querySelectorAll(".publish-button").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
-      publishProduct(button.dataset.publishProductId);
+      publishProduct(button.dataset.publishProductId,"allegro");
     });
   });
   productList.querySelectorAll("[data-edit-ovoko-product-id]").forEach(button => {
@@ -715,6 +723,7 @@ function renderProducts() {
       if(product&&!publishingProducts.has(product.id))window.ListingOvoko?.editPublished(product,renderProducts);
     });
   });
+  productList.querySelectorAll("[data-ovoko-target]").forEach(button=>button.addEventListener("click",event=>{event.stopPropagation();publishProduct(button.dataset.ovokoProductId,button.dataset.ovokoTarget);}));
   productList.querySelectorAll("[data-select-product-id]").forEach(input => {
     input.closest("label").addEventListener("click", event => event.stopPropagation());
     input.addEventListener("change", () => {
@@ -829,6 +838,7 @@ function resetForm() {
   parametersGrid.innerHTML = "";
   state.appendedPartNumber = "";
   state.selectedVehicleId = "";
+  state.quickVehicle = null;
   state.descriptionText = "";
   state.descriptionFullLayout = false;
   state.descriptionVehicleFull = "";
@@ -1131,7 +1141,7 @@ function detectBrandFromTitle() {
 }
 
 function getSelectedVehicle() {
-  return state.vehicles.find((item) => item.id === state.selectedVehicleId) || null;
+  return state.quickVehicle?.id===state.selectedVehicleId ? state.quickVehicle : state.vehicles.find((item) => item.id === state.selectedVehicleId) || null;
 }
 
 function getPreferredManufacturer() {
@@ -1545,6 +1555,8 @@ async function restoreSessionPayload(raw) {
       delete draft.ovokoStatus;
       delete draft.ovokoError;
       delete draft.ovokoNotes;
+      delete draft.ovokoNativeStarted;
+      delete draft.ovokoNativeSource;
       window.SessionSafety.validate({ format: payload.format, products: [draft] });
       state.products.push(draft); editProduct(draft.id); state.products.pop();
       activeProductId = state.products.some(p => p.id === payload.activeProductId && !p.allegroOfferId) ? payload.activeProductId : "";
@@ -1946,10 +1958,10 @@ function renderVehicleButtons() {
   });
 }
 
-function useVehicle(id) {
-  const vehicle = state.vehicles.find((item) => item.id === id);
+function useVehicle(id, quickVehicle = null) {
+  const vehicle = quickVehicle || state.vehicles.find((item) => item.id === id);
   if (!vehicle) return;
-  const previousVehicle = state.vehicles.find((item) => item.id === state.selectedVehicleId);
+  const previousVehicle = getSelectedVehicle();
   let title = titleInput.value.trim();
   if (state.sourceVehicleTitle && !previousVehicle) title = window.TitleSuggestions.partName(title);
   if (previousVehicle?.short) title = title.replace(new RegExp(`\\s*${escapeRegExp(previousVehicle.short)}\\s*`, "i"), " ").trim();
@@ -1957,6 +1969,7 @@ function useVehicle(id) {
   if (part) title = title.replace(new RegExp(`\\s*${escapeRegExp(part)}\\s*$`, "i"), "").trim();
   titleInput.value = `${title}${title ? " " : ""}${vehicle.short}${part ? ` ${part}` : ""}`.trim();
   state.selectedVehicleId = id;
+  state.quickVehicle = quickVehicle;
   window.ListingOvoko?.refreshVehicle();
   state.appendedPartNumber = part;
   const replacedBlock = descriptionEditor.replaceVehicle(vehicle);
@@ -1996,11 +2009,23 @@ function openSearch(baseUrl, query) {
 }
 
 const publishingProducts = new Set();
-async function publishProduct(id) {
+async function publishProduct(id, target) {
   if (publishingProducts.has(id)) return;
   if (activeProductId === id) saveActiveProductDraft();
   const product = state.products.find((item) => item.id === id);
   if (!product) return;
+  if(product.ovokoNativeStarted&&target&&target!=="ovoko"){showToast("Ta pozycja jest juz wysylana tylko do Ovoko. Nie tworzymy drugiej publikacji.");return;}
+  if(target){
+    const mode=product.allegroOfferId&&target==="ovoko"?"both":target;
+    product.ovokoListing={price:"",stockMode:"shared",categoryId:"",vehicleId:"",vehicleName:"",...product.ovokoListing,enabled:mode!=="allegro",target:mode};
+  }
+  if(!product.allegroOfferId&&product.ovokoListing?.target==="ovoko"){
+    if(!product.title||!Number.isInteger(product.stock)||product.stock<1){showToast("Uzupelnij tytul i sztuki.");return;}
+    if(!product.ovokoNativeSource&&(!product.photoNames?.length||product.photoNames.some(name=>!state.localPhotosByName.has(name)))){showToast("Wskaz zdjecia czesci.");return;}
+    publishingProducts.add(id);
+    try{await window.ListingOvoko.publishNative(product,renderProducts);}finally{publishingProducts.delete(id);renderProducts();}
+    return;
+  }
   if (product.allegroOfferId || product.publishStatus === "WYSTAWIONO") {
     if (product.allegroOfferId && product.ovokoListing?.enabled && !product.ovokoResult?.done) {
       publishingProducts.add(id);
@@ -2090,7 +2115,7 @@ function applyDefaultAfterSalesToProduct(product) {
 
 function validateProductBeforePublish(product) {
   if (product.catalogLinkRequested && !product.catalogProduct) return "Wybierz produkt z katalogu albo odznacz Lacz z katalogiem.";
-  if (product.descriptionText?.includes("{{CZESC}}") && !window.DescriptionEditor.partTitle(product.title, state.vehicles.find(v => v.id === product.selectedVehicleId), product.enteredPartNumber)) return "Nie rozpoznano nazwy czesci bez auta. Wybierz auto z listy lub zastap blok w opisie wlasnym tekstem.";
+  if (product.descriptionText?.includes("{{CZESC}}") && !window.DescriptionEditor.partTitle(product.title, product.vehicleSnapshot || state.vehicles.find(v => v.id === product.selectedVehicleId), product.enteredPartNumber)) return "Nie rozpoznano nazwy czesci bez auta. Wybierz auto z listy lub zastap blok w opisie wlasnym tekstem.";
   if (!state.allegroConnected) return "Najpierw połącz konto Allegro na świeżej wersji programu.";
   if (!product.title) return "Brakuje tytułu.";
   const titleError = window.TitleEditor.error(product.title);
@@ -2314,7 +2339,7 @@ function buildAfterSalesServices(product) {
 
 function buildProductDescriptionForPublish(product, imageUrls) {
   const mainImageUrl = imageUrls[0] || "";
-  const vehicle = state.vehicles.find(item => item.id === product.selectedVehicleId) || { full: product.descriptionVehicleFull || "" };
+  const vehicle = product.vehicleSnapshot || state.vehicles.find(item => item.id === product.selectedVehicleId) || { full: product.descriptionVehicleFull || "" };
   const text = window.DescriptionEditor.descriptionHtml(product.descriptionText || "Część używana 100% sprawna", product.title, vehicle, product.descriptionFullLayout === true, product.enteredPartNumber);
   return {
     sections: [
@@ -2407,6 +2432,7 @@ function editProduct(id) {
   const product = state.products.find((item) => item.id === id);
   if (!product) return;
   if (publishingProducts.has(id)) return;
+  if(product.ovokoNativeStarted){showToast("Rozpoczety szkic Ovoko: sprawdz wynik lub ponow tylko Ovoko.");return;}
   if (product.allegroOfferId) { openPublishedOffer(product); return; }
   ownOffers.clear();
   activeProductId = id;
@@ -2432,6 +2458,7 @@ function editProduct(id) {
   renderAfterSalesInputs(product);
   state.appendedPartNumber = product.enteredPartNumber || "";
   state.selectedVehicleId = product.selectedVehicleId || "";
+  state.quickVehicle = product.vehicleSnapshot || null;
   window.ListingOvoko?.restore(product);
   state.descriptionText = product.descriptionText || "Część używana 100% sprawna";
   state.descriptionFullLayout = product.descriptionFullLayout === true;
@@ -2463,6 +2490,7 @@ function navigateProduct(direction) {
 function saveActiveProductDraft() {
   const product = state.products.find((item) => item.id === activeProductId);
   if (!product) return;
+  if(product.ovokoNativeStarted)return;
   Object.assign(product, getFormProduct(product.id));
   renderProducts();
 }
@@ -2503,6 +2531,7 @@ function getFormProduct(id) {
   product.vehicleDescriptionBlock = state.vehicleDescriptionBlock || null;
   product.sourceVehicleTitle = state.sourceVehicleTitle || "";
   product.selectedVehicleId = state.selectedVehicleId;
+  product.vehicleSnapshot = getSelectedVehicle() ? {...getSelectedVehicle()} : null;
   product.ovokoListing = window.ListingOvoko?.capture(getSelectedVehicle());
   return product;
 }
@@ -2537,10 +2566,8 @@ function showToast(message) {
 window.ListingOvoko?.mount({
   selected: getSelectedVehicle,
   toast: showToast,
-  importVehicle(vehicle) {
-    const existing = state.vehicles.find(row => row.libraryId === vehicle.libraryId);
-    if (!existing) state.vehicles.push(vehicle);
-    renderVehicles();
-  }
+  upload: product => uploadProductImages(product),
+  publishCurrent: publishCurrentTarget,
+  useHistory(vehicle) { useVehicle(vehicle.id,vehicle); }
 });
 

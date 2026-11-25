@@ -1,10 +1,23 @@
-.workspace-ovoko-panel { margin: 12px 0; padding: 12px; border: 1px solid #454951; border-radius: 10px; }
+.ovoko-field, .workspace-ovoko-panel { background: #102649; color: #edf4ff; border: 1px solid #355987; border-radius: 8px; padding: 8px 10px; }
+.ovoko-field input, .ovoko-field select, .workspace-ovoko-panel input:not([type=checkbox]), .workspace-ovoko-panel select { background: #172f52; color: #fff; border-color: #46678f; }
+.ovoko-field input::placeholder { color: #adbed7; }
+.ovoko-field .suffix-input b { color: #d9e7ff; }
+.ovoko-field > span { color: #d9e7ff !important; }
+.ovoko-category { display: grid; gap: 4px; margin-top: 7px; font-size: 12px; }
+.ovoko-category select { width: 100%; min-width: 0; padding: 6px; }
+.pricing-final-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.pricing-final-row > .field { flex: 1 1 180px; }
+.ovoko-button, .product-card .ovoko-button { background: #163963 !important; color: #f1f6ff !important; border: 1px solid #4776ac !important; }
+.summary-actions { flex-wrap: wrap; }
+.workspace-ovoko-panel { margin: 8px 0; }
 .workspace-ovoko-panel [hidden] { display: none !important; }
-.workspace-ovoko-panel p { font-size: 13px; margin: 8px 0; }
-.workspace-ovoko-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap: 10px; margin: 10px 0; }
-.workspace-ovoko-grid label { display: grid; gap: 5px; }
+.workspace-ovoko-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(160px,1fr)); gap: 8px; margin-top: 8px; }
+.workspace-ovoko-grid label { display: grid; gap: 4px; font-size: 12px; }
 .workspace-ovoko-panel input:not([type=checkbox]), .workspace-ovoko-panel select { max-width: 100%; min-width: 0; }
 .workspace-ovoko-panel input[type=checkbox] { width: auto; }
-.workspace-cars-library { display: flex; flex-wrap: wrap; gap: 8px; max-height: 220px; overflow: auto; margin: 10px 0; }
+.workspace-cars-library { display: flex; flex-wrap: wrap; gap: 8px; max-height: 55vh; overflow: auto; margin-top: 10px; }
 .vehicle-form > .workspace-ovoko-panel { grid-column: 1 / -1; width: 100%; }
-dialog.workspace-ovoko-panel { margin: auto; width: min(650px, calc(100vw - 32px)); }
+dialog.workspace-ovoko-panel, #workspaceCarsDialog { margin: auto; width: min(700px, calc(100vw - 32px)); padding: 16px; border-radius: 10px; }
+#workspaceCarsSearch { width: 100%; }
+#workspaceCarsDialog { border: 1px solid var(--line); background: #fff; color: var(--ink); box-shadow: 0 24px 80px #14213d33; }
+#workspaceCarsDialog::backdrop { background: #14213d88; }

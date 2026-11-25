@@ -7,6 +7,7 @@ try{
  await db.exec("create schema auth;create table auth.users(id uuid primary key);create role anon;create role authenticated;create role service_role bypassrls;create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;grant usage on schema auth to authenticated;grant execute on function auth.uid() to authenticated");
  await db.query("insert into auth.users values($1),($2)",[owner,other]);
  const sql=await readFile(new URL("../supabase/027_workspace_vehicles.sql",import.meta.url),"utf8");await db.exec(sql);await db.exec(sql);
+ const nativeSql=await readFile(new URL("../supabase/028_workspace_ovoko_drafts.sql",import.meta.url),"utf8");await db.exec(nativeSql);await db.exec(nativeSql);
  const payload={manufacturer:"VW",short:"Golf",buttonLabel:"",full:"Golf VII",ovoko:{modelId:"164",year:"2015"}};
  await db.query("insert into workspace_vehicles(owner_id,id,payload) values($1,$2,$3),($4,$2,$3)",[owner,id,payload,other]);
  const reserve=(body=payload)=>db.query("select * from reserve_workspace_vehicle($1,$2,$3,$4,$5,$6)",[owner,id,body,account,hash,crypto.randomUUID()]);
@@ -14,11 +15,19 @@ try{
  assert.equal((await reserve()).rows.length,1);assert.equal((await reserve()).rows.length,0);
  await assert.rejects(db.query("update workspace_vehicles set payload=$1 where owner_id=$2 and id=$3",[{...payload,ovoko:{modelId:"165",year:"2015"}},owner,id]),/immutable/);
  await db.query("update workspace_vehicles set payload=$1 where owner_id=$2 and id=$3",[{...payload,short:"New name"},owner,id]);
+ await db.query("insert into workspace_ovoko_drafts(owner_id,product_id,ovoko_account,snapshot_hash,quantity,attempt_id) values($1,$2,$3,$4,2,$5)",[owner,id,account,hash,crypto.randomUUID()]);
+ const attempt=crypto.randomUUID();
+ assert.equal((await db.query("update workspace_ovoko_drafts set state='sending',attempt_id=$1 where owner_id=$2 and product_id=$3 and state='ready' and completed=0 returning *",[attempt,owner,id])).rows.length,1);
+ assert.equal((await db.query("update workspace_ovoko_drafts set state='sending' where owner_id=$1 and state='ready' returning *",[owner])).rows.length,0);
+ await assert.rejects(db.query("update workspace_ovoko_drafts set completed=1"),/check constraint/);
+ await db.query("update workspace_ovoko_drafts set state='ready',completed=1,part_ids=array['101'] where attempt_id=$1",[attempt]);
  await db.exec(`reset role;set role authenticated;set request.jwt.claim.sub='${owner}'`);
  assert.equal((await db.query("select * from workspace_vehicles")).rows.length,1);
  assert.equal((await db.query("select * from workspace_vehicle_ovoko")).rows.length,1);
+ assert.equal((await db.query("select * from workspace_ovoko_drafts")).rows.length,1);
  await assert.rejects(reserve(),/permission denied/);
  await assert.rejects(db.query("delete from workspace_vehicles"),/permission denied/);
+ await assert.rejects(db.query("update workspace_ovoko_drafts set state='ready'"),/permission denied/);
  await db.exec("reset role;set role anon");await assert.rejects(db.query("select * from workspace_vehicles"),/permission denied/);
  console.log("Workspace vehicle SQL: rerunnable migration, owner RLS, no direct client writes, atomic snapshot reservation, immutable linked donor and permitted descriptive edits passed.");
 }finally{await db.close();}

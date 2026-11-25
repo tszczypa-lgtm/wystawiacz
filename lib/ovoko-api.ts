@@ -18,6 +18,7 @@ import { manualOvokoOverride } from "./ovoko-manual-override";
 import { ovokoYearSuggestion } from "./ovoko-year-suggestion";
 import { workspaceVehicleOvoko } from "./workspace-vehicle-ovoko";
 import { workspaceListingOvoko } from "./workspace-listing-ovoko";
+import { workspaceNativeOvoko, workspaceOvokoCategory } from "./workspace-native-ovoko";
 
 type OvokoEnv = AccountEnv & OvokoKeyEnv & OvokoPublishEnv & { OVOKO_TEST_ENABLED?: string; SALES_SYNC_ENABLED?: string };
 const attempts = new Map<string, number[]>();
@@ -58,20 +59,22 @@ export async function handleOvokoApi(request: Request, env: OvokoEnv): Promise<R
       const status = storageReady ? await ovokoConnectionStatus(context) : { connected: false, verifiedAt: null };
       return reply({ allowed: true, readOnly: true, storageReady, credentialsStored: status.connected, ...status });
     }
-    if (!["/api/ovoko/test", "/api/ovoko/read", "/api/ovoko/connect", "/api/ovoko/disconnect", "/api/ovoko/publish", "/api/ovoko/create-car", "/api/ovoko/transfer-inventory", "/api/ovoko/bulk", "/api/ovoko/coordination-review", "/api/ovoko/publication-recovery", "/api/ovoko/sales-sync", "/api/ovoko/reverse-sales-sync", "/api/ovoko/inventory-actions", "/api/ovoko/link-recovery", "/api/ovoko/manual-override", "/api/ovoko/year-suggestion", "/api/ovoko/workspace-vehicle", "/api/ovoko/workspace-listing"].includes(url.pathname)) return reply({ message: "Nieznana operacja Ovoko." }, 404);
+    if (!["/api/ovoko/test", "/api/ovoko/read", "/api/ovoko/connect", "/api/ovoko/disconnect", "/api/ovoko/publish", "/api/ovoko/create-car", "/api/ovoko/transfer-inventory", "/api/ovoko/bulk", "/api/ovoko/coordination-review", "/api/ovoko/publication-recovery", "/api/ovoko/sales-sync", "/api/ovoko/reverse-sales-sync", "/api/ovoko/inventory-actions", "/api/ovoko/link-recovery", "/api/ovoko/manual-override", "/api/ovoko/year-suggestion", "/api/ovoko/workspace-vehicle", "/api/ovoko/workspace-listing", "/api/ovoko/workspace-native", "/api/ovoko/workspace-category"].includes(url.pathname)) return reply({ message: "Nieznana operacja Ovoko." }, 404);
     if (request.method !== "POST") return reply({ message: "Nieprawidlowa metoda." }, 405);
     if (request.headers.get("Origin") !== url.origin || (env.APP_ORIGIN && env.APP_ORIGIN !== url.origin)) return reply({ message: "Nieprawidlowe zrodlo zadania." }, 403);
     if (request.headers.get("Content-Type")?.split(";")[0].trim() !== "application/json") return reply({ message: "Nieprawidlowy format formularza." }, 415);
     let input: unknown;
-    try { input = JSON.parse(await boundedText(request, ["/api/ovoko/publish", "/api/ovoko/bulk", "/api/ovoko/workspace-listing"].includes(url.pathname) ? 200000 : url.pathname==="/api/ovoko/manual-override" ? 20000 : 8192)); } catch (error) { if (error instanceof OvokoError) throw error; throw new OvokoError(400, "Nieprawidlowy formularz."); }
+    try { input = JSON.parse(await boundedText(request, ["/api/ovoko/publish", "/api/ovoko/bulk", "/api/ovoko/workspace-listing", "/api/ovoko/workspace-native"].includes(url.pathname) ? 200000 : url.pathname==="/api/ovoko/manual-override" ? 20000 : 8192)); } catch (error) { if (error instanceof OvokoError) throw error; throw new OvokoError(400, "Nieprawidlowy formularz."); }
     if (!input || typeof input !== "object" || Array.isArray(input)) throw new OvokoError(400, "Nieprawidlowy formularz.");
     const values = input as Record<string, unknown>;
-    if (["/api/ovoko/workspace-vehicle", "/api/ovoko/workspace-listing"].includes(url.pathname)) {
+    if (["/api/ovoko/workspace-vehicle", "/api/ovoko/workspace-listing", "/api/ovoko/workspace-native", "/api/ovoko/workspace-category"].includes(url.pathname)) {
       const phase=url.pathname==="/api/ovoko/workspace-vehicle"?(values.create===true?"create":"read"):(values.operation==="item"?"item":"prepare");
       const key = `${context.user.id}:${url.pathname}:${phase}`, now = Date.now(), recent = (attempts.get(key) || []).filter(t => now-t<60000);
-      if (recent.length>=(phase==="read"?60:10)) throw new OvokoError(429,"Osiagnieto limit operacji Ovoko na minute. Odczekaj chwile.");
+      if (recent.length>=(phase==="read"?60:phase==="prepare"?30:10)) throw new OvokoError(429,"Osiagnieto limit operacji Ovoko na minute. Odczekaj chwile.");
       if(attempts.size>=1000&&!attempts.has(key))attempts.delete(attempts.keys().next().value!);
       attempts.set(key,[...recent,now]);
+      if(url.pathname==="/api/ovoko/workspace-native")return reply(await workspaceNativeOvoko(request,env,context,values));
+      if(url.pathname==="/api/ovoko/workspace-category")return reply(await workspaceOvokoCategory(env,context,values));
       if(url.pathname==="/api/ovoko/workspace-listing")return reply(await workspaceListingOvoko(request,env,context,values));
       if(Object.keys(values).some(k=>!["vehicleId","create"].includes(k))||typeof values.create!=="boolean")throw new OvokoError(400,"Nieprawidlowe dane samochodu.");
       return reply(await workspaceVehicleOvoko(request,env,context,values.vehicleId,values.create));

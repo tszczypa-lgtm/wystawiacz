@@ -11,6 +11,12 @@ export async function handleWorkspaceApi(request: Request, env: AccountEnv) {
     if (context.account.suspended) return reply({ message: "Konto zawieszone." }, 403);
     const url = new URL(request.url);
     const path = url.pathname.slice("/api/workspace".length);
+    if(path==="/vehicle-history"&&request.method==="GET"){
+      const offset=url.searchParams.get("offset")||"0";
+      if(!/^\d{1,7}$/.test(offset))return reply({message:"Nieprawidlowa strona historii."},400);
+      const sessions=await context.db(`workspace_sessions?owner_id=eq.${context.user.id}&select=id,name,updated_at,vehicles:payload->vehicles&order=updated_at.desc,id&limit=100&offset=${offset}`);
+      return reply({sessions});
+    }
     if(path==="/vehicles"){
       try{return reply(await workspaceVehicles(request,context));}
       catch(error){if(error instanceof OvokoError)throw error;throw new OvokoError(503,"Nie zapisano lub nie odczytano Moich samochodow. Sprawdz migracje 027 i dostep do bazy.");}

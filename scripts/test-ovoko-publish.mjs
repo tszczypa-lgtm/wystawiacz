@@ -13,7 +13,7 @@ function load(file) {
   return module.exports;
 }
 const { handleOvokoApi } = load(path.join(root, "lib/ovoko-api.ts"));
-const { sealConnection } = load(path.join(root, "lib/allegro-api.ts"));
+const { sealConnection, openConnection } = load(path.join(root, "lib/allegro-api.ts"));
 const { ovokoWriteDigest } = load(path.join(root, "lib/ovoko-write-client.ts"));
 const workspaceCarId="30000000-0000-4000-8000-000000000001";
 const workspaceCar={manufacturer:"Audi",short:"Audi A4",buttonLabel:"A4",full:"Audi A4 2005",ovoko:{brandId:"1",modelId:"11",year:"2005",vin:"WAUZZZ8K0AA000001",engineCode:"",capacity:"",power:"",mileage:"",color:"",place:""}};
@@ -24,11 +24,12 @@ let user = 1, admin, suspended, owns, stock, bundle, mode, donorModel, duplicate
 let providerPresent, inventoryReads;
 const owner = () => `00000000-0000-0000-0000-${String(user).padStart(12, "0")}`;
 const records = new Map(), calls = [];
-let stockGroup = null, stockUnits = [], missingStockSchema = false;
+let stockGroup = null, stockUnits = [], missingStockSchema = false, nativeRow=null;
 const snapshot = { title: "AUDI A4 POMPA 0281010038", price: "100.00", currency: "PLN", stock: 1, status: "ACTIVE", condition: "used", images: ["https://a.allegroimg.com/photo.jpg", "https://a.allegroimg.com/second.jpg", "https://a.allegroimg.com/label.jpg"] };
 const payload = () => ({ offerId: "101", brandId: "1", modelId: "11", donorId: "13", categoryId: "3", qualityId: "0", statusId: "0", manufacturerCode: "0281010038", additionalCodes: extraCodes, price: "100.00", currency: "PLN", notes: "Opis & uwagi + numer", confirmSingle: true, expectedSource: { ...snapshot } });
 const req = (body = payload(), headers = {}) => new Request("https://publish.test/api/ovoko/publish", { method: "POST", headers: { Authorization: "Bearer fixture", Origin: "https://publish.test", "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
 function reset() {
+  nativeRow=null;
   stockGroup = null; stockUnits = []; missingStockSchema = false;
   providerPresent = false; inventoryReads = 0;
   fitmentMode = "none";
@@ -55,6 +56,18 @@ globalThis.fetch = async (input, options = {}) => {
   if(url.pathname==="/rest/v1/workspace_vehicle_ovoko"){
     assert.equal(url.searchParams.get("owner_id"),`eq.${owner()}`);assert.equal(url.searchParams.get("vehicle_id"),`eq.${workspaceCarId}`);
     return Response.json([{state:"created",car_id:"13",request_hash:await ovokoWriteDigest(JSON.stringify(workspaceCar.ovoko))}]);
+  }
+  if(url.pathname==="/rest/v1/workspace_ovoko_drafts"){
+    if(method==="POST"){
+      const data=JSON.parse(options.body);assert.equal(data.owner_id,owner());
+      if(nativeRow)return Response.json([]);
+      nativeRow={...data,state:"ready",completed:0,part_ids:[]};return Response.json([nativeRow]);
+    }
+    assert.equal(url.searchParams.get("owner_id"),`eq.${owner()}`);
+    if(method==="GET")return Response.json(nativeRow?[nativeRow]:[]);
+    const filters=[...url.searchParams].filter(([,value])=>value.startsWith("eq."));
+    if(!nativeRow||filters.some(([key,value])=>String(nativeRow[key])!==value.slice(3)))return Response.json([]);
+    Object.assign(nativeRow,JSON.parse(options.body));return Response.json([nativeRow]);
   }
   if (url.pathname === "/rest/v1/ovoko_vehicle_creations") { assert.equal(method, "GET", "Bulk reuses the saved vehicle without creating a duplicate"); return Response.json([]); }
   if (url.pathname === "/rest/v1/ovoko_stock_groups") return missingStockSchema ? new Response("missing", { status: 404 }) : Response.json(stockGroup ? [stockGroup] : []);
@@ -143,6 +156,7 @@ globalThis.fetch = async (input, options = {}) => {
     assert.equal(url.searchParams.get("car_ids"), "13"); return Response.json({ status_code: "R200", data: [{ id: "13", car_model: donorModel }], pagination: { page: 1, limit: 1, total_count: 1 } });
   }
   if (url.pathname === "/v2/get/parts") {
+    if(url.searchParams.get("external_ids")?.startsWith("tymo:draft:"))return Response.json({status_code:"R200",data:[],pagination:{page:1,limit:1,total_count:0}});
     assert.equal(url.searchParams.has("part_ids"), false, "No undocumented filter can be trusted to prove absence");
     const external = url.searchParams.has("external_ids");
     if (external) assert.match(url.searchParams.get("external_ids"), /^tymo:555:101(?::u:\d+)?$/);
@@ -160,7 +174,9 @@ globalThis.fetch = async (input, options = {}) => {
     return Response.json({ status_code: "R200", data, pagination: { page: "1", limit: external ? "1" : "100", total_count: data.length } });
   }
   assert.equal(url.pathname, "/crm/importPart", "No arbitrary mutation, update, delete, status change, donor or warehouse operations");
-  if (stockGroup) {
+  if(nativeRow){
+    assert.equal(nativeRow.state,"sending");assert.match(form.get("external_id"),/^tymo:draft:[a-f0-9-]+:[a-f0-9-]+:u:\d+$/);
+  } else if (stockGroup) {
     assert.equal(records.size, 0, "Groups never create a legacy single journal row");
     assert.equal(stockUnits.find(row => row.external_id === form.get("external_id"))?.state, "sending");
     assert.match(form.get("external_id"), /^tymo:555:101:u:\d+$/);
@@ -181,7 +197,7 @@ globalThis.fetch = async (input, options = {}) => {
   if (mode === "unsafe-code") return Response.json({ status_code: "private-token", msg: "private-provider-error" });
   if (mode === "missing-id") return Response.json({ status_code: "R200" });
   providerPresent = true;
-  return Response.json({ status_code: "R200", part_id: stockGroup ? 77 + writes : 77 });
+  return Response.json({ status_code: "R200", part_id: stockGroup || nativeRow ? 77 + writes : 77 });
 };
 try {
   reset(); assert.equal((await handleOvokoApi(req(), { ...env, OVOKO_PUBLISH_ENABLED: "false" })).status, 503); assert.equal(writes, 0);
@@ -539,6 +555,39 @@ try {
   const stale=await listing({...publishBody,expectedSource:{...plan.expectedSource,stock:2}});assert.equal(stale.status,409);assert.equal(writes,1);
   const foreign=await listing({...listingBody,binding:{...listingBody.binding,sellerId:"666"}});assert.equal(foreign.status,409);
   console.log("Workspace listing: exact physical donor, separate price, owned source snapshot, no model guessing, forged donor rejection, durable replay and account/source change guards passed.");
+  reset();bulk=true;
+  const autoListing=await listing({...listingBody,vehicleId:""});assert.equal(autoListing.status,200,await autoListing.clone().text());assert.equal((await autoListing.json()).prepared.donorId,"13","No saved donor uses the same transfer matching");
+  reset();bulk=true;
+  const nativeBody={operation:"prepare",productId:"40000000-0000-4000-8000-000000000001",vehicleId:"",categoryId:"",source:{title:originalTitle,notes:"Opis & uwagi + numer",images:snapshot.images,stock:2,condition:"used",number:"0281010038",price:"100.00",currency:"PLN"}};
+  const native=body=>handleOvokoApi(new Request("https://publish.test/api/ovoko/workspace-native",{method:"POST",headers:{Authorization:"Bearer fixture",Origin:"https://publish.test","Content-Type":"application/json"},body:JSON.stringify(body)}),env);
+  const nativePrepare=await native(nativeBody);assert.equal(nativePrepare.status,200,await nativePrepare.clone().text());
+  const nativePlan=await nativePrepare.json();assert.equal(nativePlan.prepared.donorId,"13");
+  assert.ok(!calls.some(call=>call.url.startsWith("https://api.allegro.pl")),"Ovoko-only preparation never reads or creates an Allegro offer");
+  const nativeItem={...nativeBody,operation:"item",ticket:nativePlan.ticket};
+  assert.equal((await native({...nativeItem,productId:"40000000-0000-4000-8000-000000000002"})).status,409);assert.equal(writes,0);
+  assert.equal((await native({...nativeItem,ticket:nativePlan.ticket.slice(0,-4)+"xxxx"})).status,400);assert.equal(writes,0);
+  assert.equal((await native({...nativeItem,source:{...nativeBody.source,price:"99.00"}})).status,409);assert.equal(writes,0);
+  const firstNative=await native(nativeItem);assert.equal(firstNative.status,200,await firstNative.clone().text());assert.equal((await firstNative.json()).moreUnits,true);assert.equal(writes,1);
+  const lastNative=await native(nativeItem);assert.equal(lastNative.status,200,await lastNative.clone().text());assert.equal((await lastNative.json()).moreUnits,false);assert.equal(writes,2);
+  assert.equal((await native(nativeItem)).status,200);assert.equal(writes,2);assert.equal(nativeRow.part_ids.length,2);
+  assert.ok(!calls.some(call=>call.url.startsWith("https://api.allegro.pl")),"Ovoko-only publication never creates or mutates Allegro");
+  reset();bulk=true;mode="timeout";
+  const uncertainNative=await native(nativeBody);assert.equal(uncertainNative.status,200);
+  const uncertainItem={...nativeBody,operation:"item",ticket:(await uncertainNative.json()).ticket};
+  assert.equal((await native(uncertainItem)).status,409);assert.equal(nativeRow.state,"uncertain");assert.equal(writes,1);
+  assert.equal((await native(uncertainItem)).status,409);assert.equal(writes,1);
+  reset();bulk=true;
+  const raceTicket=(await (await native(nativeBody)).json()).ticket;
+  const races=await Promise.all([native({...nativeBody,operation:"item",ticket:raceTicket}),native({...nativeBody,operation:"item",ticket:raceTicket})]);
+  assert.deepEqual(races.map(row=>row.status).sort(),[200,409]);assert.equal(writes,1,"Concurrent native publication reserves one ordinal once");
+  reset();bulk=true;
+  const cleanTicket=(await (await native(nativeBody)).json()).ticket;
+  const cleanPlan=await openConnection(cleanTicket,key,`ovoko-draft:v1:${owner()}`);
+  nativeRow={owner_id:owner(),product_id:nativeBody.productId,ovoko_account:await ovokoWriteDigest(credentials.username),snapshot_hash:cleanPlan.hash,quantity:2,completed:0,part_ids:[],state:"ready",attempt_id:crypto.randomUUID()};
+  const corrected=await native({...nativeBody,source:{...nativeBody.source,price:"99.00"}});assert.equal(corrected.status,200,await corrected.clone().text());
+  assert.notEqual(nativeRow.snapshot_hash,cleanPlan.hash);assert.equal(writes,0,"Unsent drafts can be corrected without manual unlocking");
+  assert.equal((await native({...nativeBody,operation:"item",ticket:cleanTicket})).status,409,"Old preparation cannot send after correction");assert.equal(writes,0);
+  console.log("Native Ovoko: shared transfer matching, no Allegro offers, signed preparation, snapshot fencing, multi-unit progress, replay and uncertain no-retry passed.");
   }
   console.log("Ovoko single + bulk publication: guards, source/target binding, prices, multi-make model lookup, constrained fallback and generation/brand conflicts, car reuse, full photos, durable duplicate locks and uncertain no-retry passed. All services mocked; nothing published live.");
 } finally { globalThis.fetch = originalFetch; Date.now = originalNow; }

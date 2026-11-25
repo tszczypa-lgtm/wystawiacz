@@ -5,7 +5,7 @@ import { publishOvokoPart, type OvokoPublishEnv } from "./ovoko-publish";
 import { createOvokoCar } from "./ovoko-create-car";
 import { workspaceVehicleOvoko } from "./workspace-vehicle-ovoko";
 import { workspaceVehicleId } from "./workspace-vehicles";
-import { initialOvokoDraft, ovokoPublicationBlockers, ovokoSourcePreview, validOvokoCode } from "./ovoko-preparation";
+import { initialOvokoDraft, ovokoPublicationBlockers, ovokoSourcePreview, validOvokoCode, type OvokoSourcePreview } from "./ovoko-preparation";
 import { automaticOvokoBrand, automaticOvokoModel, ovokoAutomaticFields, ovokoModelHasConflict, suggestOvokoBrands, vehicleSuggestionText } from "./ovoko-suggestions";
 import { ovokoCarYear } from "./ovoko-car-selection";
 import { OvokoError, parseOvokoRead, type OvokoReadRow } from "./ovoko-read";
@@ -19,7 +19,8 @@ import type { YearEvidence } from "./ovoko-year-evidence";
 import { lookupWebFitment, selectWebVehicle, webVehicleMismatchMessage } from "./ovoko-web-fitment";
 
 type Context = Awaited<ReturnType<typeof accountContext>>;
-export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, context: Context, input: Record<string, unknown>) {
+export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, context: Context, input: Record<string, unknown>, nativeSource?: OvokoSourcePreview) {
+  if(nativeSource&&input.operation!=="prepare")throw new OvokoError(400,"Szkic obsluguje tylko przygotowanie auta i kategorii.");
   if (env.OVOKO_PUBLISH_ENABLED !== "true") throw new OvokoError(503, "Publikacja Ovoko jest wylaczona.");
   if (!["start", "prepare", "item"].includes(String(input.operation)) || Object.keys(input).some(key => !["operation", "offerId", "adjustment", "binding", "notes", "expectedSource", "prepared", "fallbackVehicle", "overrides", "allowTechnicalModel", "manualVehicle", "stockMode", "workspaceVehicleId"].includes(key))) throw new OvokoError(400, "Nieprawidlowa operacja przenoszenia.");
   if (input.workspaceVehicleId !== undefined && !workspaceVehicleId(input.workspaceVehicleId)) throw new OvokoError(400, "Nieprawidlowy samochod z biblioteki.");
@@ -47,11 +48,11 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
     if (typeof sellerId !== "string" || !/^\d{1,30}$/.test(sellerId)) throw new OvokoError(502, "Nie potwierdzono sprzedawcy.");
     return { ok: true, binding: { sellerId, fingerprint } };
   }
-  const owned = await allegro(`/ovoko-source/${input.offerId}`);
+  const owned = nativeSource ? {sellerId:"0"} : await allegro(`/ovoko-source/${input.offerId}`);
   if (typeof owned.sellerId !== "string" || !/^\d{1,30}$/.test(owned.sellerId)) throw new OvokoError(502, "Nie potwierdzono sprzedawcy oferty.");
   const binding = input.binding as Record<string, unknown> | null;
   if (!binding || binding.sellerId !== owned.sellerId || binding.fingerprint !== fingerprint) throw new OvokoError(409, "Polaczone konto zmienilo sie. Zatrzymano partie; rozpocznij ja ponownie po sprawdzeniu kont.", "account_changed");
-  const source = ovokoSourcePreview(owned.offer, input.offerId as string, () => input.notes as string);
+  const source = nativeSource || ovokoSourcePreview(owned.offer, input.offerId as string, () => input.notes as string);
   const expected = input.expectedSource as Record<string, unknown> | null;
   if (!expected || !sameOvokoMoney(expected.price, source.price) || ["title", "currency", "stock", "status", "condition"].some(key => expected[key] !== source[key as keyof typeof source]) || JSON.stringify(expected.images) !== JSON.stringify(source.images)) throw new OvokoError(409, "Oferta Allegro zmienila sie. Sprawdz dane przed ponownym przeniesieniem.");
   let price: string;
@@ -69,6 +70,8 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
     return { ...result, price, currency: source.currency };
   }
   // Look up the durable source-to-target key before creating even a vehicle record.
+  // Native drafts reuse matching only, with their own publication journal and no Allegro offer.
+  if (!nativeSource) {
   const stock = await readStockPublication(context, account, owned.sellerId, source.id);
   if (stock) {
     checkStockPublication(stock, source.stock, stockMode);
@@ -85,6 +88,7 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
     const row = createdPublication(existing[0], context.user.id);
     if (await ovokoPublicationPresent(ovokoWriteClient(credentials), row.part_id, `tymo:${owned.sellerId}:${source.id}`)) return { ok: true, alreadyCreated: true, partId: row.part_id };
     // Preparation never releases a journal entry. publishOvokoPart rechecks and atomically reserves it.
+  }
   }
   const remote = ovokoWriteClient(credentials), dictionaries: Record<string, OvokoReadRow[]> = {};
   for (const [operation, path] of [["categories", "/get/categories"], ["qualities", "/get/part_quality"], ["statuses", "/get/part_status"], ["brands", "/get/car_brands"]] as const) {
@@ -144,7 +148,7 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
   let fitmentOrigin = input.manualVehicle === true ? "manual" : "";
   let fitmentRows: FitmentRow[] | undefined;
   let exactVehicleText = "";
-  if (input.manualVehicle !== true && (draft.manufacturerCode || !modelId || !draft.categoryId)) {
+  if (!nativeSource && input.manualVehicle !== true && (draft.manufacturerCode || !modelId || !draft.categoryId)) {
     const lookupCode = draft.manufacturerCode.replace(/-/g, "");
     let fitment: Record<string, unknown> | undefined;
     try { fitment = await allegro(`/ovoko-fitment/${source.id}?expand=1${lookupCode ? `&number=${encodeURIComponent(lookupCode)}` : ""}`); }
@@ -191,7 +195,7 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
   let yearEvidence: YearEvidence | null = null;
   const lookupNumber = draft.manufacturerCode.replace(/-/g, "");
   let brand = dictionaries.brands.find(row => row.id === brandId);
-  if (model && brand && !year && !savedCar && lookupNumber) {
+  if (!nativeSource && model && brand && !year && !savedCar && lookupNumber) {
     try {
       yearEvidence = await cachedOvokoYearEvidence(`${context.user.id}:${owned.sellerId}:${fingerprint}:${source.id}:${source.categoryId}:${lookupNumber}:${brandId}:${modelId}`, { source: yearSource, number: lookupNumber, brand, model, models, fitmentRows, allegro: yearAllegroReader(request, env), ovoko: remote });
       year = yearEvidence?.year || "";
@@ -199,7 +203,7 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
   }
   let webMessage = "";
   const readyForVehicleLookup = ovokoPublicationBlockers(source, draft, brandId || "1", modelId || "1").length === 0;
-  if (input.manualVehicle !== true && lookupNumber && readyForVehicleLookup && (!model || !year && !savedCar || fitmentOrigin === "technical")) {
+  if (input.manualVehicle !== true && lookupNumber && readyForVehicleLookup && (nativeSource || !model || !year && !savedCar || fitmentOrigin === "technical")) {
     const web = await lookupWebFitment(env, context.user.id, lookupNumber, brand?.name);
     if (web.pending) return {ok:true,webPending:true,retryAfter:web.retryAfter||5,message:web.message};
     const matched = await selectWebVehicle(web.matches, dictionaries.brands, allowedBrands.map(row => row.id), loadModels, modelId);
