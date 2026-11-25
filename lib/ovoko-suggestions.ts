@@ -147,7 +147,10 @@ function rankOvokoModels(title: string, models: OvokoReadRow[], includeRejected 
   const sourceTokens = vehicleTokens(title), tokens = new Set(sourceTokens), sourceGenerations = new Set(vehicleGenerations(title));
   return models.map(row => {
     const names = vehicleTokens(row.name.split("(")[0]);
-    const matches = [...new Set(names.filter(token => token.length >= 2 && !Object.hasOwn(romanGenerations, token) && !/^(?:mk|mark|gen)/.test(token) && tokens.has(token)))];
+    const meaningful = [...new Set(names.filter(token => token.length >= 2 && !Object.hasOwn(romanGenerations, token) && !/^(?:mk|mark|gen)/.test(token)))];
+    const matches = meaningful.filter(token => tokens.has(token));
+    const aliases = row.name.split("(")[0].split(/[,/]+/).filter(value => value.trim());
+    const unmatched = Math.min(meaningful.filter(token => !tokens.has(token)).length, ...aliases.map(alias => vehicleTokens(alias).filter(token => token.length >= 2 && !Object.hasOwn(romanGenerations, token) && !/^(?:mk|mark|gen)/.test(token) && !tokens.has(token)).length));
     const generation = vehicleTokens(row.name);
     const generations = generation.filter(token => /^[bdefgwlx]\d{1,4}$/.test(token));
     const conflict = generations.some(token => [...tokens].some(source => source[0] === token[0] && /^[bdefgwlx]\d{1,4}$/.test(source))) && !generations.some(token => tokens.has(token));
@@ -155,8 +158,8 @@ function rankOvokoModels(title: string, models: OvokoReadRow[], includeRejected 
     const chassis = generations.filter(token => tokens.has(token));
     const score = (matches.length || chassis.length) && !conflict ? matches.length + chassis.length * 10 + numbered.filter(token => sourceGenerations.has(token)).length * 2 : 0;
     const order = Math.min(...[...matches, ...chassis].map(token => sourceTokens.indexOf(token)), sourceTokens.length);
-    return { ...row, matches, score, order, generationConflict: numberedConflict, chassisConflict: conflict };
-  }).filter(row => row.score > 0 || includeRejected && row.matches.length > 0).sort((a, b) => b.score - a.score || a.order - b.order || a.name.localeCompare(b.name) || a.id.localeCompare(b.id, "en", { numeric: true }));
+    return { ...row, matches, unmatched, score, order, generationConflict: numberedConflict, chassisConflict: conflict };
+  }).filter(row => row.score > 0 || includeRejected && row.matches.length > 0).sort((a, b) => b.score - a.score || a.unmatched - b.unmatched || a.order - b.order || a.name.localeCompare(b.name) || a.id.localeCompare(b.id, "en", { numeric: true }));
 }
 export function ovokoModelHasConflict(title: string, model: OvokoReadRow): boolean {
   return rankOvokoModels(title, [model], true).some(row => row.generationConflict || row.chassisConflict);

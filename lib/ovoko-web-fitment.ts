@@ -52,14 +52,29 @@ function parseResult(data: Record<string, unknown>, number: string): Result {
 }
 export async function selectWebVehicle(matches: WebVehicle[], brands: OvokoReadRow[], allowed: string[], loadModels: (id: string)=>Promise<OvokoReadRow[]>, preferredModel = "") {
   const found=[];
+  const chassisCodes=(name:string)=>new Set((name.toUpperCase().match(/\b[A-Z0-9]{2,5}\b/g)||[]).filter(token=>/^(?:[BDEFGWLXV]\d{1,4}|[1-9][A-Z]\d{1,2}|[A-Z]{2}\d{1,2}|5[GT])$/.test(token)));
+  const withoutGeneration=(name:string)=>name.replace(/\b(?:[IVX]+|(?:MK|GEN)\s*\d+)\b/gi, " ");
   for(const item of matches){
-    const match=await matchOvokoFitment([{text:`${item.make} ${item.model}`,origin:"web"}],brands,allowed,"",loadModels,true);
+    const compatibleYears = async (brandId:string)=>(await loadModels(brandId)).filter(model=>{
+      const bounds=model.years?.match(/^(\d{4})?\s*[-\u2013\u2014]\s*(\d{4})?$/);
+      return !bounds || ((!bounds[1] || Number(item.year)>=Number(bounds[1])) && (!bounds[2] || Number(item.year)<=Number(bounds[2])));
+    });
+    let match=await matchOvokoFitment([{text:`${item.make} ${item.model}`,origin:"web"}],brands,allowed,"",compatibleYears,true);
+    // Marketplaces count facelifts differently. An identical full chassis code is
+    // stronger than their Roman generation label; never match by an OE prefix.
+    if(!match){
+      const codes=chassisCodes(item.model);
+      if(codes.size)match=await matchOvokoFitment([{text:`${item.make} ${withoutGeneration(item.model)}`,origin:"web"}],brands,allowed,"",async brandId=>(await compatibleYears(brandId)).filter(row=>[...chassisCodes(row.name)].some(code=>codes.has(code))).map(row=>({...row,name:withoutGeneration(row.name)})),true);
+    }
     if(!match)continue;
     const bounds=match.model.years?.match(/^(\d{4})?\s*[-\u2013\u2014]\s*(\d{4})?$/);
     if(bounds && (bounds[1] && Number(item.year)<Number(bounds[1]) || bounds[2] && Number(item.year)>Number(bounds[2])))continue;
     found.push({...match,...item});
   }
   return found.find(item=>item.modelId===preferredModel)||found[0]||null;
+}
+export function webVehicleMismatchMessage(matches: WebVehicle[]) {
+  return matches.length ? `Zrodla dla pelnego numeru podaja: ${matches.slice(0,4).map(row=>`${row.make} ${row.model}, rok ${row.year}`).join("; ")}. Nazwy lub lata nie odpowiadaja jednoznacznie slownikowi Ovoko. Wybierz model z tej listy recznie.` : "Internet nie zwrocil modelu i roku ze zrodlem.";
 }
 /** Only public part numbers/make hints leave the server; no account data or listing descriptions. */
 export async function lookupWebFitment(env: WebFitmentEnv, owner: string, rawNumber: string, makeHint = ""): Promise<Result> {

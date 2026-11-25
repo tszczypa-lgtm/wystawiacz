@@ -64,6 +64,9 @@ assert.equal(await matchOvokoFitment([{ text: "AUDI A4 B8", origin: "suggestion"
 const vw=[{id:"4",name:"Volkswagen"}], golfs=async()=>[{id:"41",name:"Golf V"},{id:"42",name:"Golf VII"}];
 assert.equal((await matchOvokoFitment([{text:"Volkswagen Golf 7 2012-2019",origin:"catalog"}],vw,["4"],"",golfs,true)).modelId,"42");
 assert.equal(await matchOvokoFitment([{text:"Volkswagen Golf 5G0907044BF",origin:"catalog"}],vw,["4"],"",golfs,true),null,"OE digits do not identify a model generation; ambiguous catalogue row cannot select the first Golf");
+const variants=async()=>[{id:"variant",name:"Golf VII Variant (BA5, BV5)"},{id:"base",name:"Golf VII, e-Golf (5G1, BQ1)"}];
+assert.equal((await matchOvokoFitment([{text:"Volkswagen Golf VII",origin:"catalog"}],vw,["4"],"",variants,true)).modelId,"base","Alternative names are aliases, not missing body-type requirements");
+assert.equal((await matchOvokoFitment([{text:"Volkswagen Golf VII Variant",origin:"catalog"}],vw,["4"],"",variants,true)).modelId,"variant");
 mode="ok";
 const duplicateOrigin=await readOvokoFitment({...source,compatibilityList:{items:[{text:"CITROEN C5 AIRCROSS 2017 - 2024"}]}},number,remote,true);
 assert.equal(duplicateOrigin.rows[0].origin,"catalog","Exact catalogue verification must upgrade a duplicated seller fitment row");

@@ -6,7 +6,7 @@ import ts from "typescript";
 const root=fileURLToPath(new URL("../lib/",import.meta.url)), cache=new Map();
 let number="5G0907044BF",catalog=true,manual=false,sourceTitle="",created=[],calls=[];
 const source=()=>({id:"101",name:sourceTitle,category:{id:"cat"},parameters:[{id:"11323",name:"Stan",values:["Uzywany"],valuesIds:["11323_2"]}],stock:{available:1},publication:{status:"ACTIVE"},productSet:[{quantity:{value:1},product:{parameters:[{name:"Numer katalogowy czesci",values:[number]}]}}],images:["https://a.allegroimg.com/photo.jpg"],sellingMode:{price:{amount:"50.00",currency:"PLN"}}});
-const brands=[{id:"2",name:"Volkswagen"}], models=[{id:"21",brand:"2",name:"Golf V",years:" - "},{id:"22",brand:"2",name:"Golf VII",years:" - "},{id:"23",brand:"2",name:"Touran III",years:" - "}];
+const brands=[{id:"2",name:"Volkswagen"}], models=[{id:"21",brand:"2",name:"Golf V",years:" - "},{id:"24",brand:"2",name:"Golf VII Variant (BA5, BV5)",years:" - "},{id:"22",brand:"2",name:"Golf VII, e-Golf (5G1, BQ1)",years:" - "},{id:"23",brand:"2",name:"Touran III",years:" - "}];
 const remote=async p=>{
  calls.push(p);
  if(p==="/get/categories")return{list:[{id:"3",pl:"Panel sterowania klimatyzacji",level:3,parent_id:0}]};

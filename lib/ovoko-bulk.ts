@@ -14,7 +14,7 @@ import { createdPublication, ovokoPublicationPresent } from "./ovoko-publication
 import { publicationStockMode, readStockPublication, checkStockPublication, stockPublicationResult } from "./ovoko-stock-publication";
 import { cachedOvokoYearEvidence, yearAllegroReader } from "./ovoko-year-suggestion";
 import type { YearEvidence } from "./ovoko-year-evidence";
-import { lookupWebFitment, selectWebVehicle } from "./ovoko-web-fitment";
+import { lookupWebFitment, selectWebVehicle, webVehicleMismatchMessage } from "./ovoko-web-fitment";
 
 type Context = Awaited<ReturnType<typeof accountContext>>;
 export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, context: Context, input: Record<string, unknown>) {
@@ -193,7 +193,7 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
       year = matched.year; savedCar = undefined; usedFallback = false; fitmentOrigin = "web";
       exactVehicleText = "";
       yearEvidence = { year, technical: true, source: "web-search", sourceUrl: matched.sourceUrl, reason: `Internet / OpenAI: pelny numer ${lookupNumber}, ${matched.make} ${matched.model}, rok techniczny ${year}. Publiczna oferta, nie potwierdza rocznika dawcy ani pelnej zgodnosci.` };
-    } else webMessage = web.message || "Internet znalazl dane, ale nie udalo sie jednoznacznie przypisac modelu do slownika Ovoko.";
+    } else webMessage = web.message || webVehicleMismatchMessage(web.matches);
   }
   const blockers = ovokoPublicationBlockers(source, draft, brandId, modelId);
   if (!model || !year && !savedCar) blockers.push((model ? "Wybrano model, ale nie znaleziono roku dla pelnego numeru czesci. Podaj rok w uzupelnieniu tej pozycji." : "Nie rozpoznano modelu. Wybierz model ponizej; kategoria i cena zostaja bez zmian.") + (webMessage ? ` ${webMessage}` : ""));

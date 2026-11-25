@@ -47,6 +47,16 @@ try{
  assert.equal((await api.selectWebVehicle(result.matches,brands,["2"],async()=>models,"22")).modelId,"23","A sourced Touran is not rejected because the title guessed Golf");
  assert.equal(await api.selectWebVehicle([{...result.matches[0],year:"2010"}],brands,["2"],async()=>models),null,"Reject year outside selected dictionary range");
  assert.equal(await api.selectWebVehicle(result.matches,[{id:"3",name:"Audi"}],["3"],async()=>models),null,"Do not mix makes");
+ const providerModels=[{id:"g5",name:"Golf V (1K1)",years:"2003 - 2009"},{id:"g6",name:"Golf VI (5K1)",years:"2008 - 2013"},{id:"g7v",name:"Golf VII Variant (BA5, BV5)",years:"2013 - 2020"},{id:"g7",name:"Golf VII, e-Golf (5G1, BQ1, BE1, BE2)",years:" - "},{id:"g8",name:"Golf VIII (CD1)",years:"2019 - "}];
+ for(const model of ["Golf 7","Golf VII","Golf Mk7","Golf VII (5G1)"]){
+  const candidate={...result.matches[0],model,year:"2018"};
+  assert.equal((await api.selectWebVehicle([candidate],brands,["2"],async()=>providerModels,"g5")).modelId,"g7",`${model} must choose the base/alias row, not Variant or an older Golf`);
+ }
+ assert.equal((await api.selectWebVehicle([{...result.matches[0],model:"Golf VII Variant",year:"2018"}],brands,["2"],async()=>providerModels)).modelId,"g7v","Explicit body variant retains priority");
+ assert.equal((await api.selectWebVehicle([{...result.matches[0],model:"Golf",year:"2018"}],brands,["2"],async()=>providerModels)).modelId,"g7","Use sourced year before resolving overlapping generation names");
+ assert.equal((await api.selectWebVehicle([{...result.matches[0],model:"Touran II (5T1)",year:"2019"}],brands,["2"],async()=>[{id:"t3",name:"Touran III (5T1)",years:"2015 - "}])).modelId,"t3","Identical full chassis code resolves marketplace-specific generation counting");
+ assert.equal(await api.selectWebVehicle([{...result.matches[0],model:"Touran II (1T3)",year:"2019"}],brands,["2"],async()=>[{id:"t3",name:"Touran III (5T1)",years:"2015 - "}]),null,"Different chassis must remain rejected");
+ assert.equal(await api.selectWebVehicle([{...result.matches[0],model:"Golf VIII 3DOOR",year:"2018"}],brands,["2"],async()=>[{id:"bad",name:"Golf VII 3DOOR",years:"2012 - 2019"}]),null,"Door count is not a chassis code and cannot bypass a generation conflict");
  mode="empty";for(let i=0;i<200;i++)await api.lookupWebFitment(env,"budget-owner",`TEST${100000+i}`);
  const charged=count;assert.match((await api.lookupWebFitment(env,"budget-owner","TEST999999")).message,/Limit 200/);assert.equal(count,charged,"Soft hourly guard prevents further calls in this isolate");
  mode="queued";const beforeJob=count;

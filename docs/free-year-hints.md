@@ -28,6 +28,14 @@ as a technical year, never a verified donor year or universal compatibility clai
 Web evidence can replace the initially guessed model; manual choices are retained.
 Both single-offer and bulk screens display a clickable source.
 
+Mapping first filters dictionary rows by the sourced year, then prefers a base
+model over an unmentioned body variant. Comma/slash-separated names are aliases
+(for example `Golf VII, e-Golf`), not extra required words. Different marketplace
+generation labels may be reconciled only with an identical explicit chassis code,
+the same family/make and a compatible year; an OE prefix or door count cannot do
+this. If mapping still fails, the message lists the actual sourced models/years.
+Successful search cache entries remain reusable after matcher updates.
+
 Searches run in OpenAI background mode with `store=true` so the same response ID
 can be retrieved. This stores the public number/hint and generated search result
 with OpenAI under its Responses data controls. User account data is not sent.
