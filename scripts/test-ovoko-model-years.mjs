@@ -13,6 +13,8 @@ for(const values of[{year_start:2009,year_end:2016},{year_start:"2009",year_end:
  const row=model(values);assert.equal(row.years,"2009 - 2016");assert.equal(ovokoCarYear(source,row).year,"2009");assert.equal(ovokoCarYear(source,row).technical,true);
 }
 assert.equal(model({year_start:0,year_end:"0000"}).years," - ");
+assert.equal(ovokoCarYear(source,model({year_end:2016})).year,"2016","Use a known production end when the dictionary start is missing");
+assert.equal(ovokoCarYear(source,model({year_end:2999})).year,"","Do not use a future end year");
 assert.equal(ovokoCarYear(source,model({})).year,"","No guessed year from a Mercedes chassis or OE number");
 assert.equal(model({year_start:"2010",year_end:"2015",name:"W212 2009-2016"}).years,"2010 - 2015","Explicit dictionary fields take priority over model-name text");
 assert.equal(ovokoCarYear({...source,parameters:[{name:"Rok produkcji",values:["2012"]}]},model({year_start:2009,year_end:2016})).year,"2012");

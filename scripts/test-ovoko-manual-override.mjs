@@ -20,7 +20,8 @@ const c={sellerId:"555",account:"a".repeat(64),clientId:"client",get fingerprint
 const db=async(path,init={})=>{
  if(path.startsWith("ovoko_single_publications?")||path.startsWith("ovoko_vehicle_creations?"))return journal?[journal]:[];
  if(path.startsWith("ovoko_manual_overrides?"))return decisions;
- const b=JSON.parse(init.body);assert.ok(["rpc/release_stale_ovoko_attempt","rpc/apply_ovoko_manual_override"].includes(path));assert.equal(b.p_owner,owner);assert.equal(b.p_allegro,"a-sealed");assert.equal(b.p_ovoko,"o-sealed");assert.deepEqual(b.p_expected,journal||{});
+ const b=JSON.parse(init.body);assert.ok(["rpc/release_ovoko_vehicle_attempt","rpc/release_stale_ovoko_attempt","rpc/apply_ovoko_manual_override"].includes(path));assert.equal(b.p_owner,owner);assert.equal(b.p_allegro,"a-sealed");assert.equal(b.p_ovoko,"o-sealed");assert.deepEqual(b.p_expected,journal||{});
+ if(b.p_kind==="vehicle")assert.equal(path,"rpc/release_ovoko_vehicle_attempt","Vehicle release must not depend on optional sales/recovery tables");
  if(mode==="foreign-owner-lock"&&path==="rpc/apply_ovoko_manual_override")throw new store.SyncDbError(400,"P0001","physical account ownership conflict");
  if(path==="rpc/release_stale_ovoko_attempt"){assert.equal(mode,"foreign-owner-lock");assert.equal(b.p_found,null);}
  applies++;const row={id:b.p_id,kind:b.p_kind,action:b.p_found?"reconciled":"released",found_id:b.p_found};decisions=[row];if(mode==="lost-ack")throw new Error("lost acknowledgment");return[row];
@@ -48,6 +49,8 @@ reset();p=await check();await assert.rejects(run(owner,{}, {operation:"confirm",
 reset();p=await check();mode="lost-ack";await assert.rejects(confirm(p));assert.equal((await confirm(p)).resolved,true);assert.equal(applies,1);
 reset();journal.part_id="20";mode="known-present";await assert.rejects(check());
 reset();p=await check("vehicle");assert.equal(proof.brand,"7");assert.equal((await confirm(p)).kind,"vehicle");
+reset();journal.updated_at=new Date().toISOString();p=await check("vehicle");await confirm(p);assert.equal(applies,1,"A finished uncertain vehicle attempt needs no arbitrary 30 minute wait");
+reset();journal.state="sending";journal.updated_at=new Date().toISOString();await assert.rejects(check("vehicle"),error=>error.code==="vehicle_in_progress");assert.equal(applies,0);
 reset();p=await check("vehicle");await assert.rejects(run(owner,{}, {operation:"confirm",token:p.token,brandId:"8",checkedOvoko:true,confirmRisk:true,typedOfferId:"10",reason:"Sprawdzono wszystkie statusy"}));assert.equal(applies,0);
 reset();p=await check();assert.equal((await run(owner,{}, {operation:"confirm",token:p.token,brandId:"7",confirmManual:true})).resolved,true);assert.equal(applies,1,"Single explicit consent needs no typed ID or reason");
 reset();p=await check();await assert.rejects(run(owner,{}, {operation:"confirm",token:p.token,confirmManual:false}));assert.equal(applies,0);
@@ -63,6 +66,8 @@ for(const [code,reason,expected]of[["P0001","physical account ownership conflict
  const error=diagnose(new store.SyncDbError(400,code,reason),"rpc/release_stale_ovoko_attempt");assert.match(error.message,expected);assert.match(error.message,new RegExp(code));assert.equal(error.code,"override_database");
 }
 assert.doesNotMatch(diagnose(new Error("private-password-secret"),"rpc/release_stale_ovoko_attempt").message,/private-password-secret/);
+assert.match(diagnose(new store.SyncDbError(400,"PGRST202"),"rpc/release_ovoko_vehicle_attempt").message,/025/);
+assert.match(diagnose(new store.SyncDbError(400,"P0001","vehicle operation in progress"),"rpc/release_ovoko_vehicle_attempt").message,/Tworzenie auta jeszcze trwa/);
 const originalFetch=globalThis.fetch;
 try{
  for(const body of[{code:"P0001",message:"physical account ownership conflict"},{code:"42501",message:"private-secret-database-detail"},{code:"private-secret-code",message:"private-secret-body"}]){

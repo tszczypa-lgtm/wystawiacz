@@ -14,7 +14,9 @@ export function overrideDatabaseError(error:unknown,path:string):OvokoError {
  if(error instanceof SyncDbError){
   const reasons:Record<string,string>={"physical account ownership conflict":"Te konta sa przypisane do synchronizacji innego konta Wystawiacza. Nie zmieniono wlasciciela synchronizacji.","link recovery pending":"Trwa osobne odzyskiwanie powiazan. Zakoncz lub anuluj jego plan.","synchronization check in progress":"Wlasnie trwa kontrola synchronizacji tych kont. Sprobuj po jej zakonczeniu.","pending sale action for this offer":"Dla tej konkretnej oferty trwa lub pozostala niepewna operacja sprzedazy. Nie wolno jej ponownie wystawic przed wyjasnieniem.","connection changed":"Polaczenie konta zmienilo sie podczas operacji. Sprawdz ponownie.","operation too recent":"Poprzednia wysylka jest mlodsza niz 30 minut. Nie przerwano jej.","operation changed":"Blokada zmienila sie podczas sprawdzania. Sprawdz ja ponownie.","no stale attempt to release":"Nie ma zapisanej proby do zwolnienia lub jej stan jest nieprawidlowy. Sprawdz wynik oferty ponownie.","pause synchronization and settle writes":"Baza ma starsza wersje odblokowania wymagajaca zatrzymania synchronizacji.","conflicting part ids":"Ovoko i rejestr wskazuja rozne ID czesci. Nie nadpisano powiazania."};
   const missing=error.databaseCode&&["42883","42P01","42703","PGRST202","PGRST204","PGRST205"].includes(error.databaseCode);
-  const message=error.databaseReason?reasons[error.databaseReason]:missing?`W bazie brakuje ${path==="rpc/release_stale_ovoko_attempt"?"funkcji zwalniania starej proby. Wymagana jednorazowa poprawka bazy":"wymaganej funkcji, tabeli lub kolumny"}.`:error.databaseCode==="42501"?"Serwer bazy odmowil uprawnien do odblokowania.":"Baza nie potwierdzila operacji. Nie uznano tego automatycznie za brak migracji.";
+  const vehicleBusy=error.databaseReason==="vehicle operation in progress";
+  const vehicleFunctionMissing=path==="rpc/release_ovoko_vehicle_attempt"&&["42883","PGRST202"].includes(error.databaseCode||"");
+  const message=vehicleBusy?"Tworzenie auta jeszcze trwa. Nie przerwano wysylki; sprawdz ponownie po 5 minutach.":vehicleFunctionMissing?"Baza nie ma jeszcze poprawki odblokowania aut (025). Wklej poprawke SQL w Supabase; sam Push origin nie aktualizuje bazy.":error.databaseReason?reasons[error.databaseReason]:missing?`W bazie brakuje ${path==="rpc/release_stale_ovoko_attempt"?"funkcji zwalniania starej proby. Wymagana jednorazowa poprawka bazy":"wymaganej funkcji, tabeli lub kolumny"}.`:error.databaseCode==="42501"?"Serwer bazy odmowil uprawnien do odblokowania.":"Baza nie potwierdzila operacji. Nie uznano tego automatycznie za brak migracji.";
   return new OvokoError(409,`${message} Etap: ${stage}. Kod bazy: ${error.databaseCode||`HTTP ${error.databaseStatus}`}. Nie wyslano czesci.`,"override_database");
  }
  return new OvokoError(503,`Utracono odpowiedz bazy (etap: ${stage}). Sprawdz wynik przed ponowieniem; nie wyslano czesci.`,"override_transport");
@@ -72,7 +74,11 @@ export async function manualOvokoOverride(owner:string,env:SalesSyncEnv,input:Da
  if(!Array.isArray(owned.offers)||owned.offers.length!==1||(owned.offers[0]as Data).id!==p.offer)throw new OvokoError(409,"Nie potwierdzono aukcji na Twoim koncie Allegro.");
  if(p.kind==="vehicle"&&input.brandId!==p.brand)throw new OvokoError(409,"Marka zmienila sie. Sprawdz blokade ponownie.");
  const found=await inspect(c,p,p.brand);
- if(!found&&Object.keys(p.row).length&&Date.now()-Date.parse(String(p.row.updated_at))<1800000)throw new OvokoError(409,"Proba jest mlodsza niz 30 minut i moze jeszcze trwac. Nie odblokowujemy trwajacych wysylek.");
+ if(!found&&Object.keys(p.row).length){
+  const age=Date.now()-Date.parse(String(p.row.updated_at));
+  if(p.kind==="part"&&age<1800000)throw new OvokoError(409,"Proba jest mlodsza niz 30 minut i moze jeszcze trwac. Nie odblokowujemy trwajacych wysylek.");
+  if(p.kind==="vehicle"&&p.row.state==="sending"&&age<300000)throw new OvokoError(409,"Tworzenie auta jest w toku lub utracono jego odpowiedz przed chwila. Nie przerywamy trwajacego zapisu; sprawdz ponownie po 5 minutach.","vehicle_in_progress");
+ }
  if(operation==="confirm"&&p.foundId!==found)throw new OvokoError(409,"Wynik odczytu Ovoko zmienil sie. Sprawdz blokade ponownie; niczego nie wyslano.");
  if(operation==="check"&&p.kind==="vehicle"&&found)return{resolved:true,kind:"vehicle",foundId:found,modelId:p.model,year:p.year,message:`Potwierdzono zapisane auto ID ${found}. Uzyjemy go bez tworzenia drugiego i bez zmiany wlasciciela synchronizacji.`};
  if(operation==="check"&&!Object.keys(p.row).length){
@@ -85,11 +91,12 @@ export async function manualOvokoOverride(owner:string,env:SalesSyncEnv,input:Da
  const staleOnly=!found&&["sending","uncertain","created"].includes(String(p.row.state));
  const decision=syncJson({p_owner:owner,p_id:p.id,p_kind:p.kind,p_account:p.account,p_seller:p.seller,p_offer:p.offer,p_model:p.model,p_year:p.year,p_expected:p.row,p_found:found,p_reason:reason,p_allegro:c.allegroSealed,p_ovoko:c.ovokoSealed});
  let applied:unknown;
- try{applied=await raw("rpc/apply_ovoko_manual_override",decision);}
+ const endpoint=p.kind==="vehicle"&&!found?"rpc/release_ovoko_vehicle_attempt":"rpc/apply_ovoko_manual_override";
+ try{applied=await raw(endpoint,decision);}
  catch(error){
   // Only a known rolled-back guard failure permits the narrower release. Never retry a lost acknowledgement.
-  if(staleOnly&&error instanceof SyncDbError&&error.databaseCode==="P0001"&&["physical account ownership conflict","pause synchronization and settle writes"].includes(error.databaseReason||"")) applied=await db("rpc/release_stale_ovoko_attempt",decision);
-  else throw overrideDatabaseError(error,"rpc/apply_ovoko_manual_override");
+  if(p.kind==="part"&&staleOnly&&error instanceof SyncDbError&&error.databaseCode==="P0001"&&["physical account ownership conflict","pause synchronization and settle writes"].includes(error.databaseReason||"")) applied=await db("rpc/release_stale_ovoko_attempt",decision);
+  else throw overrideDatabaseError(error,endpoint);
  }
  const rows=syncRows<Data>(applied);
  if(rows.length!==1||rows[0].id!==p.id)throw new OvokoError(503,"Nie potwierdzono zapisu decyzji. Sprawdz status przed kolejna proba; nie wyslano czesci.");

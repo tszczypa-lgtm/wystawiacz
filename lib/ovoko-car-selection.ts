@@ -13,7 +13,8 @@ export function ovokoCarYear(source: Pick<OvokoSourcePreview, "title" | "descrip
   const candidates = [...new Set([...parameters, ...title, ...description].filter(valid))];
   if (candidates.length === 1) return { year: candidates[0], reason: "Rok odczytany z tytulu, opisu lub parametru aukcji. Sprawdz przypisanie auta.", technical: false };
   if (range?.[1] && valid(range[1])) return { year: range[1], reason: `Rok techniczny: poczatek zakresu produkcji ${model!.years}. Nie jest potwierdzonym rocznikiem dawcy${candidates.length > 1 ? "; dane aukcji sa niejednoznaczne" : ""}.`, technical: true };
-  return { year: "", reason: "Brak jednoznacznego roku i poczatku zakresu modelu. Podaj rok recznie.", technical: false };
+  if (range?.[2] && valid(range[2])) return { year: range[2], reason: `Rok techniczny: koniec zakresu produkcji ${model!.years}. Nie jest potwierdzonym rocznikiem dawcy.`, technical: true };
+  return { year: "", reason: "Brak jednoznacznego roku i poprawnego zakresu produkcji modelu. Podaj rok recznie.", technical: false };
 }
 
 export function preferredOvokoCar(rows: OvokoReadRow[], year: string): OvokoReadRow | undefined {

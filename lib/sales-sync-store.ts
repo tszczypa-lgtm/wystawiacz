@@ -15,7 +15,7 @@ export const syncRows = <T>(value: unknown): T[] => {
   if (!Array.isArray(value)) throw new OvokoError(503, "Nie potwierdzono rejestru automatu. Sprawdz migracje 016.");
   return value as T[];
 };
-const databaseReasons = ["physical account ownership conflict", "link recovery pending", "synchronization check in progress", "pending sale action for this offer", "connection changed", "operation too recent", "operation changed", "no stale attempt to release", "pause synchronization and settle writes", "conflicting part ids"] as const;
+const databaseReasons = ["physical account ownership conflict", "link recovery pending", "synchronization check in progress", "pending sale action for this offer", "connection changed", "operation too recent", "operation changed", "no stale attempt to release", "pause synchronization and settle writes", "conflicting part ids", "vehicle operation in progress"] as const;
 export class SyncDbError extends OvokoError {
   constructor(public databaseStatus: number, public databaseCode?: string, public databaseReason?: string) {
     super(503, "Nie potwierdzono rejestru automatu. Sprawdz migracje 016; nie ponawiamy niepewnych zapisow.");
