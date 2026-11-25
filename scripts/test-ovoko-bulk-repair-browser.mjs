@@ -31,7 +31,8 @@ try {
     return route.fulfill({json:{ok:true,category:{id:"3",name:"Radio"},prepared:{brandId:"7",modelId:"71",categoryId:"3"}}});
    }
    if (body.offerId === "2" && mode !== "recovered") return route.fulfill({status:503,headers:{"cf-ray":"test123-WAW"},contentType:"text/html",body:"<!DOCTYPE html><h1>private proxy error</h1>"});
-   return route.fulfill({json:{ok:true,alreadyCreated:false,partId:`8${body.offerId}`,price:"50",currency:"PLN"}});
+   if(mode==="recovered"&&body.offerId==="2")assert.deepEqual(body.adjustment,{mode:"percent",value:"20"},"Explicit one-row force retains its original price rule, not changed global controls");
+   return route.fulfill({json:{ok:true,alreadyCreated:false,partId:`8${body.offerId}`,price:body.adjustment?.mode==="percent"?"60":"50",currency:"PLN"}});
   }
   if (url.pathname === "/api/ovoko/read") { assert.equal(body.operation,"models","Model-only repair must not load categories"); assert.equal(body.brandId,"7");return route.fulfill({json:{ok:true,readOnly:true,rows:[{id:"71",name:"Kangoo III",years:"2021 - "}]}}); }
   if (url.pathname === "/api/ovoko/manual-override") {
@@ -42,7 +43,7 @@ try {
   throw new Error(`Unexpected request ${url.pathname}`);
  });
  const mount = async path => { await page.goto(`https://bulk.test${path}`);await page.addScriptTag({content:bundle.outputFiles[0].text}); };
- await mount("/");await page.getByRole("button",{name:"Przenies zaznaczone do Ovoko",exact:true}).click();
+ await mount("/");await page.getByLabel("Cena w Ovoko").selectOption("percent");await page.getByLabel("Procent (%)").fill("20");await page.getByRole("button",{name:"Przenies zaznaczone do Ovoko",exact:true}).click();
  await page.getByRole("status").filter({hasText:"Partia zakonczona"}).waitFor({timeout:45000});
  assert.match(await page.locator('[data-offer-id="2"]').innerText(),/HTTP 503.*etap item/);
  assert.match(await page.locator('[data-offer-id="2"]').innerText(),/test123-WAW/);
@@ -55,13 +56,11 @@ try {
  await repair.getByRole("button",{name:"Przenies te pozycje"}).click();await page.getByRole("status").filter({hasText:"Zakonczono poprawianie pozycji"}).waitFor({timeout:15000});
  assert.match(await repair.innerText(),/Przeniesiono/);assert.equal(calls.filter(c=>c.body?.offerId==="2"&&c.body.operation==="item").length,1);
  const uncertainRow=page.locator('[data-offer-id="2"]');
- page.once("dialog",dialog=>dialog.accept());await uncertainRow.getByRole("button",{name:"Odblokuj te oferte",exact:true}).click();
- await uncertainRow.getByText("Uzupelnij i przenies",{exact:true}).waitFor();
- assert.equal(calls.filter(c=>c.body?.offerId==="2"&&c.body.operation==="item").length,1,"Unlocking alone never publishes");
- mode="recovered";await uncertainRow.getByText("Uzupelnij i przenies",{exact:true}).click();
- assert.equal(await uncertainRow.getByLabel("Kategoria Ovoko").count(),0,"Release requires no invented category/model fields");
- await uncertainRow.getByRole("button",{name:"Przenies te pozycje"}).click();
- await page.getByRole("status").filter({hasText:"Zakonczono poprawianie pozycji"}).waitFor({timeout:15000});
+ await page.getByLabel("Cena w Ovoko").selectOption("none");
+ page.once("dialog",dialog=>dialog.dismiss());await uncertainRow.getByRole("button",{name:"Odblokuj i przenies te oferte",exact:true}).click();
+ assert.equal(calls.filter(c=>c.body?.offerId==="2"&&c.body.operation==="item").length,1,"Canceling explicit force never resends the part");
+ mode="recovered";page.once("dialog",dialog=>dialog.accept());await uncertainRow.getByRole("button",{name:"Odblokuj i przenies te oferte",exact:true}).click();
+ await uncertainRow.locator("p").filter({hasText:/^Przeniesiono\./}).waitFor({timeout:15000});
  assert.match(await uncertainRow.innerText(),/Przeniesiono/);assert.equal(calls.filter(c=>c.body?.offerId==="2"&&c.body.operation==="item").length,2,"Second publication needs a separate explicit user click");
  mode="unauthorized";const before=calls.length;await mount("/");await page.getByRole("button",{name:"Przenies zaznaczone do Ovoko",exact:true}).click();await page.getByRole("status").filter({hasText:"Partia zatrzymana"}).waitFor();assert.equal(calls.slice(before).filter(c=>c.path.startsWith("/api/allegro/")).length,1,"401 stops remaining rows");
  mode="all-errors";const beforeErrors=calls.length;await mount("/");await page.getByRole("button",{name:"Przenies zaznaczone do Ovoko",exact:true}).click();await page.getByRole("status").filter({hasText:"Partia zakonczona"}).waitFor({timeout:45000});assert.match(await page.locator('[data-offer-id="5"]').innerText(),/Przeniesiono/);assert.equal(calls.slice(beforeErrors).filter(c=>c.path.startsWith("/api/allegro/ovoko-source/")).length,5,"Four consecutive mixed row errors do not stop the fifth");

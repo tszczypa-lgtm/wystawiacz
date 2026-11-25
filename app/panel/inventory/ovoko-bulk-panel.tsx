@@ -136,9 +136,12 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
       <p className={`text-xs leading-5 ${job.state === "done" || job.state === "skipped" ? "text-emerald-300" : job.state === "error" ? "text-amber-200" : "text-white/60"}`}>{job.message}</p>
       {job.retryable && <OvokoJobRepair key={`${job.id}:${JSON.stringify(job.repair)}`} id={job.id} hint={job.repair} disabled={running || recovering} onTransfer={(vehicle, corrections) => void retry(job, vehicle, corrections)} />}
       {job.state === "error" && !running && <>
-        <ManualOvokoOverride offerId={job.id} brandId={job.repair?.vehicle?.brandId || job.repair?.brandId || ""} modelId={job.repair?.vehicle?.modelId || ""} year={job.repair?.vehicle?.year || ""} disabled={recovering} onBusyChange={busy => { lock.current = busy; setRecovering(busy); }} onResolved={result => {
+        <ManualOvokoOverride offerId={job.id} brandId={job.repair?.vehicle?.brandId || job.repair?.brandId || ""} modelId={job.repair?.vehicle?.modelId || ""} year={job.repair?.vehicle?.year || ""} disabled={recovering} continueTransfer onBusyChange={busy => { lock.current = busy; setRecovering(busy); }} onResolved={result => {
           if (result.kind === "part" && result.foundId) update(job.id, { state: "skipped", retryable: false, message: `Potwierdzono istniejaca czesc Ovoko ID: ${result.foundId}. Powiazanie naprawione; nie utworzono duplikatu.` });
-          else update(job.id, { retryable: true, repair: job.repair || { needsVehicle: false, needsCategory: false, brandId: "", categoryId: "" }, message: `${result.message} Kliknij Uzupelnij i przenies, aby ponowic tylko te pozycje z zachowana cena.` });
+          else {
+            const vehicle = job.repair?.vehicle;
+            void retry({ ...job, retryable: true }, vehicle?.brandId && vehicle.modelId ? vehicle : undefined, job.repair?.categoryId ? { categoryId: job.repair.categoryId } : {});
+          }
         }} />
         <ManualOvokoLauncher offerId={job.id} />
       </>}

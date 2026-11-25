@@ -1,6 +1,6 @@
 import { openConnection,sealConnection } from "./allegro-api";
 import { syncAuthorization,syncConnections,type SalesSyncEnv } from "./sales-sync-connections";
-import { salesSyncDb,syncRows,syncJson } from "./sales-sync-store";
+import { salesSyncDb,syncRows,syncJson,SyncDbError } from "./sales-sync-store";
 import { ovokoConnectionKey } from "./ovoko-connection";
 import { OvokoError,ovokoPageData,parseOvokoRead } from "./ovoko-read";
 import { ovokoPublicationPresent } from "./ovoko-publication-presence";
@@ -8,6 +8,16 @@ type Data=Record<string,unknown>;
 type Proof={id:string;owner:string;kind:"part"|"vehicle";offer:string;seller:string;account:string;fingerprint:string;client:string;brand:string|null;model:string|null;year:string|null;row:Data;foundId?:string|null;expires:number};
 const uuid=/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
 const positive=(v:unknown):v is string=>typeof v==="string"&&/^[1-9]\d{0,11}$/.test(v);
+export function overrideDatabaseError(error:unknown,path:string):OvokoError {
+ const stage=path.startsWith("rpc/")?"zapis decyzji":path.startsWith("ovoko_single_publications?")||path.startsWith("ovoko_vehicle_creations?")?"odczyt blokady":"kontrola konta";
+ if(error instanceof SyncDbError){
+  const reasons:Record<string,string>={"physical account ownership conflict":"Te konta sa przypisane do synchronizacji innego konta Wystawiacza. Nie zmieniono wlasciciela synchronizacji.","link recovery pending":"Trwa osobne odzyskiwanie powiazan. Zakoncz lub anuluj jego plan.","synchronization check in progress":"Wlasnie trwa kontrola synchronizacji tych kont. Sprobuj po jej zakonczeniu.","pending sale action for this offer":"Dla tej konkretnej oferty trwa lub pozostala niepewna operacja sprzedazy. Nie wolno jej ponownie wystawic przed wyjasnieniem.","connection changed":"Polaczenie konta zmienilo sie podczas operacji. Sprawdz ponownie.","operation too recent":"Poprzednia wysylka jest mlodsza niz 30 minut. Nie przerwano jej.","operation changed":"Blokada zmienila sie podczas sprawdzania. Sprawdz ja ponownie.","no stale attempt to release":"Nie ma zapisanej proby do zwolnienia lub jej stan jest nieprawidlowy. Sprawdz wynik oferty ponownie.","pause synchronization and settle writes":"Baza ma starsza wersje odblokowania wymagajaca zatrzymania synchronizacji.","conflicting part ids":"Ovoko i rejestr wskazuja rozne ID czesci. Nie nadpisano powiazania."};
+  const missing=error.databaseCode&&["42883","42P01","42703","PGRST202","PGRST204","PGRST205"].includes(error.databaseCode);
+  const message=error.databaseReason?reasons[error.databaseReason]:missing?`W bazie brakuje ${path==="rpc/release_stale_ovoko_attempt"?"funkcji zwalniania starej proby. Wymagana jednorazowa poprawka bazy":"wymaganej funkcji, tabeli lub kolumny"}.`:error.databaseCode==="42501"?"Serwer bazy odmowil uprawnien do odblokowania.":"Baza nie potwierdzila operacji. Nie uznano tego automatycznie za brak migracji.";
+  return new OvokoError(409,`${message} Etap: ${stage}. Kod bazy: ${error.databaseCode||`HTTP ${error.databaseStatus}`}. Nie wyslano czesci.`,"override_database");
+ }
+ return new OvokoError(503,`Utracono odpowiedz bazy (etap: ${stage}). Sprawdz wynik przed ponowieniem; nie wyslano czesci.`,"override_transport");
+}
 async function inspect(c:Awaited<ReturnType<typeof syncConnections>>,p:Proof,brand:unknown){
  if(p.kind==="part"){
   const external=`tymo:${c.sellerId}:${p.offer}`;
@@ -33,7 +43,7 @@ export async function manualOvokoOverride(owner:string,env:SalesSyncEnv,input:Da
  const operation=input.operation;
  const allowed=operation==="check"?["operation","kind","offerId","brandId","modelId","year"]:["operation","token","brandId","confirmRisk","checkedOvoko","typedOfferId","reason","confirmManual"];
  if(!["check","confirm"].includes(String(operation))||Object.keys(input).some(k=>!allowed.includes(k)))throw new OvokoError(400,"Nieprawidlowe reczne rozstrzygniecie.");
- const raw=salesSyncDb(env),db:typeof raw=async(path,init)=>{try{return await raw(path,init);}catch{throw new OvokoError(409,"Nie potwierdzono odblokowania. Sprawdz migracje 023 i wlasciciela kont. Jesli trwa kontrola synchronizacji lub operacja sprzedazy tej oferty, poczekaj i sprawdz ponownie. Nie ponowiono wysylki.");}};
+ const raw=salesSyncDb(env),db:typeof raw=async(path,init)=>{try{return await raw(path,init);}catch(error){throw overrideDatabaseError(error,path);}};
  const c=await syncConnections(db,owner,env),key=await ovokoConnectionKey(env),aad=`ovoko-manual-override:${owner}`;
  let p:Proof;
  if(operation==="check"){
@@ -65,7 +75,16 @@ export async function manualOvokoOverride(owner:string,env:SalesSyncEnv,input:Da
  if(operation==="check")return{token:await sealConnection(p,key,aad),kind:p.kind,offerId:p.offer,modelId:p.model,year:p.year,foundId:found,message:found?`Znaleziono istniejacy rekord ${p.kind==="part"?"czesci":"auta"} ID ${found}. Zamiast tworzyc duplikat, potwierdzenie naprawi rejestr.`:p.kind==="vehicle"?"Nie znaleziono auta z tym rokiem na pierwszej stronie (do 20). Sprawdz recznie pozostale auta. Potwierdzenie zwolni stara blokade, bez tworzenia auta.":"Nie znaleziono powiazanej czesci. Nie jest to gwarancja braku fizycznego duplikatu, zwlaszcza po utracie odpowiedzi importu. Sprawdz recznie wszystkie statusy Ovoko."};
  await syncAuthorization(db,owner,env);
  const reason=input.confirmManual===true?"Reczne odblokowanie potwierdzone przez uzytkownika; zaakceptowano ryzyko duplikatu.":String(input.reason).trim();
- const rows=syncRows<Data>(await db("rpc/apply_ovoko_manual_override",syncJson({p_owner:owner,p_id:p.id,p_kind:p.kind,p_account:p.account,p_seller:p.seller,p_offer:p.offer,p_model:p.model,p_year:p.year,p_expected:p.row,p_found:found,p_reason:reason,p_allegro:c.allegroSealed,p_ovoko:c.ovokoSealed})));
+ const staleOnly=!found&&["sending","uncertain","created"].includes(String(p.row.state));
+ const decision=syncJson({p_owner:owner,p_id:p.id,p_kind:p.kind,p_account:p.account,p_seller:p.seller,p_offer:p.offer,p_model:p.model,p_year:p.year,p_expected:p.row,p_found:found,p_reason:reason,p_allegro:c.allegroSealed,p_ovoko:c.ovokoSealed});
+ let applied:unknown;
+ try{applied=await raw("rpc/apply_ovoko_manual_override",decision);}
+ catch(error){
+  // Only a known rolled-back guard failure permits the narrower release. Never retry a lost acknowledgement.
+  if(staleOnly&&error instanceof SyncDbError&&error.databaseCode==="P0001"&&["physical account ownership conflict","pause synchronization and settle writes"].includes(error.databaseReason||"")) applied=await db("rpc/release_stale_ovoko_attempt",decision);
+  else throw overrideDatabaseError(error,"rpc/apply_ovoko_manual_override");
+ }
+ const rows=syncRows<Data>(applied);
  if(rows.length!==1||rows[0].id!==p.id)throw new OvokoError(503,"Nie potwierdzono zapisu decyzji. Sprawdz status przed kolejna proba; nie wyslano czesci.");
  return{resolved:true,kind:p.kind,action:rows[0].action,foundId:found,modelId:p.model,year:p.year,message:found?"Naprawiono rejestr istniejacego rekordu. Niczego nie utworzono i nie zmieniono Allegro.":"Zwolniono stara blokade na Twoje jawne zlecenie, zachowujac historie. Niczego nie wystawiono. Sprawdz formularz i osobno kliknij Wystaw; wszystkie kontrole danych nadal obowiazuja."};
 }

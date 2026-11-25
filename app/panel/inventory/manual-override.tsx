@@ -4,16 +4,18 @@ import { useRef, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase";
 
 export type OverrideResult = { message: string; token?: string; resolved?: boolean; kind?: "part" | "vehicle"; foundId?: string | null };
-export function ManualOvokoOverride({ offerId, brandId, modelId, year, disabled, onBusyChange, onResolved }: {
+export function ManualOvokoOverride({ offerId, brandId, modelId, year, disabled, continueTransfer = false, onBusyChange, onResolved }: {
   offerId: string; brandId: string; modelId: string; year: string; disabled: boolean;
+  continueTransfer?: boolean;
   onBusyChange: (busy: boolean) => void; onResolved: (result: OverrideResult) => void;
 }) {
   const [busy, setBusy] = useState(false), [message, setMessage] = useState("");
   const lock = useRef(false);
   async function run(kind: "part" | "vehicle") {
     if (disabled || lock.current) return;
-    if (!window.confirm(`Recznie odblokowac ${kind === "part" ? "te oferte" : "wybrane auto"}? Akceptujesz ryzyko duplikatu po niepewnej wysylce. Jesli znajdziemy istniejacy rekord, wykorzystamy go zamiast tworzyc drugi. Potem osobno kliknij Wystaw.`)) return;
+    if (!window.confirm(`Recznie odblokowac ${kind === "part" ? "te oferte" : "wybrane auto"}? Akceptujesz ryzyko duplikatu po niepewnej wysylce. Jesli znajdziemy istniejacy rekord, wykorzystamy go zamiast tworzyc drugi. ${continueTransfer ? "Po odblokowaniu ponowimy tylko te pozycje z zachowana cena." : "Potem osobno kliknij Wystaw."}`)) return;
     lock.current = true; setBusy(true); onBusyChange(true); setMessage("Sprawdzam i odblokowuje...");
+    let resolved: OverrideResult | undefined;
     try {
       const { data } = await createSupabaseBrowserClient().auth.getSession();
       if (!data.session) throw new Error("Zaloguj sie ponownie.");
@@ -31,16 +33,17 @@ export function ManualOvokoOverride({ offerId, brandId, modelId, year, disabled,
       const preview = await request({ operation: "check", kind, offerId, brandId, modelId, year });
       const result = preview.resolved ? preview : preview.token ? await request({ operation: "confirm", token: preview.token, brandId, confirmManual: true }) : null;
       if (!result?.resolved) throw new Error("Nie potwierdzono odblokowania. Nie ponowiono wysylki.");
-      setMessage(result.message); onResolved(result);
+      setMessage(result.message); resolved = result;
     } catch (e) { setMessage(e instanceof Error ? e.message : "Nie potwierdzono wyniku. Nie ponowiono wysylki."); }
     finally { lock.current = false; setBusy(false); onBusyChange(false); }
+    if (resolved) onResolved(resolved);
   }
   const button = "rounded border border-orange-300/40 px-3 py-1.5 text-xs disabled:opacity-40";
   return <div className="space-y-2 rounded border border-orange-300/25 p-3 text-sm">
     <p className="text-xs text-white/65">Problem z poprzednia proba? Reczne odblokowanie na Twoja odpowiedzialnosc. Trwajacych wysylek nie przerywamy.</p>
     <div className="flex flex-wrap gap-2">
-      <button type="button" className={button} disabled={disabled || busy} onClick={() => void run("part")}>{busy ? "Sprawdzam..." : "Odblokuj te oferte"}</button>
-      <button type="button" className={button} disabled={disabled || busy || !brandId || !modelId || !year} onClick={() => void run("vehicle")}>Odblokuj wybrane auto</button>
+      <button type="button" className={button} disabled={disabled || busy} onClick={() => void run("part")}>{busy ? "Sprawdzam..." : continueTransfer ? "Odblokuj i przenies te oferte" : "Odblokuj te oferte"}</button>
+      <button type="button" className={button} disabled={disabled || busy || !brandId || !modelId || !year} onClick={() => void run("vehicle")}>{continueTransfer ? "Odblokuj auto i przenies te oferte" : "Odblokuj wybrane auto"}</button>
     </div>
     {message && <p role="status" className="text-xs text-amber-200">{message}</p>}
   </div>;

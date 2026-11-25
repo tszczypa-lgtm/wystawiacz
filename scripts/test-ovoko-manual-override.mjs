@@ -19,10 +19,12 @@ const c={sellerId:"555",account:"a".repeat(64),clientId:"client",get fingerprint
 const db=async(path,init={})=>{
  if(path.startsWith("ovoko_single_publications?")||path.startsWith("ovoko_vehicle_creations?"))return journal?[journal]:[];
  if(path.startsWith("ovoko_manual_overrides?"))return decisions;
- assert.equal(path,"rpc/apply_ovoko_manual_override");const b=JSON.parse(init.body);assert.equal(b.p_owner,owner);assert.equal(b.p_allegro,"a-sealed");assert.equal(b.p_ovoko,"o-sealed");assert.deepEqual(b.p_expected,journal||{});
+ const b=JSON.parse(init.body);assert.ok(["rpc/release_stale_ovoko_attempt","rpc/apply_ovoko_manual_override"].includes(path));assert.equal(b.p_owner,owner);assert.equal(b.p_allegro,"a-sealed");assert.equal(b.p_ovoko,"o-sealed");assert.deepEqual(b.p_expected,journal||{});
+ if(mode==="foreign-owner-lock"&&path==="rpc/apply_ovoko_manual_override")throw new store.SyncDbError(400,"P0001","physical account ownership conflict");
+ if(path==="rpc/release_stale_ovoko_attempt"){assert.equal(mode,"foreign-owner-lock");assert.equal(b.p_found,null);}
  applies++;const row={id:b.p_id,kind:b.p_kind,action:b.p_found?"reconciled":"released",found_id:b.p_found};decisions=[row];if(mode==="lost-ack")throw new Error("lost acknowledgment");return[row];
 };
-const {manualOvokoOverride:run}=load("ovoko-manual-override",name=>{
+const {manualOvokoOverride:run,overrideDatabaseError:diagnose}=load("ovoko-manual-override",name=>{
  if(name==="./sales-sync-connections")return{syncConnections:async()=>{if(!permitted)throw new read.OvokoError(403,"revoked");return c;},syncAuthorization:async()=>{if(!permitted)throw new read.OvokoError(403,"revoked");}};
  if(name==="./sales-sync-store")return{...store,salesSyncDb:()=>db};if(name==="./ovoko-read")return read;
  if(name==="./ovoko-connection")return{ovokoConnectionKey:async()=>"key"};
@@ -51,4 +53,18 @@ reset();journal=null;mode="present";p=await check();assert.equal(p.foundId,"20")
 reset();journal=null;p=await check();assert.equal(p.resolved,true);assert.equal(recoveryCalls.length,0);assert.equal(applies,0);
 reset();mode="present";journal.updated_at=new Date().toISOString();p=await check();assert.equal((await confirm(p)).action,"reconciled","Positive provider proof can repair a fresh uncertain row");
 reset();p=await check();mode="present";await assert.rejects(confirm(p));assert.equal(applies,0,"Provider result changing after preview invalidates consent");
+reset();mode="foreign-owner-lock";journal.owner_id="00000000-0000-4000-8000-000000000002";p=await check();assert.equal((await confirm(p)).resolved,true);assert.equal(applies,1,"Only the narrower old-row release runs after a known ownership-guard rejection");
+for(const [code,reason,expected]of[["P0001","physical account ownership conflict",/innego konta Wystawiacza/],["P0001","pending sale action for this offer",/operacja sprzedazy/],["PGRST202",undefined,/jednorazowa poprawka bazy/],["42501",undefined,/odmowil uprawnien/],["P0001",undefined,/Nie uznano tego automatycznie za brak migracji/]]){
+ const error=diagnose(new store.SyncDbError(400,code,reason),"rpc/release_stale_ovoko_attempt");assert.match(error.message,expected);assert.match(error.message,new RegExp(code));assert.equal(error.code,"override_database");
+}
+assert.doesNotMatch(diagnose(new Error("private-password-secret"),"rpc/release_stale_ovoko_attempt").message,/private-password-secret/);
+const originalFetch=globalThis.fetch;
+try{
+ for(const body of[{code:"P0001",message:"physical account ownership conflict"},{code:"42501",message:"private-secret-database-detail"},{code:"private-secret-code",message:"private-secret-body"}]){
+  globalThis.fetch=async()=>Response.json(body,{status:400});
+  await assert.rejects(store.salesSyncDb({SUPABASE_SERVICE_ROLE_KEY:"fixture-key",NEXT_PUBLIC_SUPABASE_URL:"https://fixture.test"})("rpc/release_stale_ovoko_attempt"),error=>{
+   assert.ok(error instanceof store.SyncDbError);assert.doesNotMatch(JSON.stringify(error),/private-secret/);assert.equal(error.databaseReason,body.message==="physical account ownership conflict"?body.message:undefined);return true;
+  });
+ }
+}finally{globalThis.fetch=originalFetch;}
 console.log("Manual override server: stale preview, explicit confirmations, provider presence/conflicts, token expiry, account binding, permissions, vehicle brand binding, idempotent lost DB acknowledgment, and zero provider writes passed. Fixtures only.");

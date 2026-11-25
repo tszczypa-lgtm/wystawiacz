@@ -8,9 +8,10 @@ try {
  for (const id of [owner, other]) await db.query("insert into auth.users values($1)", [id]);
  await db.query("insert into public.allegro_connections values($1,'a-sealed')", [owner]);
  await db.query("insert into public.ovoko_connections values($1,'o-sealed')", [owner]);
- for (const file of ["012_ovoko_single_publications.sql", "013_ovoko_vehicle_creations.sql", "016_sales_sync.sql", "017_inventory_operations.sql", "018_reverse_sales_sync.sql", "019_sync_ownership_reservations.sql", "020_inventory_link_recovery.sql", "021_ovoko_manual_overrides.sql", "023_ovoko_scoped_recovery.sql", "023_ovoko_scoped_recovery.sql"]) await db.exec(await readFile(new URL(`../supabase/${file}`, import.meta.url), "utf8"));
+ for (const file of ["012_ovoko_single_publications.sql", "013_ovoko_vehicle_creations.sql", "016_sales_sync.sql", "017_inventory_operations.sql", "018_reverse_sales_sync.sql", "019_sync_ownership_reservations.sql", "020_inventory_link_recovery.sql", "021_ovoko_manual_overrides.sql", "023_ovoko_scoped_recovery.sql", "023_ovoko_scoped_recovery.sql", "024_release_stale_ovoko_attempt.sql", "024_release_stale_ovoko_attempt.sql"]) await db.exec(await readFile(new URL(`../supabase/${file}`, import.meta.url), "utf8"));
  const publication = async (offer, who = owner) => { await db.query("insert into public.ovoko_single_publications(owner_id,ovoko_account,allegro_seller_id,allegro_offer_id,request_hash,state,updated_at) values($1,$2,'555',$3,$4,'uncertain',now()-interval '1 hour')", [who, account, offer, hash]); return (await db.query("select to_jsonb(j) as row from public.ovoko_single_publications j where allegro_offer_id=$1", [offer])).rows[0].row; };
- const apply = (offer, row, { id = crypto.randomUUID(), kind = "part", model = null, year = null, found = null, sealed = "a-sealed", reason = "Sprawdzono wszystkie statusy" } = {}) => db.query("select * from public.apply_ovoko_manual_override($1,$2,$3,$4,'555',$5,$6,$7,$8,$9,$10,$11,'o-sealed')", [owner,id,kind,account,offer,model,year,row,found,reason,sealed]);
+ const apply = (offer, row, { id = crypto.randomUUID(), kind = "part", model = null, year = null, found = null, sealed = "a-sealed", reason = "Sprawdzono wszystkie statusy",rpc="apply_ovoko_manual_override" } = {}) => db.query(`select * from public.${rpc}($1,$2,$3,$4,'555',$5,$6,$7,$8,$9,$10,$11,'o-sealed')`, [owner,id,kind,account,offer,model,year,row,found,reason,sealed]);
+ const release=(offer,row,options={})=>apply(offer,row,{...options,rpc:"release_stale_ovoko_attempt"});
  let row = await publication("10"); const id = crypto.randomUUID();
  await assert.rejects(apply("10", row, { sealed: "changed" }));
  await assert.rejects(apply("10", row, { reason: "short" }));
@@ -65,5 +66,28 @@ try {
  saved=(await db.query("select * from public.ovoko_single_publications where allegro_offer_id='22'")).rows[0];
  assert.equal(saved.origin,"recovered");assert.equal(saved.part_id,"122");
  await assert.rejects(apply("23",{}),"No absent journal can be forced into a publication");
+ // Reproduce stale publications created under an earlier Wystawiacz owner.
+ await db.query("delete from public.sales_sync_accounts");
+ await db.query("insert into public.sales_sync_accounts(owner_id,seller_id,ovoko_account) values($1,'555',$2)",[other,account]);
+ await db.query("insert into public.sales_sync_reverse(owner_id,epoch,enabled,seller_id,ovoko_account,fingerprint,client_id,armed_at,baseline,watch) values($1,gen_random_uuid(),true,'555',$2,'fingerprint','client',now(),'[]','[]')",[other,account]);
+ row=await publication("30",other);
+ await assert.rejects(apply("30",row),/physical account ownership conflict/,"Old recovery incorrectly depends on global synchronization ownership");
+ await db.exec("alter role service_role bypassrls;grant usage on schema public,auth to service_role;grant select on public.allegro_connections,public.ovoko_connections to service_role;set role service_role");
+ const releaseId=crypto.randomUUID();assert.equal((await release("30",row,{id:releaseId})).rows[0].action,"released");
+ assert.equal((await release("30",row,{id:releaseId})).rows[0].id,releaseId,"Lost release acknowledgement does not repeat deletion");
+ assert.equal((await db.query("select owner_id from public.sales_sync_accounts")).rows[0].owner_id,other,"Releasing one stale attempt never steals synchronization ownership");
+ assert.equal((await db.query("select enabled from public.sales_sync_reverse where owner_id=$1",[other])).rows[0].enabled,true);
+ await db.exec("reset role");
+ row=await publication("31",other);await db.query("update public.ovoko_single_publications set updated_at=now() where allegro_offer_id='31'");await assert.rejects(release("31",row),/operation too recent/);
+ row=await publication("32",other);await assert.rejects(release("32",{...row,request_hash:"changed"}),/operation changed/);await assert.rejects(release("32",row,{found:"132"}));await assert.rejects(release("32",row,{sealed:"changed"}),/connection changed/);
+ await db.query("update public.sales_sync_reverse set lease_until=now()+interval '1 minute' where owner_id=$1",[other]);await assert.rejects(release("32",row),/synchronization check in progress/);await db.query("update public.sales_sync_reverse set lease_until=null");
+ await db.query("insert into public.sales_sync_actions(owner_id,epoch,seller_id,offer_id,part_id,publication_hash,item_id,bought_at,state) values($1,gen_random_uuid(),'555','32','132',$2,'item-32',now(),'queued')",[other,hash]);await assert.rejects(release("32",row),/pending sale action/);await db.query("update public.sales_sync_actions set state='done' where offer_id='32'");
+ await db.query("update public.ovoko_single_publications set state='created',part_id='132' where allegro_offer_id='32'");await assert.rejects(release("32",row),/operation changed/);
+ const deletedPart=(await db.query("select to_jsonb(j) as row from public.ovoko_single_publications j where allegro_offer_id='32'")).rows[0].row;
+ assert.equal((await release("32",deletedPart)).rows[0].action,"released","Explicit absence proof can also release an old created record after user deleted the actual Ovoko part");
+ await db.query("insert into public.ovoko_vehicle_creations(owner_id,ovoko_account,model_id,vehicle_year,state,updated_at) values($1,$2,'33','2010','uncertain',now()-interval '1 hour')",[other,account]);
+ const staleVehicle=(await db.query("select to_jsonb(j) as row from public.ovoko_vehicle_creations j where model_id='33'")).rows[0].row;
+ await db.exec("set role service_role");assert.equal((await release("33",staleVehicle,{kind:"vehicle",model:"33",year:"2010"})).rows[0].action,"released");await db.exec("reset role");
+ for(const role of["anon","authenticated"]){await db.exec(`set role ${role}`);await assert.rejects(release("33",staleVehicle,{kind:"vehicle",model:"33",year:"2010"}));await db.exec("reset role");}
  console.log("Manual override SQL: migration rerun, stale CAS, freshness, credentials, audit, release/reconcile, handover, idempotence, conflicting IDs, vehicle reuse, sync lease/pending recovery and browser role guards passed. Local PostgreSQL only.");
 } finally { await db.close(); }
