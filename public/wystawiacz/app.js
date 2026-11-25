@@ -577,7 +577,8 @@ function addCurrentProductToList() {
     descriptionVehicleFull: getSelectedVehicle()?.full || state.descriptionVehicleFull || "",
     vehicleDescriptionBlock: state.vehicleDescriptionBlock || null,
     sourceVehicleTitle: state.sourceVehicleTitle || "",
-    selectedVehicleId: state.selectedVehicleId
+    selectedVehicleId: state.selectedVehicleId,
+    ovokoListing: window.ListingOvoko?.capture(getSelectedVehicle())
   };
 
   if (product.catalogLinkRequested && !product.catalogProduct) {
@@ -590,7 +591,11 @@ function addCurrentProductToList() {
     Object.assign(product, {
       allegroOfferId: state.products[existingIndex]?.allegroOfferId,
       publishStatus: state.products[existingIndex]?.publishStatus,
-      allegroResponse: state.products[existingIndex]?.allegroResponse
+      allegroResponse: state.products[existingIndex]?.allegroResponse,
+      ovokoResult: state.products[existingIndex]?.ovokoResult,
+      ovokoNotes: state.products[existingIndex]?.ovokoNotes,
+      ovokoStatus: state.products[existingIndex]?.ovokoStatus,
+      ovokoError: state.products[existingIndex]?.ovokoError
     });
     state.products[existingIndex] = product;
     showToast("Zapisano zmiany aukcji.");
@@ -678,6 +683,7 @@ function renderProducts() {
           <p>Wysyłka: ${escapeHtml(product.shippingRateName || "profil do wybrania")}</p>
           <p>Zwrot: ${escapeHtml(product.returnPolicyName || "brak")} · Reklamacja: ${escapeHtml(product.impliedWarrantyName || "brak")}</p>
           ${product.publishError ? `<p class="publish-error">Błąd Allegro: ${escapeHtml(product.publishError)}</p>` : ""}
+          ${product.ovokoListing?.enabled ? `<p>Ovoko: ${escapeHtml(product.ovokoListing.price)} / ${escapeHtml(product.ovokoListing.vehicleName)}. ${escapeHtml(product.ovokoStatus || "Do wystawienia")}</p>${product.ovokoError ? `<p class="publish-error">${escapeHtml(product.ovokoError)}. Allegro nie bedzie wystawione ponownie.</p>` : ""}` : ""}
         </div>
         <div class="product-price">
           <label>
@@ -685,10 +691,11 @@ function renderProducts() {
           </label>
           <span>${escapeHtml(product.publishStatus || (product.allegroOfferId ? "WYSTAWIONO" : "GOTOWE"))}</span>
         </div>
-        <button class="publish-button" type="button" data-publish-product-id="${escapeHtml(product.id)}" ${product.allegroOfferId ? "disabled" : ""}>
-          ${product.allegroOfferId ? "Wystawiona" : "Wystaw"}
+        <button class="publish-button" type="button" data-publish-product-id="${escapeHtml(product.id)}" ${publishingProducts.has(product.id) || product.allegroOfferId && (!product.ovokoListing?.enabled || product.ovokoResult?.done) ? "disabled" : ""}>
+          ${product.allegroOfferId ? product.ovokoListing?.enabled && !product.ovokoResult?.done ? "Ponow tylko Ovoko" : "Wystawiona" : product.ovokoListing?.enabled ? "Wystaw Allegro + Ovoko" : "Wystaw"}
         </button>
         <div class="product-row-actions">
+          ${product.allegroOfferId && product.ovokoListing?.enabled && !product.ovokoResult?.done ? `<button type="button" data-edit-ovoko-product-id="${escapeHtml(product.id)}" ${publishingProducts.has(product.id) ? "disabled" : ""}>Popraw Ovoko</button>` : ""}
           <button class="edit-button" type="button" data-product-id="${escapeHtml(product.id)}" ${publishingProducts.has(product.id) ? "disabled" : ""}>${product.allegroOfferId ? "Edytuj w Allegro" : "Edytuj"}</button>
           <button class="remove-product-button" type="button" data-remove-product-id="${escapeHtml(product.id)}" aria-label="Usuń z listy: ${escapeHtml(product.title)}" title="Usuń tylko z listy Wystawiacza, nie z Allegro" ${batchPublishing || publishingProducts.has(product.id) ? "disabled" : ""}>Usuń</button>
         </div>
@@ -699,6 +706,13 @@ function renderProducts() {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
       publishProduct(button.dataset.publishProductId);
+    });
+  });
+  productList.querySelectorAll("[data-edit-ovoko-product-id]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.stopPropagation();
+      const product=state.products.find(item=>item.id===button.dataset.editOvokoProductId);
+      if(product&&!publishingProducts.has(product.id))window.ListingOvoko?.editPublished(product,renderProducts);
     });
   });
   productList.querySelectorAll("[data-select-product-id]").forEach(input => {
@@ -842,6 +856,7 @@ function resetForm() {
   updateProductNavigation();
   renderPhotos();
   renderVehicleButtons();
+  window.ListingOvoko?.restore(null);
 }
 
 function detectProductDetails() {
@@ -1526,6 +1541,10 @@ async function restoreSessionPayload(raw) {
     if (payload.draft && typeof payload.draft.title === "string" && payload.draft.title) {
       const draft = { ...payload.draft, id: crypto.randomUUID(), stock: payload.draft.stock || 1, photoNames: payload.draft.photoNames || [] };
       delete draft.allegroOfferId;
+      delete draft.ovokoResult;
+      delete draft.ovokoStatus;
+      delete draft.ovokoError;
+      delete draft.ovokoNotes;
       window.SessionSafety.validate({ format: payload.format, products: [draft] });
       state.products.push(draft); editProduct(draft.id); state.products.pop();
       activeProductId = state.products.some(p => p.id === payload.activeProductId && !p.allegroOfferId) ? payload.activeProductId : "";
@@ -1826,6 +1845,7 @@ function updateAutomaticDescriptionText() {
 
 let editingVehicleId = null;
 function resetVehicleEditor() {
+  window.ListingOvoko?.editorReset();
   editingVehicleId = null;
   vehicleManufacturerInput.value = "";
   vehicleShortInput.value = "";
@@ -1835,7 +1855,8 @@ function resetVehicleEditor() {
   document.getElementById("cancelVehicleEditButton").classList.add("hidden");
 }
 
-function addVehicle() {
+async function addVehicle() {
+  if (addVehicleButton.disabled) return;
   const manufacturer = normalizeManufacturerName(vehicleManufacturerInput.value);
   const short = vehicleShortInput.value.trim();
   const buttonLabel = vehicleButtonLabelInput.value.trim();
@@ -1850,18 +1871,28 @@ function addVehicle() {
     showToast("To auto nie jest juz na liscie. Dodaj je ponownie.");
     return;
   }
+  const vehicle = { id: existing?.id || crypto.randomUUID(), manufacturer, short, full, buttonLabel };
+  addVehicleButton.disabled = true;
+  try {
+    if (window.ListingOvoko) await window.ListingOvoko.saveVehicle(vehicle, existing);
+  } catch (error) {
+    showToast(error.message);
+    addVehicleButton.disabled = false;
+    return;
+  }
+  addVehicleButton.disabled = false;
   if (existing) {
     const selected = state.selectedVehicleId === existing.id;
     if (selected) {
       titleInput.value = titleInput.value.replace(new RegExp(`\\s*${escapeRegExp(existing.short)}\\s*`, "i"), " ").trim();
       state.selectedVehicleId = "";
     }
-    Object.assign(existing, { manufacturer, short, full, buttonLabel });
+    Object.assign(existing, vehicle);
     if (selected) useVehicle(existing.id);
-  } else state.vehicles.push({ id: crypto.randomUUID(), manufacturer, short, full, buttonLabel });
+  } else state.vehicles.push(vehicle);
   resetVehicleEditor();
   renderVehicles();
-  showToast(existing ? "Zapisano zmiany auta." : "Auto dodane do listy sesji.");
+  showToast(vehicle.ovokoCarError || (vehicle.ovokoCarId ? `Auto zapisane. Ovoko ID: ${vehicle.ovokoCarId}.` : existing ? "Zapisano zmiany auta." : "Auto zapisane w sesji i w Moich samochodach."));
 }
 
 function renderVehicles() {
@@ -1894,6 +1925,7 @@ function renderVehicles() {
       vehicleShortInput.value = vehicle.short;
       vehicleButtonLabelInput.value = vehicle.buttonLabel || "";
       vehicleFullInput.value = vehicle.full;
+      window.ListingOvoko?.editorRestore(vehicle);
       addVehicleButton.textContent = "Zapisz zmiany";
       document.getElementById("cancelVehicleEditButton").classList.remove("hidden");
       vehicleShortInput.focus();
@@ -1925,6 +1957,7 @@ function useVehicle(id) {
   if (part) title = title.replace(new RegExp(`\\s*${escapeRegExp(part)}\\s*$`, "i"), "").trim();
   titleInput.value = `${title}${title ? " " : ""}${vehicle.short}${part ? ` ${part}` : ""}`.trim();
   state.selectedVehicleId = id;
+  window.ListingOvoko?.refreshVehicle();
   state.appendedPartNumber = part;
   const replacedBlock = descriptionEditor.replaceVehicle(vehicle);
   if (!replacedBlock && state.sourceVehicleTitle && state.descriptionManuallyEdited) showToast("Model w tytule zmieniony. W skopiowanym opisie zaznacz stare dane auta i kliknij Wstaw dane auta tutaj; nie zgadujemy, ktore akapity usunac.");
@@ -1942,7 +1975,10 @@ function normalizeVehicle(vehicle) {
     manufacturer,
     short,
     buttonLabel: typeof vehicle?.buttonLabel === "string" ? vehicle.buttonLabel.slice(0, 40) : "",
-    full
+    full,
+    libraryId: typeof vehicle?.libraryId === "string" ? vehicle.libraryId : "",
+    libraryRevision: Number.isSafeInteger(vehicle?.libraryRevision) ? vehicle.libraryRevision : 0,
+    ovoko: vehicle?.ovoko || null
   };
 }
 
@@ -1966,6 +2002,12 @@ async function publishProduct(id) {
   const product = state.products.find((item) => item.id === id);
   if (!product) return;
   if (product.allegroOfferId || product.publishStatus === "WYSTAWIONO") {
+    if (product.allegroOfferId && product.ovokoListing?.enabled && !product.ovokoResult?.done) {
+      publishingProducts.add(id);
+      try { await window.ListingOvoko.publish(product, renderProducts); }
+      finally { publishingProducts.delete(id); renderProducts(); }
+      return;
+    }
     showToast("Ta aukcja jest juz wystawiona. Nie wysylamy jej ponownie.");
     return;
   }
@@ -2001,6 +2043,8 @@ async function publishProduct(id) {
     }
     const parameterError = validateListingParameters({ ...product, parameterValues: validationValues }, parameterDefinitions);
     if (parameterError) throw new Error(parameterError);
+    stage = "Sprawdzanie Ovoko";
+    await window.ListingOvoko?.preflight(product);
     stage = "Wysylanie zdjec";
     product.publishStatus = "Wysyłanie zdjęć...";
     renderProducts();
@@ -2008,6 +2052,7 @@ async function publishProduct(id) {
     product.publishStatus = "Tworzenie oferty...";
     renderProducts();
     const offer = buildAllegroOfferPayload(product, imageUrls, parameterDefinitions, location);
+    if (product.ovokoListing?.enabled) product.ovokoNotes = window.ListingOvoko.notes(offer.description);
     stage = "Tworzenie oferty";
     const result = await apiRequest("/api/product-offers", {
       method: "POST",
@@ -2016,6 +2061,7 @@ async function publishProduct(id) {
     product.allegroOfferId = result.id || result.offer?.id || "";
     product.publishStatus = "WYSTAWIONO";
     product.allegroResponse = result;
+    if (product.ovokoListing?.enabled) await window.ListingOvoko.publish(product, renderProducts);
     showToast(`Wystawiono aukcję${product.allegroOfferId ? ` ID: ${product.allegroOfferId}` : ""}.`);
   } catch (error) {
     product.publishStatus = "BŁĄD";
@@ -2386,6 +2432,7 @@ function editProduct(id) {
   renderAfterSalesInputs(product);
   state.appendedPartNumber = product.enteredPartNumber || "";
   state.selectedVehicleId = product.selectedVehicleId || "";
+  window.ListingOvoko?.restore(product);
   state.descriptionText = product.descriptionText || "Część używana 100% sprawna";
   state.descriptionFullLayout = product.descriptionFullLayout === true;
   state.descriptionVehicleFull = product.descriptionVehicleFull || "";
@@ -2456,6 +2503,7 @@ function getFormProduct(id) {
   product.vehicleDescriptionBlock = state.vehicleDescriptionBlock || null;
   product.sourceVehicleTitle = state.sourceVehicleTitle || "";
   product.selectedVehicleId = state.selectedVehicleId;
+  product.ovokoListing = window.ListingOvoko?.capture(getSelectedVehicle());
   return product;
 }
 
@@ -2485,4 +2533,14 @@ function showToast(message) {
   clearTimeout(showToast.timeout);
   showToast.timeout = setTimeout(() => toast.classList.remove("visible"), 3200);
 }
+
+window.ListingOvoko?.mount({
+  selected: getSelectedVehicle,
+  toast: showToast,
+  importVehicle(vehicle) {
+    const existing = state.vehicles.find(row => row.libraryId === vehicle.libraryId);
+    if (!existing) state.vehicles.push(vehicle);
+    renderVehicles();
+  }
+});
 

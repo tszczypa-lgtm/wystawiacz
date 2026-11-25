@@ -12,6 +12,10 @@
       if (typeof product.title !== "string" || product.title.length > 1000 || !Number.isInteger(Number(product.stock)) || Number(product.stock) < 1) throw new Error("Nieprawidlowy tytul lub liczba sztuk w sesji.");
       product.stock = Number(product.stock);
       if (product.allegroOfferId && !/^\d+$/.test(String(product.allegroOfferId))) throw new Error("Nieprawidlowy identyfikator oferty.");
+      if (product.ovokoListing != null) {
+        const row=product.ovokoListing;
+        if(!row||typeof row!=="object"||Array.isArray(row)||typeof row.enabled!=="boolean"||["price","vehicleId","vehicleName","categoryId","stockMode"].some(key=>typeof row[key]!=="string"||row[key].length>500))throw new Error("Nieprawidlowe ustawienia Ovoko w sesji.");
+      }
       if (!Array.isArray(product.photoNames) || product.photoNames.some(name => typeof name !== "string" || name.length > 1000)) throw new Error("Nieprawidlowa lista zdjec.");
       return product;
     });

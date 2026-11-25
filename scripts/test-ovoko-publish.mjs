@@ -14,6 +14,9 @@ function load(file) {
 }
 const { handleOvokoApi } = load(path.join(root, "lib/ovoko-api.ts"));
 const { sealConnection } = load(path.join(root, "lib/allegro-api.ts"));
+const { ovokoWriteDigest } = load(path.join(root, "lib/ovoko-write-client.ts"));
+const workspaceCarId="30000000-0000-4000-8000-000000000001";
+const workspaceCar={manufacturer:"Audi",short:"Audi A4",buttonLabel:"A4",full:"Audi A4 2005",ovoko:{brandId:"1",modelId:"11",year:"2005",vin:"WAUZZZ8K0AA000001",engineCode:"",capacity:"",power:"",mileage:"",color:"",place:""}};
 const keyBytes = new Uint8Array(32).fill(7), key = await crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, ["encrypt", "decrypt"]);
 const env = { BILLING_ENFORCED: "true", SUPABASE_SERVICE_ROLE_KEY: "fixture", ALLEGRO_ENCRYPTION_KEY: Buffer.from(keyBytes).toString("base64"), OVOKO_PUBLISH_ENABLED: "true" };
 const credentials = { username: "fixture-account", password: "private-password", user_token: "private-token" };
@@ -45,6 +48,14 @@ globalThis.fetch = async (input, options = {}) => {
   if (url.pathname === "/rest/v1/account_admins") return Response.json(admin ? [{ owner_id: owner() }] : []);
   if (url.pathname === "/rest/v1/allegro_connections") return Response.json([{ sealed: await sealConnection({ accessToken: "seller-token", expiresAt: Date.now() + 3600000 }, key, owner()) }]);
   if (url.pathname === "/rest/v1/ovoko_connections") { credentialReads++; return Response.json([{ sealed: await sealConnection({ ...credentials, ...(credentialReads >= rotateAt ? { password: "private-changed" } : {}) }, key, `ovoko:v1:${owner()}`) }]); }
+  if(url.pathname==="/rest/v1/workspace_vehicles"){
+    assert.equal(url.searchParams.get("owner_id"),`eq.${owner()}`);
+    return Response.json(url.searchParams.get("id")===`eq.${workspaceCarId}`?[{id:workspaceCarId,revision:1,payload:workspaceCar}]:[]);
+  }
+  if(url.pathname==="/rest/v1/workspace_vehicle_ovoko"){
+    assert.equal(url.searchParams.get("owner_id"),`eq.${owner()}`);assert.equal(url.searchParams.get("vehicle_id"),`eq.${workspaceCarId}`);
+    return Response.json([{state:"created",car_id:"13",request_hash:await ovokoWriteDigest(JSON.stringify(workspaceCar.ovoko))}]);
+  }
   if (url.pathname === "/rest/v1/ovoko_vehicle_creations") { assert.equal(method, "GET", "Bulk reuses the saved vehicle without creating a duplicate"); return Response.json([]); }
   if (url.pathname === "/rest/v1/ovoko_stock_groups") return missingStockSchema ? new Response("missing", { status: 404 }) : Response.json(stockGroup ? [stockGroup] : []);
   if (url.pathname === "/rest/v1/rpc/prepare_ovoko_stock_group") {
@@ -120,6 +131,7 @@ globalThis.fetch = async (input, options = {}) => {
   assert.equal(url.origin, "https://api.rrr.lt"); assert.equal(method, "POST"); assert.equal(options.redirect, "manual");
   const form = new URLSearchParams(options.body);
   for (const [key, value] of Object.entries(credentials)) assert.equal(form.get(key), value);
+  if(url.pathname==="/get/car/13")return Response.json({status_code:"R200",list:[[{id:"13",car_model:"11",car_years:"2005",car_body_number:workspaceCar.ovoko.vin}]]});
   if (url.pathname === "/get/categories") return Response.json({ status_code: "R200", list: [{ id: "3", parent_id: "0", level: "3", pl: categoryName }] });
   if (url.pathname === "/get/car_brands") return Response.json({ status_code: "R200", list: [{ id: "1", name: "Audi" }, { id: "2", name: "Volkswagen" }] });
   if (url.pathname === "/get/part_quality") return Response.json({ status_code: "R200", list: { "0": { pl: "Używany" } } });
@@ -512,5 +524,21 @@ try {
   const missingCar = await bulkPlan({ mode: "none", value: "0" }); const blocked = await bulkSend(missingCar);
   assert.equal(blocked.status, 400); assert.match(await blocked.text(), /Nie rozpoznano modelu/); assert.equal(writes, 0);
   snapshot.title = originalTitle;
+  {
+  reset();bulk=true;expectedPrice="125.00";
+  const listingBody={operation:"prepare",offerId:"101",vehicleId:workspaceCarId,price:"125.00",stockMode:"shared",categoryId:"3",notes:"Opis & uwagi + numer",binding:{sellerId:"555",fingerprint:await ovokoWriteDigest(JSON.stringify(credentials))}};
+  const listing=body=>handleOvokoApi(new Request("https://publish.test/api/ovoko/workspace-listing",{method:"POST",headers:{Authorization:"Bearer fixture",Origin:"https://publish.test","Content-Type":"application/json"},body:JSON.stringify(body)}),env);
+  const planResponse=await listing(listingBody);assert.equal(planResponse.status,200,await planResponse.clone().text());
+  const plan=await planResponse.json();assert.equal(plan.prepared.donorId,"13");assert.equal(plan.expectedSource.price,"100.00");
+  assert.ok(!calls.some(call=>call.url.includes("compatibility-list")||call.url.includes("api.openai.com")||call.url.includes("/crm/importCar")),"A selected physical donor bypasses model guessing and never creates a generic car");
+  const publishBody={...listingBody,operation:"item",prepared:plan.prepared,expectedSource:plan.expectedSource};
+  const forged=await listing({...publishBody,prepared:{...plan.prepared,donorId:"999"}});assert.equal(forged.status,409);assert.equal(writes,0);
+  const listed=await listing(publishBody);assert.equal(listed.status,200,await listed.clone().text());assert.equal(writes,1);
+  assert.equal((await listing(publishBody)).status,200);assert.equal(writes,1,"Dual-listing uses the existing durable source lock");
+  const missing=await listing({...listingBody,vehicleId:"30000000-0000-4000-8000-000000000002"});assert.equal(missing.status,404);
+  const stale=await listing({...publishBody,expectedSource:{...plan.expectedSource,stock:2}});assert.equal(stale.status,409);assert.equal(writes,1);
+  const foreign=await listing({...listingBody,binding:{...listingBody.binding,sellerId:"666"}});assert.equal(foreign.status,409);
+  console.log("Workspace listing: exact physical donor, separate price, owned source snapshot, no model guessing, forged donor rejection, durable replay and account/source change guards passed.");
+  }
   console.log("Ovoko single + bulk publication: guards, source/target binding, prices, multi-make model lookup, constrained fallback and generation/brand conflicts, car reuse, full photos, durable duplicate locks and uncertain no-retry passed. All services mocked; nothing published live.");
 } finally { globalThis.fetch = originalFetch; Date.now = originalNow; }

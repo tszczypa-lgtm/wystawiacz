@@ -1,5 +1,7 @@
 import { accountContext, type AccountEnv } from "./account-api";
 import { searchPriceComparison } from "./price-comparison";
+import {workspaceVehicles} from "./workspace-vehicles";
+import {OvokoError} from "./ovoko-read";
 const uuid = /^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i;
 
 export async function handleWorkspaceApi(request: Request, env: AccountEnv) {
@@ -9,6 +11,10 @@ export async function handleWorkspaceApi(request: Request, env: AccountEnv) {
     if (context.account.suspended) return reply({ message: "Konto zawieszone." }, 403);
     const url = new URL(request.url);
     const path = url.pathname.slice("/api/workspace".length);
+    if(path==="/vehicles"){
+      try{return reply(await workspaceVehicles(request,context));}
+      catch(error){if(error instanceof OvokoError)throw error;throw new OvokoError(503,"Nie zapisano lub nie odczytano Moich samochodow. Sprawdz migracje 027 i dostep do bazy.");}
+    }
     if (path === "/price-comparison" && request.method === "GET") {
       const result = await searchPriceComparison(context.user.id, url.searchParams.get("number") || "");
       return "error" in result ? reply({ message: result.error }, result.status) : reply(result);
@@ -85,6 +91,7 @@ export async function handleWorkspaceApi(request: Request, env: AccountEnv) {
     }
     return reply({ message: "Nieznana operacja." }, 404);
   } catch (error) {
+    if(error instanceof OvokoError)return reply({message:error.message},error.status);
     if (error instanceof Error && "status" in error && error.status === 401) return reply({ message: "Sesja wygasla. Zaloguj sie ponownie." }, 401);
     return reply({ message: "Nie udalo sie obsluzyc sesji. Sprawdz logowanie i migracje 004; lokalny eksport pozostaje dostepny." }, 503);
   }

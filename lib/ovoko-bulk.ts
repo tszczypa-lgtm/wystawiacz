@@ -3,6 +3,8 @@ import { handleAllegroApi } from "./allegro-api";
 import { loadOvokoConnection, ovokoConnectionKey } from "./ovoko-connection";
 import { publishOvokoPart, type OvokoPublishEnv } from "./ovoko-publish";
 import { createOvokoCar } from "./ovoko-create-car";
+import { workspaceVehicleOvoko } from "./workspace-vehicle-ovoko";
+import { workspaceVehicleId } from "./workspace-vehicles";
 import { initialOvokoDraft, ovokoPublicationBlockers, ovokoSourcePreview, validOvokoCode } from "./ovoko-preparation";
 import { automaticOvokoBrand, automaticOvokoModel, ovokoAutomaticFields, ovokoModelHasConflict, suggestOvokoBrands, vehicleSuggestionText } from "./ovoko-suggestions";
 import { ovokoCarYear } from "./ovoko-car-selection";
@@ -19,7 +21,8 @@ import { lookupWebFitment, selectWebVehicle, webVehicleMismatchMessage } from ".
 type Context = Awaited<ReturnType<typeof accountContext>>;
 export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, context: Context, input: Record<string, unknown>) {
   if (env.OVOKO_PUBLISH_ENABLED !== "true") throw new OvokoError(503, "Publikacja Ovoko jest wylaczona.");
-  if (!["start", "prepare", "item"].includes(String(input.operation)) || Object.keys(input).some(key => !["operation", "offerId", "adjustment", "binding", "notes", "expectedSource", "prepared", "fallbackVehicle", "overrides", "allowTechnicalModel", "manualVehicle", "stockMode"].includes(key))) throw new OvokoError(400, "Nieprawidlowa operacja przenoszenia.");
+  if (!["start", "prepare", "item"].includes(String(input.operation)) || Object.keys(input).some(key => !["operation", "offerId", "adjustment", "binding", "notes", "expectedSource", "prepared", "fallbackVehicle", "overrides", "allowTechnicalModel", "manualVehicle", "stockMode", "workspaceVehicleId"].includes(key))) throw new OvokoError(400, "Nieprawidlowa operacja przenoszenia.");
+  if (input.workspaceVehicleId !== undefined && !workspaceVehicleId(input.workspaceVehicleId)) throw new OvokoError(400, "Nieprawidlowy samochod z biblioteki.");
   const stockMode = publicationStockMode(input.stockMode);
   if (input.manualVehicle !== undefined && typeof input.manualVehicle !== "boolean") throw new OvokoError(400, "Nieprawidlowy wybor reczny.");
   if (input.allowTechnicalModel !== undefined && typeof input.allowTechnicalModel !== "boolean") throw new OvokoError(400, "Nieprawidlowy tryb modelu roboczego.");
@@ -53,10 +56,14 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
   if (!expected || !sameOvokoMoney(expected.price, source.price) || ["title", "currency", "stock", "status", "condition"].some(key => expected[key] !== source[key as keyof typeof source]) || JSON.stringify(expected.images) !== JSON.stringify(source.images)) throw new OvokoError(409, "Oferta Allegro zmienila sie. Sprawdz dane przed ponownym przeniesieniem.");
   let price: string;
   try { price = adjustedOvokoPrice(source.price, source.currency, input.adjustment); } catch (error) { throw new OvokoError(400, (error as Error).message); }
+  const workspaceCar = input.workspaceVehicleId ? await workspaceVehicleOvoko(request, env, context, input.workspaceVehicleId) : null;
   if (input.operation === "item") {
     const prepared = input.prepared as Record<string, unknown> | null;
     const keys = ["brandId", "modelId", "donorId", "categoryId", "qualityId", "statusId", "manufacturerCode", "additionalCodes"];
     if (!prepared || Array.isArray(prepared) || Object.keys(prepared).some(key => !keys.includes(key)) || keys.some(key => typeof prepared[key] !== "string")) throw new OvokoError(400, "Brak przygotowania pozycji. Nie wyslano czesci.");
+    if (workspaceCar) {
+      if (prepared.donorId !== workspaceCar.carId || prepared.brandId !== workspaceCar.brandId || prepared.modelId !== workspaceCar.modelId) throw new OvokoError(409, "Czesc nie jest przypisana do wybranego samochodu.");
+    }
     // Publication owns the item precheck; do not page a large group twice in one Worker request.
     const result = await publishOvokoPart(request, env, context, { ...prepared, offerId: source.id, price, currency: source.currency, notes: source.description, confirmSingle: true, expectedSource: input.expectedSource, stockMode }, { sellerId: owned.sellerId, fingerprint });
     return { ...result, price, currency: source.currency };
@@ -93,6 +100,15 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
     draft.categoryId = overrides.categoryId as string;
   }
   if (overrides?.manufacturerCode !== undefined) draft.manufacturerCode = overrides.manufacturerCode as string;
+  if (workspaceCar) {
+    const car = workspaceCar;
+    draft.donorId = car.carId;
+    const blockers = ovokoPublicationBlockers(source, draft, car.brandId, car.modelId);
+    const category = dictionaries.categories.find(row => row.id === draft.categoryId && row.level === "3");
+    if (!category) blockers.push("Wybierz kategorie Ovoko dla tej czesci.");
+    if (blockers.length) throw new OvokoError(400, blockers.join(" "), "preparation_incomplete");
+    return { ok: true, prepared: { brandId: car.brandId, modelId: car.modelId, donorId: car.carId, categoryId: draft.categoryId, qualityId: draft.qualityId, statusId: draft.statusId, manufacturerCode: draft.manufacturerCode, additionalCodes: draft.additionalCodes || "" }, price, currency: source.currency };
+  }
   let brandId = automaticOvokoBrand(source.title, source.parameters, dictionaries.brands);
   const modelCache = new Map<string, OvokoReadRow[]>();
   const loadModels = async (brand: string) => {

@@ -6,7 +6,9 @@ const validation = moduleUrl(await readFile(new URL("../lib/account-validation.t
 const account = moduleUrl((await readFile(new URL("../lib/account-api.ts", import.meta.url), "utf8")).replace('"./account-validation"', JSON.stringify(validation)));
 const { accountAccess } = await import(account);
 const pricing = moduleUrl(await readFile(new URL("../lib/price-comparison.ts", import.meta.url), "utf8"));
-const { handleWorkspaceApi } = await import(moduleUrl((await readFile(new URL("../lib/workspace-api.ts", import.meta.url), "utf8")).replace('"./account-api"', JSON.stringify(account)).replace('"./price-comparison"', JSON.stringify(pricing))));
+const ovokoRead = moduleUrl(await readFile(new URL("../lib/ovoko-read.ts", import.meta.url), "utf8"));
+const vehicles = moduleUrl((await readFile(new URL("../lib/workspace-vehicles.ts", import.meta.url), "utf8")).replace('"./ovoko-read"', JSON.stringify(ovokoRead)));
+const { handleWorkspaceApi } = await import(moduleUrl((await readFile(new URL("../lib/workspace-api.ts", import.meta.url), "utf8")).replace('"./account-api"', JSON.stringify(account)).replace('"./price-comparison"', JSON.stringify(pricing)).replace('"./workspace-vehicles"', JSON.stringify(vehicles)).replace('"./ovoko-read"', JSON.stringify(ovokoRead))));
 const { handleAllegroApi, sealConnection } = await import(moduleUrl(await readFile(new URL("../lib/allegro-api.ts", import.meta.url), "utf8")));
 const owner = "00000000-0000-0000-0000-000000000001", other = "00000000-0000-0000-0000-000000000002";
 const productId = "10000000-0000-0000-0000-000000000001";

@@ -4,8 +4,18 @@ import { createServer } from "node:http";
 import { pathToFileURL, fileURLToPath } from "node:url";
 const { chromium } = await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href);
 const root = new URL("../public/wystawiacz/", import.meta.url);
+const cars = new Map();
 const server = createServer(async (req, res) => {
   const path = new URL(req.url, "http://test.local").pathname;
+  if (path === "/api/workspace/vehicles") {
+    res.setHeader("Content-Type", "application/json");
+    if (req.method === "PUT") {
+      let raw="";for await(const chunk of req)raw+=chunk;
+      const data=JSON.parse(raw),vehicle={id:data.id,revision:data.revision+1,payload:data.payload};cars.set(data.id,vehicle);
+      res.end(JSON.stringify({vehicle}));
+    } else res.end(JSON.stringify({vehicles:[...cars.values()]}));
+    return;
+  }
   if (path.startsWith("/api/")) { res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify({ connected: false, build: "2026-06-02.35", categories: [] })); return; }
   try {
     const name = path === "/" ? "index.html" : path.slice(1);
@@ -51,6 +61,7 @@ try {
   await page.locator("#vehicleButtonLabelInput").fill("Golf krotko");
   await page.locator("#vehicleFullInput").fill("Volkswagen Golf VII 2019");
   await page.locator("#addVehicleButton").click();
+  await page.waitForFunction(() => state.vehicles.length === 1);
   assert.equal(await page.locator("#vehicleList .vehicle-chip").count(), 1);
   await page.locator("#closeVehiclesButton").click();
   await page.locator("#titleInput").fill("Czujnik parktronik PDC");
@@ -86,6 +97,7 @@ try {
   await page.locator("#vehicleShortInput").fill("VW Golf VIII");
   await page.locator("#vehicleFullInput").fill("Volkswagen Golf VIII 2021");
   await page.locator("#addVehicleButton").click();
+  await page.waitForFunction(() => state.vehicles[0]?.short === "VW Golf VIII");
   assert.equal(await page.locator("#vehicleList .vehicle-chip").count(), 1, "Edit keeps model id rather than adding duplicates");
   await page.keyboard.press("Escape");
   assert.equal(await page.locator("#titleInput").inputValue(), "Czujnik parktronik PDC VW Golf VIII 5Q0919275B");

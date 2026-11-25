@@ -1,0 +1,10 @@
+.workspace-ovoko-panel { margin: 12px 0; padding: 12px; border: 1px solid #454951; border-radius: 10px; }
+.workspace-ovoko-panel [hidden] { display: none !important; }
+.workspace-ovoko-panel p { font-size: 13px; margin: 8px 0; }
+.workspace-ovoko-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap: 10px; margin: 10px 0; }
+.workspace-ovoko-grid label { display: grid; gap: 5px; }
+.workspace-ovoko-panel input:not([type=checkbox]), .workspace-ovoko-panel select { max-width: 100%; min-width: 0; }
+.workspace-ovoko-panel input[type=checkbox] { width: auto; }
+.workspace-cars-library { display: flex; flex-wrap: wrap; gap: 8px; max-height: 220px; overflow: auto; margin: 10px 0; }
+.vehicle-form > .workspace-ovoko-panel { grid-column: 1 / -1; width: 100%; }
+dialog.workspace-ovoko-panel { margin: auto; width: min(650px, calc(100vw - 32px)); }
