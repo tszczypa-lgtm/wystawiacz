@@ -2,6 +2,14 @@
 
 ## Optional OpenAI Internet Fallback
 
+Runtime regression: use `redirect: "manual"` for provider fetches. Cloudflare's
+workerd rejects `redirect: "error"` before making any outbound request, unlike
+Node's fetch. Non-2xx responses, including redirects, must be handled explicitly;
+never follow a redirect carrying the provider Authorization header. The v3 cache
+key invalidates failures produced by the unsupported redirect mode.
+`scripts/test-ovoko-web-worker.mjs` exercises native workerd POST/GET requests,
+background polling and redirect rejection, with only OpenAI's HTTP service mocked.
+
 With the owner's cost approval, a missing model/year now falls back to OpenAI
 Responses API web search. This path is paid, unlike the account/catalogue reads
 below. It uses the server-side `OPENAI_API_KEY`; no key is sent to the browser.

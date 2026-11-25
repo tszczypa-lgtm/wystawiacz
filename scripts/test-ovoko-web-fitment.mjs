@@ -18,7 +18,7 @@ globalThis.fetch=async(input,options)=>{
   if(mode==="poll-running")return Response.json({id:"resp_background123",status:"in_progress"});
   return Response.json({id:"resp_background123",status:"completed",output:[{type:"web_search_call",status:"completed",action:{sources:[{url}]}},{type:"message",status:"completed",content:[{type:"output_text",text:JSON.stringify({number:"5G0907044CH",matches:[{number:"5G0907044CH",make:"Volkswagen",model:"Touran III",year:"2019",sourceUrl:url,evidence:"5G0907044CH Volkswagen Touran III 2019"}]})}]}]});
  }
- assert.equal(input,"https://api.openai.com/v1/responses");assert.equal(options.method,"POST");assert.equal(options.redirect,"error");
+ assert.equal(input,"https://api.openai.com/v1/responses");assert.equal(options.method,"POST");assert.equal(options.redirect,"manual");
  assert.equal(options.headers.Authorization,"Bearer fake-private-key");count++;
  const body=JSON.parse(options.body);bodies.push(body);const number=JSON.parse(body.input).manufacturerNumber;
  assert.equal(body.tools[0].type,"web_search");assert.equal(body.tool_choice,"required");assert.equal(body.store,true);assert.equal(body.background,true);assert.equal(body.max_tool_calls,4);assert.equal(body.max_output_tokens,8192);assert.ok(body.text.format.strict);assert.deepEqual(body.include,["web_search_call.action.sources"]);
