@@ -3,7 +3,7 @@ import { loadOvokoConnection, ovokoConnectionKey } from "./ovoko-connection";
 import type { OvokoPublishEnv } from "./ovoko-publish";
 import { OvokoError, parseOvokoRead } from "./ovoko-read";
 import { requireOvokoAccess } from "./ovoko-access";
-import { ovokoWriteClient, ovokoWriteDigest } from "./ovoko-write-client";
+import { ovokoRemoteDiagnosis, ovokoWriteClient, ovokoWriteDigest } from "./ovoko-write-client";
 
 type Context = Awaited<ReturnType<typeof accountContext>>;
 class VehicleJournalError extends OvokoError {
@@ -45,7 +45,7 @@ export async function createOvokoCar(request: Request, env: OvokoPublishEnv, con
       const car = Array.isArray(verified.list) && verified.list.length === 1 && Array.isArray(verified.list[0]) && verified.list[0].length === 1 ? verified.list[0][0] : null;
       if (car && String(car.id) === existing[0].car_id && String(car.car_model) === modelId && String(car.car_years) === year) return { ok: true, carId: String(car.id), modelId, year, reused: true };
     }
-    if (existing.length) throw new OvokoError(409, "Nie znaleziono zapisanego auta, a poprzednia proba ma blokade. Uzyj Odblokuj wybrane auto przy tej pozycji.", "vehicle_creation_locked");
+    if (existing.length) throw new OvokoError(409, `Rekord auta ${model.name}, rok ${year}, ma nierozstrzygnieta poprzednia probe. To nie jest blokada czesci ani marki. Uzyj Odblokuj auta z bledow nad lista lub odblokowania auta przy tej pozycji.`, "vehicle_creation_locked");
     const externalId = `tymo:car:${modelId}:${year}`;
     const statuses = await remote("/get/car_status");
     if (!statuses.list || typeof statuses.list !== "object" || Array.isArray(statuses.list)) throw new Error("status shape");
@@ -85,7 +85,7 @@ export async function createOvokoCar(request: Request, env: OvokoPublishEnv, con
     } catch (error) {
       if (writeStage === "zapis potwierdzenia" && error instanceof VehicleJournalError) confirmationDiagnosis = `Blad zapisu lub odczytu odpowiedzi PATCH rejestru (${error.adapterStatus === undefined ? "status adaptera bazy niedostepny" : `status adaptera bazy: ${error.adapterStatus}`}; rzeczywisty HTTP Supabase niedostepny). Sprawdz logi bazy/proxy, uprawnienia i schemat; jesli brakuje tabeli lub kolumn, wymagany jest SQL migracji 013.`;
       try { await db(`?${selector}&owner_id=eq.${context.user.id}&attempt_id=eq.${attemptId}&state=eq.sending`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ state: "uncertain", updated_at: new Date().toISOString() }) }); } catch { /* Sending remains a durable lock. */ }
-      throw new OvokoError(409, `Niepewny wynik tworzenia auta (etap: ${writeStage}). ${confirmationDiagnosis ? `${confirmationDiagnosis} ` : ""}Moglo powstac w Ovoko. Nie ponawiaj; sprawdz Moje samochody. Blokada duplikatu pozostaje aktywna.`);
+      throw new OvokoError(409, `Niepewny wynik tworzenia auta (etap: ${writeStage}). ${confirmationDiagnosis ? `${confirmationDiagnosis} ` : `${ovokoRemoteDiagnosis(error)} `}Moglo powstac w Ovoko. Nie ponawiaj; sprawdz Moje samochody. Blokada duplikatu pozostaje aktywna.`);
     }
   } catch (error) {
     if (error instanceof OvokoError) throw error;

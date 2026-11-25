@@ -1,9 +1,9 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { createSupabaseBrowserClient } from "@/lib/supabase";
+import { resolveManualOvokoOverride, type OverrideResult } from "@/lib/ovoko-manual-client";
 
-export type OverrideResult = { message: string; token?: string; resolved?: boolean; kind?: "part" | "vehicle"; foundId?: string | null };
+export type { OverrideResult } from "@/lib/ovoko-manual-client";
 export function ManualOvokoOverride({ offerId, brandId, modelId, year, disabled, continueTransfer = false, onBusyChange, onResolved }: {
   offerId: string; brandId: string; modelId: string; year: string; disabled: boolean;
   continueTransfer?: boolean;
@@ -17,22 +17,7 @@ export function ManualOvokoOverride({ offerId, brandId, modelId, year, disabled,
     lock.current = true; setBusy(true); onBusyChange(true); setMessage("Sprawdzam i odblokowuje...");
     let resolved: OverrideResult | undefined;
     try {
-      const { data } = await createSupabaseBrowserClient().auth.getSession();
-      if (!data.session) throw new Error("Zaloguj sie ponownie.");
-      const session = data.session;
-      const request = async (body: unknown) => {
-        const current = await createSupabaseBrowserClient().auth.getSession();
-        if (current.data.session?.user.id !== session.user.id) throw new Error("Sesja zmienila sie. Otworz formularz ponownie.");
-        const response = await fetch("/api/ovoko/manual-override", { method: "POST", cache: "no-store", headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
-        const after = await createSupabaseBrowserClient().auth.getSession();
-        if (after.data.session?.user.id !== session.user.id) throw new Error("Sesja zmienila sie. Sprawdz wynik po ponownym zalogowaniu.");
-        const result = await response.json().catch(() => null) as OverrideResult | null;
-        if (!response.ok || !result) throw new Error(result?.message || "Nie potwierdzono odblokowania. Nie wyslano czesci; sprawdz ponownie.");
-        return result;
-      };
-      const preview = await request({ operation: "check", kind, offerId, brandId, modelId, year });
-      const result = preview.resolved ? preview : preview.token ? await request({ operation: "confirm", token: preview.token, brandId, confirmManual: true }) : null;
-      if (!result?.resolved) throw new Error("Nie potwierdzono odblokowania. Nie ponowiono wysylki.");
+      const result = await resolveManualOvokoOverride({ kind, offerId, brandId, modelId, year });
       setMessage(result.message); resolved = result;
     } catch (e) { setMessage(e instanceof Error ? e.message : "Nie potwierdzono wyniku. Nie ponowiono wysylki."); }
     finally { lock.current = false; setBusy(false); onBusyChange(false); }

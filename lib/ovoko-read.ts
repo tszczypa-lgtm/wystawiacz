@@ -65,6 +65,10 @@ function text(value: unknown, max = 300, required = false) {
   if (typeof value !== "string" || value.length > max || (required && !value.trim())) throw invalid();
   return value;
 }
+function modelYear(value: unknown) {
+  if (value === 0 || value === "0" || value === "0000") return "";
+  return text(typeof value === "number" ? String(value) : value, 4);
+}
 export function ovokoReadPlan(input: Record<string, unknown>): { operation: OvokoReadOperation; path: string } {
   // An exhaustive read-only allowlist, never an upstream URL or method supplied by the browser.
   switch (input.operation) {
@@ -110,7 +114,13 @@ export function parseOvokoRead(operation: OvokoReadOperation, result: Record<str
       }
       if (operation === "models") {
         if (id(value.brand) !== selectedId) throw invalid();
-        return { ...base, brand: id(value.brand), years: [text(value.year_start, 4), text(value.year_end, 4)].join(" - ") };
+        let start = modelYear(value.year_start), end = modelYear(value.year_end);
+        // Some dictionaries put the production range in the model name instead of year fields.
+        if (!start && !end) {
+          const range = base.name.match(/\b((?:18|19|20)\d{2})\s*[-–/]\s*((?:18|19|20)\d{2})\b/);
+          if (range && Number(range[1]) <= Number(range[2])) { start = range[1]; end = range[2]; }
+        }
+        return { ...base, brand: id(value.brand), years: [start, end].join(" - ") };
       }
       const price = text(value.price, 30);
       if (price && !/^\d{1,15}(\.\d{1,4})?$/.test(price)) throw invalid();

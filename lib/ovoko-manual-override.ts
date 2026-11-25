@@ -4,6 +4,7 @@ import { salesSyncDb,syncRows,syncJson,SyncDbError } from "./sales-sync-store";
 import { ovokoConnectionKey } from "./ovoko-connection";
 import { OvokoError,ovokoPageData,parseOvokoRead } from "./ovoko-read";
 import { ovokoPublicationPresent } from "./ovoko-publication-presence";
+import { preferredOvokoCar } from "./ovoko-car-selection";
 type Data=Record<string,unknown>;
 type Proof={id:string;owner:string;kind:"part"|"vehicle";offer:string;seller:string;account:string;fingerprint:string;client:string;brand:string|null;model:string|null;year:string|null;row:Data;foundId?:string|null;expires:number};
 const uuid=/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
@@ -36,15 +37,19 @@ async function inspect(c:Awaited<ReturnType<typeof syncConnections>>,p:Proof,bra
  const range=model.years?.match(/^(\d{4})? - (\d{4})?$/);
  if(range&&(range[1]&&Number(p.year)<Number(range[1])||range[2]&&Number(p.year)>Number(range[2])))throw new OvokoError(400,"Rok nie pasuje do modelu.");
  const rows=parseOvokoRead("cars",await c.ovoko(`/v2/get/cars?model_ids=${p.model}&page=1&limit=20`),p.model).rows;
- const found=rows.filter(r=>r.years===p.year).sort((a,b)=>Number(a.id)-Number(b.id))[0];
+ const found=preferredOvokoCar(rows,p.year);
  return found?.id||null;
 }
 export async function manualOvokoOverride(owner:string,env:SalesSyncEnv,input:Data){
  const operation=input.operation;
- const allowed=operation==="check"?["operation","kind","offerId","brandId","modelId","year"]:["operation","token","brandId","confirmRisk","checkedOvoko","typedOfferId","reason","confirmManual"];
+ const allowed=operation==="check"?["operation","kind","offerId","brandId","modelId","year","binding"]:["operation","token","brandId","confirmRisk","checkedOvoko","typedOfferId","reason","confirmManual"];
  if(!["check","confirm"].includes(String(operation))||Object.keys(input).some(k=>!allowed.includes(k)))throw new OvokoError(400,"Nieprawidlowe reczne rozstrzygniecie.");
  const raw=salesSyncDb(env),db:typeof raw=async(path,init)=>{try{return await raw(path,init);}catch(error){throw overrideDatabaseError(error,path);}};
  const c=await syncConnections(db,owner,env),key=await ovokoConnectionKey(env),aad=`ovoko-manual-override:${owner}`;
+ if(operation==="check"&&input.binding!==undefined){
+  const binding=input.binding as Data|null;
+  if(!binding||typeof binding!=="object"||Array.isArray(binding)||Object.keys(binding).some(k=>!["sellerId","fingerprint"].includes(k))||binding.sellerId!==c.sellerId||binding.fingerprint!==c.fingerprint)throw new OvokoError(409,"Konto Allegro lub Ovoko zmienilo sie od rozpoczecia partii. Nie odblokowano auta.","account_changed");
+ }
  let p:Proof;
  if(operation==="check"){
   if(!["part","vehicle"].includes(String(input.kind))||typeof input.offerId!=="string"||!/^\d{1,30}$/.test(input.offerId))throw new OvokoError(400,"Wybierz rodzaj blokady i aukcje.");
@@ -68,6 +73,7 @@ export async function manualOvokoOverride(owner:string,env:SalesSyncEnv,input:Da
  const found=await inspect(c,p,p.brand);
  if(!found&&Object.keys(p.row).length&&Date.now()-Date.parse(String(p.row.updated_at))<1800000)throw new OvokoError(409,"Proba jest mlodsza niz 30 minut i moze jeszcze trwac. Nie odblokowujemy trwajacych wysylek.");
  if(operation==="confirm"&&p.foundId!==found)throw new OvokoError(409,"Wynik odczytu Ovoko zmienil sie. Sprawdz blokade ponownie; niczego nie wyslano.");
+ if(operation==="check"&&p.kind==="vehicle"&&found)return{resolved:true,kind:"vehicle",foundId:found,modelId:p.model,year:p.year,message:`Potwierdzono zapisane auto ID ${found}. Uzyjemy go bez tworzenia drugiego i bez zmiany wlasciciela synchronizacji.`};
  if(operation==="check"&&!Object.keys(p.row).length){
   if(p.kind!=="part"||!found)return{resolved:true,kind:p.kind,foundId:found,message:found?`Znaleziono auto ID ${found}. Nie ma blokady; kliknij Wystaw.`:"Nie ma zapisanej blokady. Mozesz ponownie kliknac Wystaw; oferty nie wyslano automatycznie."};
  }

@@ -10,15 +10,20 @@ import { OvokoJobRepair, type OvokoCorrections } from "./ovoko-job-repair";
 import type { OvokoRepairHint } from "@/lib/ovoko-read";
 import { ManualOvokoLauncher } from "./manual-ovoko-launcher";
 import { ManualOvokoOverride } from "./manual-override";
+import { resolveManualOvokoOverride, ManualOverrideClientError } from "@/lib/ovoko-manual-client";
 
 export type BulkOffer = { id: string; name: string; price: { amount: string; currency: string } | null };
-type Job = { id: string; name: string; price: string; currency: string; state: "waiting" | "sending" | "done" | "skipped" | "error"; message: string; retryable: boolean; repair?: OvokoRepairHint; rule: OvokoPriceAdjustment; technical: boolean };
+type Job = { id: string; name: string; price: string; currency: string; state: "waiting" | "sending" | "done" | "skipped" | "error"; message: string; retryable: boolean; code?: string; repair?: OvokoRepairHint; rule: OvokoPriceAdjustment; technical: boolean };
+function vehicleKey(job: Job) {
+  const vehicle = job.repair?.vehicle;
+  return job.state === "error" && job.code === "vehicle_creation_locked" && vehicle?.brandId && vehicle.modelId && /^[12]\d{3}$/.test(vehicle.year) ? `${vehicle.brandId}:${vehicle.modelId}:${vehicle.year}` : "";
+}
 type Binding = { sellerId: string; fingerprint: string };
 type Outcome = { ok: boolean; partId: string; alreadyCreated: boolean; price?: string; currency?: string; prepared?: Record<string, string> };
 const field = "rounded-lg border border-white/20 bg-[#0d1117] px-3 py-1.5";
 const button = "rounded-lg border border-white/20 px-3 py-1.5 text-sm font-bold disabled:opacity-40";
-async function waitForTransferSlot(lastAttempt: { current: number }, stopped: { current: boolean }) {
-  while (Date.now() - lastAttempt.current < 6250 && !stopped.current) await new Promise(resolve => setTimeout(resolve, 250));
+async function waitForTransferSlot(lastAttempt: { current: number }, stopped: { current: boolean }, interval = 6250) {
+  while (Date.now() - lastAttempt.current < interval && !stopped.current) await new Promise(resolve => setTimeout(resolve, 250));
   if (stopped.current) return false;
   lastAttempt.current = Date.now();
   return true;
@@ -31,6 +36,8 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
   const [running, setRunning] = useState(false), [jobs, setJobs] = useState<Job[]>([]), [message, setMessage] = useState("");
   const [fallbackVehicle, setFallbackVehicle] = useState<FallbackVehicle>(), [technical, setTechnical] = useState(true);
   const [recovering, setRecovering] = useState(false);
+  const [queuedRecovery, setQueuedRecovery] = useState<string[]>([]);
+  const jobsRef = useRef<Job[]>([]), pendingRecovery = useRef<string[]>([]), lastRecovery = useRef(0);
   const lock = useRef(false), stop = useRef(false), mounted = useRef(true), lastAttempt = useRef(0), binding = useRef<Binding | null>(null);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; stop.current = true; }; }, []);
   useEffect(() => {
@@ -46,7 +53,8 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
     try { return adjustedOvokoPrice(offer.price?.amount || "", offer.price?.currency || "", rule); }
     catch (error) { return (error as Error).message; }
   }
-  function update(id: string, patch: Partial<Job>) { if (mounted.current) setJobs(previous => previous.map(job => job.id === id ? { ...job, ...patch } : job)); }
+  function replaceJobs(next: Job[]) { jobsRef.current = next; if (mounted.current) setJobs(next); }
+  function update(id: string, patch: Partial<Job>) { replaceJobs(jobsRef.current.map(job => job.id === id ? { ...job, ...patch } : job)); }
   async function begin(rule: OvokoPriceAdjustment, retry = false) {
     const session = await ovokoBulkRequest<{ ok: boolean; binding: Binding }>({ operation: "start", adjustment: rule });
     if (!session.ok || !session.binding) throw new Error("Nie potwierdzono kont docelowych.");
@@ -77,19 +85,67 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
   }
   function failure(id: string, error: unknown) {
     const retryable = error instanceof OvokoBulkClientError && error.status === 400 && (!error.repair || error.repair.needsVehicle || error.repair.needsCategory);
-    update(id, { state: "error", retryable, repair: error instanceof OvokoBulkClientError ? error.repair : undefined, message: error instanceof Error ? error.message : "Niepotwierdzony wynik." });
+    update(id, { state: "error", retryable, code: error instanceof OvokoBulkClientError ? error.code : undefined, repair: error instanceof OvokoBulkClientError ? error.repair : undefined, message: error instanceof Error ? error.message : "Niepotwierdzony wynik." });
     // Each item has its own durable write lock. Never replay it; continue independent rows.
     return !((error instanceof OvokoBulkClientError || error instanceof AllegroClientError) && [401, 403].includes(error.status) || error instanceof OvokoBulkClientError && error.code === "account_changed");
   }
-  function finish() { lock.current = false; if (mounted.current) { setJobs(previous => previous.map(job => job.state === "waiting" ? { ...job, message: "Nie wyslano w tej partii" } : job)); setRunning(false); onFinished(); } }
+  function finish() { lock.current = false; pendingRecovery.current = []; if (mounted.current) { setQueuedRecovery([]); replaceJobs(jobsRef.current.map(job => job.state === "waiting" ? { ...job, message: "Nie wyslano w tej partii" } : job)); setRunning(false); onFinished(); } }
+  async function drainVehicleRecovery(session: Binding) {
+    while (pendingRecovery.current.length && !stop.current) {
+      const first = jobsRef.current.find(job => job.id === pendingRecovery.current[0]);
+      const key = first && vehicleKey(first);
+      if (!key) { pendingRecovery.current.shift(); setQueuedRecovery([...pendingRecovery.current]); continue; }
+      const group = jobsRef.current.filter(job => pendingRecovery.current.includes(job.id) && vehicleKey(job) === key);
+      const vehicle = first!.repair!.vehicle!;
+      // Two override calls per model: keep this below the separate six-calls/minute budget.
+      if (!await waitForTransferSlot(lastRecovery, stop, 21000)) break;
+      let resolved = false;
+      try {
+        await resolveManualOvokoOverride({ kind: "vehicle", offerId: first!.id, ...vehicle, binding: session });
+        resolved = true;
+        for (const job of group) {
+          if (stop.current) break;
+          const offer = offers.find(offer => offer.id === job.id); if (!offer) continue;
+          try { await transfer(offer, job.rule, session, job.technical, vehicle, job.repair?.categoryId ? { categoryId: job.repair.categoryId } : {}, true); }
+          catch (error) {
+            if (!failure(job.id, error)) throw error;
+            if ((error instanceof OvokoBulkClientError || error instanceof AllegroClientError) && error.status === 429) await waitForRateLimit(stop);
+          }
+        }
+      } catch (error) {
+        for (const job of group) if (jobsRef.current.find(current => current.id === job.id)?.state === "error") update(job.id, { message: `${resolved ? "Nie przeniesiono czesci po sprawdzeniu auta" : "Nie odblokowano auta"}: ${error instanceof Error ? error.message : "Nie potwierdzono wyniku."}` });
+        if ((error instanceof OvokoBulkClientError || error instanceof AllegroClientError || error instanceof ManualOverrideClientError) && [401, 403].includes(error.status) || (error instanceof OvokoBulkClientError || error instanceof ManualOverrideClientError) && error.code === "account_changed") throw error;
+        if (error instanceof ManualOverrideClientError && error.status === 429) await waitForRateLimit(stop);
+      } finally {
+        const ids = new Set(group.map(job => job.id));
+        pendingRecovery.current = pendingRecovery.current.filter(id => !ids.has(id)); setQueuedRecovery([...pendingRecovery.current]);
+      }
+    }
+  }
+  function queueVehicleRecovery() {
+    const selected = jobsRef.current.filter(job => vehicleKey(job) && !pendingRecovery.current.includes(job.id));
+    if (!selected.length || recovering) return;
+    const models = new Set(selected.map(vehicleKey)).size;
+    if (!window.confirm(`Sprawdzic i odblokowac ${models} rekordow aut dla ${selected.length} czesci? Akceptujesz ryzyko duplikatu po starej niepewnej probie. Istniejace auta wykorzystamy. Po odblokowaniu ponowimy tylko te czesci z zachowanymi cenami. Trwajacych zapisow nie przerywamy.`)) return;
+    pendingRecovery.current.push(...selected.map(job => job.id)); setQueuedRecovery([...pendingRecovery.current]);
+    setMessage("Zlecono odblokowanie aut. Wykonamy je pomiedzy wysylkami, bez przerywania biezacej pozycji.");
+    if (!lock.current) void (async () => {
+      lock.current = true; stop.current = false; setRunning(true);
+      try { await drainVehicleRecovery(await begin(selected[0].rule, true)); }
+      catch (error) { setMessage(error instanceof Error ? error.message : "Nie potwierdzono kont. Nie ponowiono czesci."); pendingRecovery.current = []; setQueuedRecovery([]); }
+      finally { finish(); }
+    })();
+  }
   async function start() {
     if (lock.current || !offers.length || offers.length > 200) return;
     lock.current = true; stop.current = false; setRunning(true); setMessage("");
     const snapshot = offers.map(offer => ({ ...offer, price: offer.price ? { ...offer.price } : null })), rule = { ...adjustment }, fallback = fallbackVehicle ? { ...fallbackVehicle } : undefined;
-    setJobs(snapshot.map(offer => ({ id: offer.id, name: offer.name, price: price(offer, rule), currency: offer.price?.currency || "", state: "waiting", retryable: false, message: "Oczekuje", rule, technical })));
+    pendingRecovery.current = []; setQueuedRecovery([]);
+    replaceJobs(snapshot.map(offer => ({ id: offer.id, name: offer.name, price: price(offer, rule), currency: offer.price?.currency || "", state: "waiting", retryable: false, message: "Oczekuje", rule, technical })));
     try {
       const session = await begin(rule);
       for (const offer of snapshot) {
+        await drainVehicleRecovery(session);
         if (stop.current) break;
         try { if (!await transfer(offer, rule, session, technical, fallback)) break; }
         catch (error) {
@@ -100,6 +156,7 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
           }
         }
       }
+      await drainVehicleRecovery(session);
       if (mounted.current) setMessage(stop.current ? "Zatrzymano. Pozostale pozycje nie zostaly wyslane." : "Partia zakonczona.");
     } catch (error) {
       if (mounted.current) setMessage(`Partia zatrzymana: ${error instanceof Error ? error.message : "nie potwierdzono wyniku"} Nie ponawiamy automatycznie.`);
@@ -112,6 +169,7 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
     try {
       const session = await begin(job.rule, true);
       await transfer(offer, job.rule, session, job.technical, fallback, overrides, !!fallback);
+      await drainVehicleRecovery(session);
       if (mounted.current) setMessage("Zakonczono poprawianie pozycji.");
     } catch (error) { failure(job.id, error); if (mounted.current) setMessage("Nie przeniesiono poprawianej pozycji. Sprawdz jej wynik ponizej."); }
     finally { finish(); }
@@ -126,6 +184,7 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
       {mode !== "none" && <label className="flex flex-col gap-1 text-sm">{priceLabel}<input aria-label={priceLabel} className={`${field} w-44`} inputMode="decimal" value={value} disabled={running} onChange={event => setValue(event.target.value)} placeholder={mode === "fixed" ? "np. 100" : "np. -10 lub 15"} /></label>}
       <button className={`${button} bg-[#ff5a00]`} disabled={running || recovering || !offers.length || offers.length > 200} onClick={() => void start()}>{running ? "Przenoszenie trwa..." : "Przenies zaznaczone do Ovoko"}</button>
       {running && <button className={button} onClick={() => { stop.current = true; setMessage("Zatrzymuje po biezacym zadaniu. Nie przerywamy wysylki w trakcie."); }}>Zatrzymaj po biezacej</button>}
+      {jobs.some(job => vehicleKey(job)) && <button className={`${button} border-orange-300/50`} disabled={recovering || !jobs.some(job => vehicleKey(job) && !queuedRecovery.includes(job.id))} onClick={queueVehicleRecovery}>Odblokuj auta z bledow ({new Set(jobs.filter(job => !queuedRecovery.includes(job.id)).map(vehicleKey).filter(Boolean)).size})</button>}
     </div>
     <label className="flex items-center gap-2 text-xs text-white/70"><input type="checkbox" checked={technical} disabled={running} onChange={event => setTechnical(event.target.checked)} />Gdy brak dopasowania, uzyj modelu roboczego rozpoznanej marki</label>
     <p className="text-xs text-white/50">Kwota dotyczy waluty oferty (PLN/EUR), bez przewalutowania. Minus obniza; procent zaokraglamy do 2 miejsc. Ustaw cene = jedna konkretna cena dla kazdej kopii. Zostaw okno otwarte.</p>
@@ -135,15 +194,16 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
       <div className="flex items-start justify-between gap-3"><a href={`/panel/inventory/prepare-ovoko?offerId=${job.id}`} target="_blank" rel="noopener noreferrer" className="min-w-0 font-semibold underline">{job.name}</a><span className="shrink-0 whitespace-nowrap text-xs text-white/70">{job.state === "skipped" ? "Cena istniejacej czesci bez zmian." : `${job.state === "done" ? "Cena wyslana" : "Cena planowana"}: ${job.price} ${job.currency}`}</span></div>
       <p className={`text-xs leading-5 ${job.state === "done" || job.state === "skipped" ? "text-emerald-300" : job.state === "error" ? "text-amber-200" : "text-white/60"}`}>{job.message}</p>
       {job.retryable && <OvokoJobRepair key={`${job.id}:${JSON.stringify(job.repair)}`} id={job.id} hint={job.repair} disabled={running || recovering} onTransfer={(vehicle, corrections) => void retry(job, vehicle, corrections)} />}
-      {job.state === "error" && !running && <>
-        <ManualOvokoOverride offerId={job.id} brandId={job.repair?.vehicle?.brandId || job.repair?.brandId || ""} modelId={job.repair?.vehicle?.modelId || ""} year={job.repair?.vehicle?.year || ""} disabled={recovering} continueTransfer onBusyChange={busy => { lock.current = busy; setRecovering(busy); }} onResolved={result => {
+      {job.state === "error" && <>
+        {running && <p className="text-xs text-white/60">{queuedRecovery.includes(job.id) ? "Auto w kolejce do odblokowania." : vehicleKey(job) ? "Uzyj Odblokuj auta z bledow nad lista; pozostale pozycje ida dalej." : "Reczne poprawienie dostepne po zakonczeniu lub zatrzymaniu partii."}</p>}
+        {!running && <ManualOvokoOverride offerId={job.id} brandId={job.repair?.vehicle?.brandId || job.repair?.brandId || ""} modelId={job.repair?.vehicle?.modelId || ""} year={job.repair?.vehicle?.year || ""} disabled={recovering} continueTransfer onBusyChange={busy => { lock.current = busy; setRecovering(busy); }} onResolved={result => {
           if (result.kind === "part" && result.foundId) update(job.id, { state: "skipped", retryable: false, message: `Potwierdzono istniejaca czesc Ovoko ID: ${result.foundId}. Powiazanie naprawione; nie utworzono duplikatu.` });
           else {
             const vehicle = job.repair?.vehicle;
             void retry({ ...job, retryable: true }, vehicle?.brandId && vehicle.modelId ? vehicle : undefined, job.repair?.categoryId ? { categoryId: job.repair.categoryId } : {});
           }
-        }} />
-        <ManualOvokoLauncher offerId={job.id} />
+        }} />}
+        {!running && <ManualOvokoLauncher offerId={job.id} />}
       </>}
     </div>)}</div>}
   </section>;
