@@ -17,9 +17,9 @@ const { sealConnection } = load(path.join(root, "lib/allegro-api.ts"));
 const { ovokoWriteDigest } = load(path.join(root, "lib/ovoko-write-client.ts"));
 const bytes = new Uint8Array(32).fill(7), key = await crypto.subtle.importKey("raw", bytes, "AES-GCM", false, ["encrypt", "decrypt"]);
 const env = { BILLING_ENFORCED: "true", SUPABASE_SERVICE_ROLE_KEY: "fixture", ALLEGRO_ENCRYPTION_KEY: Buffer.from(bytes).toString("base64") };
-let user = 0, admin, mode, pages, journal, seller, target, total, priceBounds, pricedRows, journalBatches, search, requestPages;
+let user = 0, admin, mode, pages, journal, seller, target, total, priceBounds, pricedRows, journalBatches, search, requestPages, stock;
 const owner = () => `00000000-0000-0000-0000-${String(user).padStart(12, "0")}`;
-function reset() { user++; admin = true; mode = "ok"; pages = []; journal = []; seller = "555"; target = "fixture"; total = 900; priceBounds = [null, null]; pricedRows = null; journalBatches = []; search = "ABS"; }
+function reset() { user++; admin = true; mode = "ok"; pages = []; journal = []; seller = "555"; target = "fixture"; total = 900; priceBounds = [null, null]; pricedRows = null; journalBatches = []; search = "ABS"; stock = {}; }
 const cents = amount => BigInt(amount.replace(".", ""));
 const req = (input, origin = "https://inventory.test") => new Request("https://inventory.test/api/ovoko/transfer-inventory", { method: "POST", headers: { Authorization: "Bearer fixture", Origin: origin, "Content-Type": "application/json" }, body: JSON.stringify(input) });
 const query = (transfer = "transferred", offset = 0) => ({ operation: "inventory", filters: { status: "ACTIVE", limit: "20", query: "ABS", searchBy: "name", sort: "stock.available" }, transfer, offset });
@@ -27,6 +27,14 @@ const record = (id, state = "created", partId = "77") => ({ allegro_offer_id: St
 const originalFetch = globalThis.fetch;
 globalThis.fetch = async (address, options = {}) => {
   const url = new URL(address), method = options.method || "GET";
+  if (url.pathname === "/rest/v1/rpc/ovoko_stock_transfer_status") {
+    assert.equal(method, "POST");
+    const args = JSON.parse(options.body);
+    assert.equal(args.p_owner, owner()); assert.equal(args.p_account, await ovokoWriteDigest(target)); assert.equal(args.p_seller, seller);
+    assert.ok(args.p_offers.length <= 200); assert.equal(new Set(args.p_offers).size, args.p_offers.length);
+    if (mode === "missing-stock-rpc") return Response.json({ message: "missing" }, { status: 404 });
+    return Response.json(stock);
+  }
   assert.equal(method, "GET", "All mocked network calls are read-only; no marketplace or journal writes");
   if (url.pathname === "/auth/v1/user") return Response.json({ id: owner(), email_confirmed_at: "2026-01-01" });
   if (url.pathname === "/rest/v1/customer_accounts") return Response.json([{ owner_id: owner(), company: {}, suspended: false }]);
@@ -40,6 +48,7 @@ globalThis.fetch = async (address, options = {}) => {
     return Response.json([{ sealed: await sealConnection({ accessToken: "seller-token", expiresAt: Date.now() + 3600000 }, key, owner()) }]);
   }
   if (url.pathname === "/rest/v1/ovoko_single_publications") {
+    assert.equal(url.searchParams.get("owner_id"), `eq.${owner()}`);
     assert.equal(url.searchParams.get("allegro_seller_id"), `eq.${seller}`);
     assert.equal(url.searchParams.get("ovoko_account"), `eq.${await ovokoWriteDigest(target)}`);
     assert.equal(url.searchParams.get("limit"), "200");
@@ -77,7 +86,8 @@ try {
   reset(); mode = "disconnected"; await run(query(), 409);
   reset(); journal = [record(1), record(2, "sending"), record(3, "uncertain"), record(4, "created", null), { ...record(5), seller: "666" }, { ...record(6), target: "other" }];
   const states = await run({ operation: "statuses", offerIds: ["1", "2", "3", "4", "5", "6"] });
-  assert.deepEqual(states.statuses, { "1": { state: "transferred", partId: "77" }, "2": { state: "sending" }, "3": { state: "uncertain" }, "4": { state: "uncertain" }, "5": { state: "not_transferred" }, "6": { state: "not_transferred" } });
+  assert.deepEqual(Object.fromEntries(Object.entries(states.statuses).map(([id, row]) => [id, row.state])), { "1": "transferred", "2": "sending", "3": "uncertain", "4": "uncertain", "5": "not_transferred", "6": "not_transferred" });
+  assert.deepEqual(states.statuses["1"], { state: "transferred", partId: "77", partIds: ["77"], totalUnits: 1, completedUnits: 1 });
   seller = "666"; const otherSeller = await run({ operation: "statuses", offerIds: ["1", "5"] }); assert.equal(otherSeller.statuses["1"].state, "not_transferred"); assert.equal(otherSeller.statuses["5"].state, "transferred");
   reset(); mode = "db-error"; await run({ operation: "statuses", offerIds: ["1"] }, 503);
   reset(); mode = "bad-journal"; await run({ operation: "statuses", offerIds: ["1"] }, 502);
@@ -96,7 +106,7 @@ try {
   assert.deepEqual(journalBatches, []); assert.deepEqual(pages, []);
   reset(); journal = [record(48)];
   const repeated = await run({ operation: "statuses", offerIds: Array(200).fill("48") });
-  assert.deepEqual(repeated.statuses, { "48": { state: "transferred", partId: "77" } }); assert.deepEqual(journalBatches, [["48"]]);
+  assert.equal(repeated.statuses["48"].state, "transferred"); assert.deepEqual(journalBatches, [["48"]]);
   reset(); journal = [record(48), record(48)];
   await run({ operation: "statuses", offerIds: ["48", "52"] }, 502);
   for (const [bounds, expectedBounds, expectedIds] of [
@@ -148,6 +158,28 @@ try {
   assert.equal(continued.offers[0].id, "251"); assert.equal(continued.offers.at(-1).id, "290"); assert.equal(continued.nextOffset, null);
   reset(); total = 10000001; const tail = query("not_transferred", 9999801); tail.filters.limit = "200";
   const last200 = await run(tail); assert.equal(last200.count, 199); assert.equal(last200.nextOffset, null); assert.deepEqual(pages, [9999800]);
+  reset(); stock = {
+    "1": { state: "sending", stockMode: "separate", totalUnits: 3, completedUnits: 1, partIds: ["77"] },
+    "2": { state: "uncertain", stockMode: "separate", totalUnits: 3, completedUnits: 2, partIds: ["78", "79"] },
+    "3": { state: "transferred", stockMode: "shared", totalUnits: 1, completedUnits: 1, partIds: ["80"] },
+    "4": { state: "transferred", stockMode: "separate", totalUnits: 2, completedUnits: 2, partIds: ["81", "82"] },
+  };
+  const grouped = await run({ operation: "statuses", offerIds: ["1", "2", "3", "4"] });
+  for (const [id, row] of Object.entries(stock)) assert.deepEqual(grouped.statuses[id], { ...row, partId: row.partIds[0] });
+  for (const stockMode of ["separate", "shared"]) {
+    reset(); stock = { "1": { state: "sending", stockMode, totalUnits: stockMode === "shared" ? 1 : 3, completedUnits: 0, partIds: [], partId: null } };
+    const pending = await run({ operation: "statuses", offerIds: ["1"] });
+    assert.equal(pending.statuses["1"].partId, undefined); assert.ok(!Object.hasOwn(pending.statuses["1"], "partId"));
+    assert.equal(pending.statuses["1"].stockMode, stockMode);
+  }
+  reset(); stock = Object.fromEntries(Array.from({ length: 200 }, (_, i) => [String(i + 1), { state: "transferred", stockMode: "separate", totalUnits: 10000, completedUnits: 10000, partIds: Array.from({ length: 10000 }, (_, j) => String(i * 10000 + j + 1)) }]));
+  const largeGroups = await run({ operation: "statuses", offerIds: Object.keys(stock) });
+  assert.equal(largeGroups.statuses["200"].partIds.length, 10000, "Aggregate JSON cannot truncate nested unit lists at 1000");
+  for (const invalid of [null, [], { "1": {} }, { "1": { state: "transferred", stockMode: "shared", totalUnits: 2, completedUnits: 2, partIds: ["1", "2"] } }, { "1": { state: "sending", stockMode: "separate", totalUnits: 2, completedUnits: 1, partIds: [] } }, { "1": { state: "transferred", stockMode: "separate", totalUnits: 2, completedUnits: 2, partIds: ["1", "1"] } }]) {
+    reset(); stock = invalid; await run({ operation: "statuses", offerIds: ["1"] }, 502);
+  }
+  reset(); mode = "missing-stock-rpc"; await run({ operation: "statuses", offerIds: ["1"] }, 503);
+  reset(); stock = { "1": { state: "transferred", stockMode: "shared", totalUnits: 1, completedUnits: 1, partIds: ["77"] } }; journal = [record(1)]; await run({ operation: "statuses", offerIds: ["1"] }, 409);
   reset(); for (let i = 0; i < 30; i++) await run({ operation: "statuses", offerIds: [] }); await run({ operation: "statuses", offerIds: [] }, 429);
   console.log("Ovoko transfer inventory: 200-row/status pages, inclusive 48..52 fixtures, single/invalid/reversed bounds, duplicate-shaped input and ID deduplication, five-batch range propagation, number-first search, cursors and read-only isolation passed. No live requests.");
 } finally { globalThis.fetch = originalFetch; }

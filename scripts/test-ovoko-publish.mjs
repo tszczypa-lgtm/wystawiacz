@@ -21,16 +21,21 @@ let user = 1, admin, suspended, owns, stock, bundle, mode, donorModel, duplicate
 let providerPresent, inventoryReads;
 const owner = () => `00000000-0000-0000-0000-${String(user).padStart(12, "0")}`;
 const records = new Map(), calls = [];
+let stockGroup = null, stockUnits = [], missingStockSchema = false;
 const snapshot = { title: "AUDI A4 POMPA 0281010038", price: "100.00", currency: "PLN", stock: 1, status: "ACTIVE", condition: "used", images: ["https://a.allegroimg.com/photo.jpg", "https://a.allegroimg.com/second.jpg", "https://a.allegroimg.com/label.jpg"] };
 const payload = () => ({ offerId: "101", brandId: "1", modelId: "11", donorId: "13", categoryId: "3", qualityId: "0", statusId: "0", manufacturerCode: "0281010038", additionalCodes: extraCodes, price: "100.00", currency: "PLN", notes: "Opis & uwagi + numer", confirmSingle: true, expectedSource: { ...snapshot } });
 const req = (body = payload(), headers = {}) => new Request("https://publish.test/api/ovoko/publish", { method: "POST", headers: { Authorization: "Bearer fixture", Origin: "https://publish.test", "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
 function reset() {
+  stockGroup = null; stockUnits = []; missingStockSchema = false;
   providerPresent = false; inventoryReads = 0;
   fitmentMode = "none";
   expectedCode = "0281010038";
   user++; admin = true; suspended = false; owns = true; stock = 1; bundle = false; mode = "ok"; donorModel = "11"; duplicate = false; failDb = ""; sourceReads = 0; lateStock = false; writes = 0; categoryName = "Pompy"; revokeAfterRead = false; imageMode = "normal"; extraCodes = ""; bulk = false; expectedPrice = "100.00"; credentialReads = 0; rotateAt = Infinity; records.clear(); calls.length = 0;
 }
 const originalFetch = globalThis.fetch;
+const originalNow = Date.now;
+let clockOffset = 0;
+Date.now = () => originalNow() + clockOffset;
 let vehicleParams = [], preparedVehicle, generationTest = false, fitmentMode = "none", expectedCode = "0281010038", hyphenCode = "";
 globalThis.fetch = async (input, options = {}) => {
   const url = new URL(input), method = options.method || "GET";
@@ -41,6 +46,28 @@ globalThis.fetch = async (input, options = {}) => {
   if (url.pathname === "/rest/v1/allegro_connections") return Response.json([{ sealed: await sealConnection({ accessToken: "seller-token", expiresAt: Date.now() + 3600000 }, key, owner()) }]);
   if (url.pathname === "/rest/v1/ovoko_connections") { credentialReads++; return Response.json([{ sealed: await sealConnection({ ...credentials, ...(credentialReads >= rotateAt ? { password: "private-changed" } : {}) }, key, `ovoko:v1:${owner()}`) }]); }
   if (url.pathname === "/rest/v1/ovoko_vehicle_creations") { assert.equal(method, "GET", "Bulk reuses the saved vehicle without creating a duplicate"); return Response.json([]); }
+  if (url.pathname === "/rest/v1/ovoko_stock_groups") return missingStockSchema ? new Response("missing", { status: 404 }) : Response.json(stockGroup ? [stockGroup] : []);
+  if (url.pathname === "/rest/v1/rpc/prepare_ovoko_stock_group") {
+    const args = JSON.parse(options.body);
+    assert.deepEqual(Object.keys(args).sort(), ["p_account", "p_mode", "p_offer", "p_owner", "p_quantity", "p_seller"]);
+    if (!stockGroup) {
+      stockGroup = { id: "10000000-0000-0000-0000-000000000001", owner_id: args.p_owner, ovoko_account: args.p_account, seller_id: args.p_seller, offer_id: args.p_offer, quantity: args.p_quantity, mode: args.p_mode };
+      stockUnits = Array.from({ length: args.p_mode === "shared" ? 1 : args.p_quantity }, (_, i) => ({ id: `20000000-0000-0000-0000-${String(i + 1).padStart(12, "0")}`, group_id: stockGroup.id, ovoko_account: args.p_account, ordinal: i + 1, external_id: `tymo:${args.p_seller}:${args.p_offer}:u:${i + 1}`, state: "pending", part_id: null, request_hash: null }));
+    }
+    return Response.json([stockGroup]);
+  }
+  if (url.pathname === "/rest/v1/ovoko_stock_units") {
+    const matches = row => [...url.searchParams].every(([key, filter]) => filter.startsWith("eq.") ? String(row[key]) === filter.slice(3) : filter === "is.null" ? row[key] === null : true);
+    const rows = stockUnits.filter(matches);
+    if (method === "PATCH") {
+      const patch = JSON.parse(options.body);
+      if (patch.state === "sending" && mode === "unit-cas-race") return Response.json([]);
+      rows.forEach(row => Object.assign(row, patch));
+      if (patch.state === "created" && mode === "confirmation-lost") throw new Error("private-db-error");
+      if (patch.state === "created" && mode === "stock-confirmation-failed") { rows.forEach(row => { row.state = "sending"; row.part_id = null; }); throw new Error("private-db-error"); }
+    }
+    return Response.json(rows.slice(Number(url.searchParams.get("offset") || 0), Number(url.searchParams.get("offset") || 0) + 1000));
+  }
   if (url.pathname === "/rest/v1/ovoko_single_publications") {
     if (failDb === method) return new Response("private-db-error", { status: 503 });
     if (method === "POST") {
@@ -106,7 +133,7 @@ globalThis.fetch = async (input, options = {}) => {
   if (url.pathname === "/v2/get/parts") {
     assert.equal(url.searchParams.has("part_ids"), false, "No undocumented filter can be trusted to prove absence");
     const external = url.searchParams.has("external_ids");
-    if (external) assert.equal(url.searchParams.get("external_ids"), "tymo:555:101");
+    if (external) assert.match(url.searchParams.get("external_ids"), /^tymo:555:101(?::u:\d+)?$/);
     else { inventoryReads++; assert.equal(url.searchParams.get("sort[id]"), "asc"); }
     if (mode === "presence-error") return new Response("private-provider-error", { status: 503 });
     if (mode === "presence-warning") return Response.json({ status_code: "R202", msg: "private-provider-error" });
@@ -115,13 +142,17 @@ globalThis.fetch = async (input, options = {}) => {
       const page = Number(url.searchParams.get("page"));
       return Response.json({ status_code: "R200", data: Array.from({ length: Math.min(100, 1501 - (page - 1) * 100) }, (_, i) => ({ id: String(10000 + (page - 1) * 100 + i), external_id: null })), pagination: { page, limit: 100, total_count: 1501 } });
     }
-    const present = providerPresent || (external ? mode === "presence-external-only" : mode === "presence-id-only" || (mode === "presence-reappeared" && inventoryReads >= 2));
+    const present = !stockGroup && (providerPresent || (external ? mode === "presence-external-only" : mode === "presence-id-only" || (mode === "presence-reappeared" && inventoryReads >= 2)));
     const data = present ? [{ id: external && mode === "presence-external-only" ? "99" : "77", external_id: mode === "presence-id-only" ? "changed" : "tymo:555:101" }] : duplicate ? [{ id: "99", external_id: "tymo:555:101" }] : [];
     if (mode === "presence-wrong-external") data.push({ id: "99", external_id: "private-wrong" });
     return Response.json({ status_code: "R200", data, pagination: { page: "1", limit: external ? "1" : "100", total_count: data.length } });
   }
   assert.equal(url.pathname, "/crm/importPart", "No arbitrary mutation, update, delete, status change, donor or warehouse operations");
-  assert.equal(records.size, 1); assert.equal([...records.values()][0].state, "sending", "Durable reservation precedes every mutation");
+  if (stockGroup) {
+    assert.equal(records.size, 0, "Groups never create a legacy single journal row");
+    assert.equal(stockUnits.find(row => row.external_id === form.get("external_id"))?.state, "sending");
+    assert.match(form.get("external_id"), /^tymo:555:101:u:\d+$/);
+  } else { assert.equal(records.size, 1); assert.equal([...records.values()][0].state, "sending", "Durable reservation precedes every mutation"); }
   writes++;
   assert.equal(form.get("manufacturer_code"), expectedCode || null); assert.equal(form.get("car_id"), "13"); assert.equal(form.get("quality"), "0"); assert.equal(form.get("status"), "0");
   assert.equal(form.get("photo"), form.get("photos[0]")); assert.equal(form.get("original_currency"), "PLN"); assert.equal(form.get("price"), expectedPrice);
@@ -138,7 +169,7 @@ globalThis.fetch = async (input, options = {}) => {
   if (mode === "unsafe-code") return Response.json({ status_code: "private-token", msg: "private-provider-error" });
   if (mode === "missing-id") return Response.json({ status_code: "R200" });
   providerPresent = true;
-  return Response.json({ status_code: "R200", part_id: 77 });
+  return Response.json({ status_code: "R200", part_id: stockGroup ? 77 + writes : 77 });
 };
 try {
   reset(); assert.equal((await handleOvokoApi(req(), { ...env, OVOKO_PUBLISH_ENABLED: "false" })).status, 503); assert.equal(writes, 0);
@@ -245,6 +276,115 @@ try {
     if (checkBounds) assert.ok(calls.length - ready < 50, "Publication uses a bounded separate Worker request");
     return result;
   }
+  const multiPayload = (stockMode = "separate") => {
+    // Advance between explicit resume requests; API rate-limit coverage lives in the worker tests.
+    clockOffset += 61000;
+    return { ...payload(), stockMode, expectedSource: { ...snapshot, stock } };
+  };
+  reset(); stock = 3;
+  const firstUnit = await handleOvokoApi(req(multiPayload()), env);
+  assert.equal(firstUnit.status, 200, await firstUnit.clone().text());
+  const firstData = await firstUnit.json();
+  assert.equal(firstData.completedUnits, 1); assert.equal(firstData.totalUnits, 3); assert.equal(firstData.moreUnits, true);
+  assert.equal(firstData.binding.sellerId, "555"); assert.match(firstData.binding.fingerprint, /^[a-f0-9]{64}$/);
+  assert.equal(writes, 1); assert.equal(stockUnits[0].external_id, "tymo:555:101:u:1"); assert.equal(stockUnits[1].state, "pending");
+  const secondUnit = await handleOvokoApi(req(multiPayload()), env);
+  assert.equal(secondUnit.status, 200, await secondUnit.clone().text()); assert.equal((await secondUnit.json()).completedUnits, 2); assert.equal(writes, 2);
+  stock = 1;
+  const changedStock = await handleOvokoApi(req(multiPayload()), env);
+  assert.equal(changedStock.status, 409); assert.equal((await changedStock.json()).code, "stock_changed"); assert.equal(writes, 2, "Existing partial group cannot fall through to legacy when stock becomes one");
+  stock = 3;
+  const changedMode = await handleOvokoApi(req(multiPayload("shared")), env);
+  assert.equal(changedMode.status, 409); assert.equal((await changedMode.json()).code, "stock_changed"); assert.equal(writes, 2);
+  providerPresent = false;
+  const finalUnit = await handleOvokoApi(req(multiPayload()), env);
+  assert.equal(finalUnit.status, 200); assert.equal((await finalUnit.json()).moreUnits, false); assert.equal(writes, 3);
+  const completedGroup = await handleOvokoApi(req(multiPayload()), env);
+  assert.equal(completedGroup.status, 200); assert.equal((await completedGroup.json()).alreadyCreated, true); assert.equal(writes, 3, "Sold/absent completed units are never silently recreated");
+  stock = 1;
+  const completedWithDefaultMode = await handleOvokoApi(req({ ...multiPayload(), stockMode: undefined }), env);
+  assert.equal(completedWithDefaultMode.status, 200, await completedWithDefaultMode.clone().text());
+  const completedDefaultData = await completedWithDefaultMode.json();
+  assert.equal(completedDefaultData.alreadyCreated, true); assert.equal(completedDefaultData.stockMode, "separate"); assert.equal(completedDefaultData.completedUnits, 3); assert.match(completedDefaultData.message, /separate/); assert.equal(writes, 3, "Completed separate group with stock one and hidden/default shared selector is a safe skip, not a conversion");
+  for (const selectedMode of [undefined, "shared"]) {
+    reset(); stock = 5;
+    const sharedPayload = { ...multiPayload("shared"), stockMode: selectedMode };
+    const response = await handleOvokoApi(req(sharedPayload), env);
+    assert.equal(response.status, 200, await response.clone().text());
+    const data = await response.json();
+    assert.equal(data.totalUnits, 1); assert.equal(data.completedUnits, 1); assert.equal(data.initialStock, 5); assert.equal(data.moreUnits, false); assert.equal(data.stockMode, "shared");
+    assert.equal(stockGroup.mode, "shared"); assert.equal(stockUnits.length, 1); assert.equal(writes, 1);
+    providerPresent = false; stock = 1;
+    const already = await handleOvokoApi(req({ ...sharedPayload, expectedSource: { ...snapshot, stock } }), env);
+    assert.equal(already.status, 200); assert.equal((await already.json()).alreadyCreated, true); assert.equal(writes, 1, "Shared publication does not renew sold records; only sync may reactivate the same ID");
+    const sharedWithOtherSelection = await handleOvokoApi(req(multiPayload("separate")), env);
+    assert.equal(sharedWithOtherSelection.status, 200); assert.equal((await sharedWithOtherSelection.json()).stockMode, "shared"); assert.equal(writes, 1);
+  }
+  for (const selectedMode of [null, "unknown", {}, 1]) {
+    reset(); stock = 2;
+    assert.equal((await handleOvokoApi(req({ ...multiPayload(), stockMode: selectedMode }), env)).status, 400); assert.equal(writes, 0);
+  }
+  for (const failure of ["timeout", "missing-id", "confirmation-lost", "stock-confirmation-failed", "unit-cas-race"]) {
+    reset(); stock = 2; mode = failure;
+    const response = await handleOvokoApi(req(multiPayload()), env);
+    assert.equal(response.status, failure === "confirmation-lost" ? 200 : 409, await response.clone().text());
+    assert.equal(writes, failure === "unit-cas-race" ? 0 : 1);
+    if (["timeout", "missing-id", "stock-confirmation-failed"].includes(failure)) {
+      mode = "ok";
+      const blocked = await handleOvokoApi(req(multiPayload()), env);
+      assert.equal(blocked.status, 409); assert.equal((await blocked.json()).code, "stock_publication_locked"); assert.equal(writes, 1);
+      assert.equal(stockUnits[1].state, "pending", "Never skip an uncertain unit to send later units");
+    }
+  }
+  reset(); stock = 2; lateStock = true;
+  assert.equal((await handleOvokoApi(req(multiPayload()), env)).status, 409); assert.equal(stockGroup, null, "Prepare only after source freshness checks"); assert.equal(writes, 0);
+  reset(); stock = 2; rotateAt = 2;
+  assert.equal((await handleOvokoApi(req(multiPayload()), env)).status, 409); assert.equal(stockGroup, null); assert.equal(writes, 0);
+  reset(); stock = 2;
+  const boundFirst = await (await handleOvokoApi(req(multiPayload()), env)).json();
+  rotateAt = credentialReads + 1;
+  const driftedConnection = await handleOvokoApi(req({ ...multiPayload(), binding: boundFirst.binding }), env);
+  assert.equal(driftedConnection.status, 409); assert.equal((await driftedConnection.json()).code, "account_changed"); assert.equal(writes, 1, "Single UI continuation carries a credential binding across requests");
+  reset(); stock = 2;
+  assert.equal((await handleOvokoApi(req(multiPayload()), env)).status, 200);
+  stockGroup.paused = true;
+  const paused = await handleOvokoApi(req(multiPayload()), env);
+  assert.equal(paused.status, 409); assert.equal((await paused.json()).code, "stock_changed"); assert.equal(writes, 1, "Manual pause blocks pending units");
+  stockGroup.paused = false;
+  assert.equal((await handleOvokoApi(req(multiPayload()), env)).status, 200);
+  stockGroup.paused = true;
+  const pausedCompleted = await (await handleOvokoApi(req(multiPayload()), env)).json();
+  assert.equal(pausedCompleted.alreadyCreated, true); assert.equal(pausedCompleted.paused, true); assert.match(pausedCompleted.message, /wstrzymana/); assert.equal(writes, 2);
+  reset(); stock = 2;
+  await Promise.all([handleOvokoApi(req(multiPayload()), env), handleOvokoApi(req(multiPayload()), env)]);
+  assert.equal(writes, 1, "Concurrent group preparation/CAS cannot import the same unit twice");
+  reset(); stock = 2;
+  assert.equal((await handleOvokoApi(req(multiPayload()), env)).status, 200);
+  user++;
+  assert.equal((await handleOvokoApi(req(multiPayload()), env)).status, 409); assert.equal(writes, 1, "Another owner cannot resume the physical group");
+  reset(); missingStockSchema = true;
+  const missingSchema = await handleOvokoApi(req(), env);
+  assert.equal(missingSchema.status, 503); assert.match(await missingSchema.text(), /ovoko_stock_groups/); assert.equal(writes, 0);
+  reset(); bulk = true; stock = 2;
+  const partialPlan = { ...await bulkPlan({ mode: "none", value: "0" }), stockMode: "separate", expectedSource: { ...snapshot, stock } };
+  assert.equal((await bulkSend(partialPlan)).status, 200); assert.equal(writes, 1);
+  const partialPreparation = await handleOvokoApi(bulkReq({ ...partialPlan, operation: "prepare" }), env);
+  assert.equal(partialPreparation.status, 200); assert.notEqual((await partialPreparation.json()).alreadyCreated, true, "Bulk precheck does not skip a partially completed group");
+  stock = 1;
+  const partialDrift = await bulkSend({ ...partialPlan, expectedSource: { ...snapshot, stock } });
+  assert.equal(partialDrift.status, 409); assert.equal((await partialDrift.json()).code, "stock_changed"); assert.equal(writes, 1);
+  stock = 2;
+  assert.equal((await bulkSend(partialPlan)).status, 200); assert.equal(writes, 2);
+  const bulkCompleted = await bulkSend(partialPlan); assert.equal((await bulkCompleted.json()).alreadyCreated, true); assert.equal(writes, 2);
+  reset(); bulk = true; stock = 4;
+  const sharedPlan = { ...await bulkPlan({ mode: "none", value: "0" }), stockMode: "shared", expectedSource: { ...snapshot, stock } };
+  const bulkShared = await bulkSend(sharedPlan); assert.equal(bulkShared.status, 200, await bulkShared.clone().text()); assert.equal((await bulkShared.json()).totalUnits, 1); assert.equal(writes, 1);
+  assert.equal((await bulkSend(sharedPlan)).status, 200); assert.equal(writes, 1);
+  reset(); bulk = true; stock = 10000;
+  const largePlan = { ...await bulkPlan({ mode: "none", value: "0" }), stockMode: "separate", expectedSource: { ...snapshot, stock } };
+  assert.equal((await bulkSend(largePlan)).status, 200); assert.equal(writes, 1);
+  const resumedLarge = await bulkSend(largePlan);
+  assert.equal(resumedLarge.status, 200, await resumedLarge.clone().text()); assert.equal((await resumedLarge.json()).completedUnits, 2); assert.equal(writes, 2, "Even a 10000-record group imports exactly one unit per bounded Worker request");
   reset(); bulk = true;
   const retransferPlan = await bulkPlan({ mode: "none", value: "0" });
   assert.equal((await bulkSend(retransferPlan)).status, 200); providerPresent = false;
@@ -373,4 +513,4 @@ try {
   assert.equal(blocked.status, 400); assert.match(await blocked.text(), /Nie rozpoznano modelu/); assert.equal(writes, 0);
   snapshot.title = originalTitle;
   console.log("Ovoko single + bulk publication: guards, source/target binding, prices, multi-make model lookup, constrained fallback and generation/brand conflicts, car reuse, full photos, durable duplicate locks and uncertain no-retry passed. All services mocked; nothing published live.");
-} finally { globalThis.fetch = originalFetch; }
+} finally { globalThis.fetch = originalFetch; Date.now = originalNow; }

@@ -11,6 +11,7 @@ function reset() { s = undefined; jobs = []; orders = [record()]; mode = "ok"; a
 const db = async (path, init = {}) => {
   const u = new URL(path, "https://db.test"), table = u.pathname.slice(1), method = init.method || "GET", b = init.body ? JSON.parse(init.body) : {};
   if (table === "rpc/sync_account_lock") return mode !== "ownership-conflict";
+  if (table === "rpc/ovoko_stock_sync_status") return { groups: 0, units: 0, pending: 0, review: 0, recent: [] };
   if (table === "rpc/reverse_sales_sync_coverage") { if(mode==="missing-migration")throw new Error("missing RPC");return{scopeVersion:2,linked:s?linkedCount:0,blocked:0}; }
   if (table === "sales_sync_reverse") {
     if (method === "POST") { s = structuredClone(b); return [structuredClone(s)]; }
@@ -19,7 +20,7 @@ const db = async (path, init = {}) => {
     return found ? [structuredClone(s)] : [];
   }
   if (table === "rpc/claim_reverse_sales_sync") { if (!s?.enabled || s.lease) return []; s.lease = crypto.randomUUID(); s.lease_until = new Date(Date.now() + 300000).toISOString(); return [structuredClone(s)]; }
-  if (table === "rpc/ingest_reverse_sales_sync") {
+  if (table === "rpc/ingest_reverse_sales_sync_with_stock") {
     assert.equal(b.p_lease, s.lease); assert.doesNotMatch(JSON.stringify(b), /private|client_email/);
     for (const row of b.p_rows) {
       if (s.baseline.includes(row.orderId)) continue;
@@ -51,6 +52,8 @@ const c = { sellerId: "555", clientId: "client", account: "account", fingerprint
     return { status_code: "R200", data: [{ id: "20", external_id: mode === "foreign" ? "tymo:999:10" : "tymo:555:10", status: oStatus }], pagination: { page: 1, limit, total_count: 1 } };
   } };
 const { reverseSyncControl, runReverseSalesSync } = load("reverse-sales-sync", name => {
+  if (name === "./ovoko-stock-status") return load("ovoko-stock-status", dependency => dependency === "./ovoko-read" ? read : store);
+  if (name === "./ovoko-stock-sync") return { tickOvokoStockSync: async () => false };
   if (name === "./sales-sync-ownership") return ownership;
   if (name === "./sales-sync-connections") return { syncConnections: async () => c, syncAuthorization: async () => { if (mode === "revoke") throw new read.OvokoError(403, "revoked"); if (mode === "disable") s.enabled = false; } };
   if (name === "./sales-sync-store") return { ...store, salesSyncDb: () => db };

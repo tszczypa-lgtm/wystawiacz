@@ -3,14 +3,32 @@ import { readFileSync } from "node:fs";
 import ts from "typescript";
 function load(name, require = () => { throw new Error("Unexpected dependency"); }) { const source = ts.transpileModule(readFileSync(new URL(`../lib/${name}.ts`, import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText; const module = { exports: {} }; new Function("require", "module", "exports", source)(require, module, module.exports); return module.exports; }
 const read = load("ovoko-read"), store = load("sales-sync-store", n => { assert.equal(n, "./ovoko-read"); return read; });
-let jobs, aStatus, aStock, aSold, oStatus, mode, writes, hash, permitted, dbWrites;
+let jobs, aStatus, aStock, aSold, oStatus, mode, writes, hash, permitted, dbWrites, stockMode, saleState;
 const owner = "00000000-0000-4000-8000-000000000001", env = { INVENTORY_WITHDRAW_ENABLED: "true" };
 const digest = async value => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)))].map(v => v.toString(16).padStart(2, "0")).join("");
-function reset() { jobs = new Map(); aStatus = "ACTIVE"; aStock = 1; aSold = 0; oStatus = "0"; mode = "ok"; writes = []; hash = "a".repeat(64); permitted = true; dbWrites = []; }
+function reset() { jobs = new Map(); aStatus = "ACTIVE"; aStock = 1; aSold = 0; oStatus = "0"; mode = "ok"; writes = []; hash = "a".repeat(64); permitted = true; dbWrites = []; stockMode = null; saleState = "running"; }
 function matches(row, search) { return [...search].every(([k, v]) => !v.startsWith("eq.") || String(row[k]) === v.slice(3)); }
 const db = async (path, init = {}) => {
   const url = new URL(path, "https://db.test"); const table = url.pathname.slice(1), method = init.method || "GET", body = init.body ? JSON.parse(init.body) : undefined;
-  if (table === "ovoko_single_publications") return [{ state: "created", part_id: "20", request_hash: hash }];
+  if (table === "ovoko_stock_units") {
+    assert.equal(url.searchParams.get("ovoko_account"), "eq.account");
+    if (url.searchParams.get("state") === "in.(sending,uncertain)") return mode === "publishing-group" ? [{ id: "in-flight-unit" }] : [];
+    if (mode === "missing-units") throw new Error("missing table");
+    if (!stockMode || mode === "no-unit") return [];
+    const unit = { id: "00000000-0000-4000-8000-000000000003", group_id: "00000000-0000-4000-8000-000000000002", ovoko_account: "account", ordinal: mode === "ordinal" ? 2 : 1, external_id: "tymo:555:10:u:1", state: mode === "pending-unit" ? "pending" : "created", part_id: "20", request_hash: hash };
+    return mode === "duplicate-unit" ? [unit, unit] : [unit];
+  }
+  if (table === "ovoko_stock_groups") {
+    assert.equal(url.searchParams.get("ovoko_account"), "eq.account");
+    if (mode === "missing-groups") throw new Error("missing table");
+    return stockMode ? [{ id: "00000000-0000-4000-8000-000000000002", owner_id: mode === "foreign-owner" ? "other" : owner, ovoko_account: "account", seller_id: mode === "foreign-seller" ? "999" : "555", offer_id: "10", quantity: 3, mode: stockMode }] : [];
+  }
+  if (["sales_sync_actions", "sales_sync_reverse_actions", "ovoko_stock_actions"].includes(table)) {
+    assert.equal(url.searchParams.get("state"), "in.(running,submitted,uncertain)");
+    if (table === "ovoko_stock_actions") assert.equal(url.searchParams.get("ovoko_stock_units.group_id"), "eq.00000000-0000-4000-8000-000000000002");
+    return mode === `pending-${table}` && ["running", "submitted", "uncertain"].includes(saleState) ? [{ id: "sale", state: saleState }] : [];
+  }
+  if (table === "ovoko_single_publications") return stockMode && mode !== "overlap" ? [] : [{ state: "created", part_id: "20", request_hash: hash }];
   if (table === "allegro_connections") return [{ sealed: mode === "rotate" ? "changed" : "a-sealed" }];
   if (table === "ovoko_connections") return [{ sealed: "o-sealed" }];
   if (table === "rpc/archive_inventory_reservation") {
@@ -38,7 +56,7 @@ const c = { sellerId: "555", account: "account", fingerprint: "fingerprint", all
   },
   ovoko: async (path, form) => {
     if (path === "/get/part_status") return { status_code: "R200", list: { "0": { pl: "Na stanie" }, "2": { pl: "Sprzedano" }, "4": { pl: "Wycofany" } } };
-    const part = { id: "20", name: "Door", status: oStatus, external_id: mode === "foreign" ? "tymo:999:10" : "tymo:555:10" };
+    const part = { id: "20", name: "Door", status: oStatus, external_id: mode === "foreign" ? "tymo:999:10" : stockMode ? "tymo:555:10:u:1" : "tymo:555:10" };
     if (path.startsWith("/get/part/")) return { status_code: "R200", list: [[part]] };
     if (path.startsWith("/v2/get/parts?")) return { status_code: "R200", data: [part], pagination: { page: 1, limit: 2, total_count: 1 } };
     assert.equal(path, "/crm/changePartStatus"); assert.ok([...jobs.values()].some(j => j.state === "running" && j.ovoko_state === "running")); writes.push(["ovoko", form.get("status")]); oStatus = form.get("status"); return { status_code: "R200" };
@@ -80,4 +98,32 @@ await assert.rejects(prepare("reserve", { reservationId: crypto.randomUUID() }))
 anchor.closed = true; await assert.rejects(prepare("reserve", { reservationId: job.id }));
 const sql = readFileSync(new URL("../supabase/017_inventory_operations.sql", import.meta.url), "utf8"); assert.match(sql, /enable row level security/); assert.match(sql, /revoke all.*from public,anon,authenticated/); assert.match(sql, /inventory_restore_once/);
 const extraSql = readFileSync(new URL("../supabase/019_sync_ownership_reservations.sql", import.meta.url), "utf8"); assert.match(extraSql, /pg_advisory_xact_lock/); assert.match(extraSql, /ovoko_account text not null unique/); assert.match(extraSql, /owner_id uuid not null unique/); assert.match(extraSql, /before insert.*inventory_operations/); assert.match(extraSql, /parent_id=p_id.*for update/);
-console.log("Inventory operations: exact scopes incl. Ovoko-only, private reservation validation, durable per-target locks, partial timeout/no replay, stock/sold/generation/credential/role/CAS guards, non-mutating preparation, manual safe restore, plan cancellation and owner isolation passed. DB/provider fixtures only.");
+for (const value of ["separate", "shared"]) {
+  reset(); stockMode = value;
+  await assert.rejects(prepare(), /Rezerwacje grup/); assert.equal(jobs.size, 0); assert.equal(writes.length, 0);
+  await assert.rejects(prepare("reserve", { partId: null, targets: ["allegro"] }), /Rezerwacje grup/);
+  await assert.rejects(prepare("reserve", { offerId: null, targets: ["ovoko"] }), /Rezerwacje grup/);
+  job = await prepare("withdraw"); assert.equal(jobs.get(job.id).publication_hash, hash); assert.equal(jobs.get(job.id).external_id, "tymo:555:10:u:1");
+  job = await execute(job); assert.equal(job.allegro, "done"); assert.equal(job.ovoko, "done");
+  reset(); stockMode = value; job = await prepare("withdraw", { targets: ["ovoko"] }); await execute(job); assert.deepEqual(writes, [["ovoko", "4"]]);
+  for (const failure of ["foreign-owner", "foreign-seller", "foreign", "duplicate-unit", "no-unit", "pending-unit", "ordinal", "overlap", "missing-units", "missing-groups", "pending-sales_sync_actions", "pending-sales_sync_reverse_actions", "pending-ovoko_stock_actions", "publishing-group"]) {
+    reset(); stockMode = value; mode = failure;
+    await assert.rejects(prepare("withdraw"), undefined, `${value}:${failure}`); assert.equal(jobs.size, 0); assert.equal(writes.length, 0);
+  }
+  for (const failure of ["pending-sales_sync_actions", "pending-sales_sync_reverse_actions", "pending-ovoko_stock_actions", "generation"]) {
+    reset(); stockMode = value; job = await prepare("withdraw");
+    if (failure === "generation") hash = "b".repeat(64); else mode = failure;
+    await assert.rejects(execute(job)); assert.equal(writes.length, 0);
+  }
+  for (const table of ["sales_sync_actions", "sales_sync_reverse_actions", "ovoko_stock_actions"]) {
+    for (const state of ["review", "waiting", "queued", "preflight", "done"]) {
+      reset(); stockMode = value; mode = `pending-${table}`; saleState = state;
+      job = await execute(await prepare("withdraw")); assert.equal(job.ovoko, "done", `${value}:${table}:${state}`);
+    }
+    for (const state of ["running", "submitted", "uncertain"]) {
+      reset(); stockMode = value; mode = `pending-${table}`; saleState = state;
+      await assert.rejects(prepare("withdraw")); assert.equal(writes.length, 0, `${value}:${table}:${state}`);
+    }
+  }
+}
+console.log("Inventory operations: legacy behavior plus shared/separate exact unit binding, reservation rejection at remaining stock one, pending sales, owner/account isolation and no replay passed.");

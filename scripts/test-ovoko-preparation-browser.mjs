@@ -99,9 +99,9 @@ try {
   await page.getByText("Cennik Allegro: Maly kurier", { exact: true }).waitFor();
   await page.getByLabel("ID rekordu auta w Ovoko (car_id)").fill("36");
   await page.getByLabel("Plan wysylki do sprawdzenia").fill("Sprawdze gabaryt i cene wysylki");
-  assert.equal(await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).isVisible(), true, "The publication entry point is always visible at the top");
-  await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).click();
-  await page.getByRole("heading", { name: "Podsumowanie: jedna czesc", exact: true }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "Wystaw w Ovoko", exact: true }).isVisible(), true, "The publication entry point is always visible at the top");
+  await page.getByRole("button", { name: "Wystaw w Ovoko", exact: true }).click();
+  await page.getByRole("heading", { name: "Podsumowanie: 1 rekordow Ovoko; zapas: 1", exact: true }).waitFor();
   assert.equal(await page.locator('input[type="checkbox"]').count(), 0, "No confirmation checkboxes");
   assert.match(await page.getByLabel("Blokady wystawienia").textContent(), /nieobslugiwanym adresem/);
   assert.equal(calls.filter(call => call.path === "/api/ovoko/publish").length, 0);
@@ -179,9 +179,9 @@ try {
   validImages = true;
   await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="11"]').waitFor({ state: "attached" });
   await page.getByLabel("ID rekordu auta w Ovoko (car_id)").fill("13");
-  await page.getByRole("button", { name: "Sprawdz pojedyncza wysylke", exact: true }).click();
-  await page.getByText("Przenoszone zdjecia: 3 (cala galeria z Allegro)", { exact: true }).waitFor();
-  const send = page.getByRole("button", { name: "Wyslij 1 czesc do Ovoko", exact: true });
+  await page.getByRole("button", { name: "Sprawdz wysylke", exact: true }).click();
+  await page.getByText("Przenoszone zdjecia: 3 (identyczna cala galeria dla kazdego rekordu)", { exact: true }).waitFor();
+  const send = page.getByRole("button", { name: "Wyslij do Ovoko", exact: true });
   assert.equal(await send.isDisabled(), false, "A single click can publish valid data without checkbox confirmations");
   assert.equal(await page.locator('input[type="checkbox"]').count(), 0);
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), "Confirmation fits the mobile viewport");
@@ -194,7 +194,7 @@ try {
   publicationFailure = true;
   await mount(); await page.getByLabel("Model auta Ovoko").locator('option[value="11"]').waitFor({ state: "attached" });
   await page.getByLabel("ID rekordu auta w Ovoko (car_id)").fill("13");
-  await page.getByRole("button", { name: "Sprawdz pojedyncza wysylke", exact: true }).click();
+  await page.getByRole("button", { name: "Sprawdz wysylke", exact: true }).click();
   await send.click(); await page.getByRole("alert").filter({ hasText: "Wynik wysylki jest niepewny" }).waitFor();
   assert.equal(await send.isDisabled(), true, "Uncertain responses cannot be retried automatically");
   offerTitle = "MODUL STEROWNIK PARKOWANIA PDC KANGOO III 259903137R"; numberParameter = offerTitle;
@@ -208,7 +208,7 @@ try {
   await page.getByRole("alert").filter({ hasText: "cars.pagination" }).waitFor();
   const beforeKangooCars = calls.filter(call => call.path === "/api/ovoko/create-car").length;
   const beforeKangooParts = calls.filter(call => call.path === "/api/ovoko/publish").length;
-  await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).dblclick();
+  await page.getByRole("button", { name: "Wystaw w Ovoko", exact: true }).dblclick();
   await page.getByRole("status").filter({ hasText: "utworzenie czesci ID 77" }).waitFor();
   assert.equal(calls.filter(call => call.path === "/api/ovoko/create-car").length, beforeKangooCars + 1);
   assert.equal(calls.filter(call => call.path === "/api/ovoko/publish").length, beforeKangooParts + 1, "One click prepares car and publishes part, no intermediate confirmations or duplicate writes");
@@ -222,7 +222,7 @@ try {
   assert.ok((await page.getByLabel("Dodatkowe numery czesci").inputValue()).split("\n").includes("JPLA14D617BA"));
   await page.getByLabel("Kategoria Ovoko", { exact: true }).selectOption("");
   const beforeBlocked = calls.filter(call => ["/api/ovoko/create-car", "/api/ovoko/publish"].includes(call.path)).length;
-  await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).click();
+  await page.getByRole("button", { name: "Wystaw w Ovoko", exact: true }).click();
   assert.match(await page.getByLabel("Blokady wystawienia").textContent(), /kategorie/);
   await page.getByRole("alert").filter({ hasText: "Auto ID 430 jest uzupelnione" }).waitFor();
   assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "430", "Missing part category no longer prevents automatic car ID");
@@ -274,13 +274,13 @@ try {
   const beforeAutomatic = calls.filter(call => call.path === "/api/ovoko/create-car").length;
   await mount(); await page.getByLabel("Moje samochody Ovoko").locator('option[value="301"]').waitFor({ state: "attached" });
   assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "301");
-  await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).click();
+  await page.getByRole("button", { name: "Wystaw w Ovoko", exact: true }).click();
   assert.equal(calls.filter(call => call.path === "/api/ovoko/create-car").length, beforeAutomatic, "An existing car is reused with no creation");
   savedCars = [];
   await mount(); await page.getByText(/Brak zapisanego auta dla tego modelu/).waitFor();
   assert.equal(calls.filter(call => call.path === "/api/ovoko/create-car").length, beforeAutomatic, "Opening page does not create a car despite automatic mode");
   await page.getByLabel("Kategoria Ovoko", { exact: true }).selectOption("3");
-  await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).dblclick();
+  await page.getByRole("button", { name: "Wystaw w Ovoko", exact: true }).dblclick();
   await page.getByRole("status").filter({ hasText: "Utworzono nowy rekord auta ID 301" }).waitFor();
   assert.equal(calls.filter(call => call.path === "/api/ovoko/create-car").length, beforeAutomatic + 1, "One click flow uses inferred year, no manual year confirmation, no duplicate on double click");
   assert.equal(await page.getByLabel("ID rekordu auta w Ovoko (car_id)").inputValue(), "301");
@@ -291,7 +291,7 @@ try {
   assert.equal(await page.getByLabel("Numer katalogowy - opcjonalny").inputValue(), "");
   await page.getByText("Bez numeru czesci - dozwolone w Ovoko. Numer nie zostanie wyslany.", { exact: true }).waitFor({ state: "attached" });
   await page.getByLabel("Kategoria Ovoko", { exact: true }).selectOption("3");
-  await page.getByRole("button", { name: "Wystaw 1 czesc w Ovoko", exact: true }).click();
+  await page.getByRole("button", { name: "Wystaw w Ovoko", exact: true }).click();
   await page.getByRole("status").filter({ hasText: "utworzenie czesci ID 77" }).waitFor();
   assert.equal(calls.filter(call => call.path === "/api/ovoko/publish").length, beforeNoNumber + 1, "A part with known vehicle and category publishes without a manufacturer number");
   carCreationFailure = true;

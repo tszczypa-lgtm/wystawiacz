@@ -2,6 +2,8 @@ import { syncAuthorization, syncConnections, type SalesSyncEnv } from "./sales-s
 import { salesSyncDb, syncRows, syncJson, type SyncAction, type SyncDb, type SyncSubscription } from "./sales-sync-store";
 import { OvokoError, ovokoPageData, parseOvokoRead } from "./ovoko-read";
 import { syncAccountLock } from "./sales-sync-ownership";
+import { ovokoStockSyncStatus } from "./ovoko-stock-status";
+import { tickOvokoStockSync } from "./ovoko-stock-sync";
 
 const representation = { Prefer: "return=representation" };
 const selection = (s: SyncSubscription) => `sales_sync?owner_id=eq.${s.owner_id}&epoch=eq.${s.epoch}&lease=eq.${s.lease}`;
@@ -21,6 +23,7 @@ export async function salesSyncControl(owner: string, env: SalesSyncEnv, input: 
     await db(`sales_sync?owner_id=eq.${owner}`, { method: "PATCH", body: JSON.stringify({ enabled: false }) });
   }
   if (input.operation === "enable") {
+    await ovokoStockSyncStatus(db, owner, "allegro");
     if (input.confirm !== true) throw new OvokoError(400, "Potwierdz uruchomienie automatu od teraz.");
     if (env.SALES_SYNC_ENABLED !== "true" || env.OVOKO_TEST_ENABLED === "false") throw new OvokoError(503, "Wlacz SALES_SYNC_ENABLED=true i harmonogram Cloudflare po migracji 016.");
     if (!existing?.enabled) {
@@ -44,8 +47,9 @@ export async function salesSyncControl(owner: string, env: SalesSyncEnv, input: 
   const rows = syncRows<SyncSubscription>(await db(`sales_sync?owner_id=eq.${owner}&select=*`));
   const jobs = syncRows<Record<string, unknown>>(await db(`sales_sync_actions?owner_id=eq.${owner}&select=id,offer_id,part_id,state,diagnostic,created_at&order=created_at.desc&limit=10`));
   const s = rows[0];
+  const stock = await ovokoStockSyncStatus(db, owner, "allegro").catch(error => { if (input.operation === "disable" || input.operation === "release") return null; throw error; });
   return { configured: env.SALES_SYNC_ENABLED === "true" && env.OVOKO_TEST_ENABLED !== "false", enabled: s?.enabled === true, direction: "allegro_to_ovoko" as const,
-    lastChecked: s?.last_checked_at || null, lastError: s?.last_error || null, caughtUp: s?.caught_up ?? false, armedAt: s?.armed_at || null, jobs };
+    lastChecked: s?.last_checked_at || null, lastError: s?.last_error || null, caughtUp: s?.caught_up ?? false, armedAt: s?.armed_at || null, jobs, stock };
 }
 
 export async function runSalesSync(env: SalesSyncEnv) {
@@ -92,9 +96,11 @@ export async function tickSalesSync(s: SyncSubscription, env: SalesSyncEnv, db: 
   }
   if (evidence.length > 5000) throw new OvokoError(502, "Za duzo pozycji zdarzen w jednej kontroli.");
   const caughtUp = batch.events.length < 100;
-  await db("rpc/ingest_sales_sync", syncJson({ p_owner: s.owner_id, p_epoch: s.epoch, p_lease: s.lease, p_cursor: s.cursor, p_next: previous, p_caught_up: caughtUp, p_evidence: evidence.map(item => ({ ...item, ...(bought.has(item.itemId) ? { boughtAt: bought.get(item.itemId) } : {}) })) }));
+  await db("rpc/ingest_sales_sync_with_stock", syncJson({ p_owner: s.owner_id, p_epoch: s.epoch, p_lease: s.lease, p_cursor: s.cursor, p_next: previous, p_caught_up: caughtUp, p_evidence: evidence.map(item => ({ ...item, ...(bought.has(item.itemId) ? { boughtAt: bought.get(item.itemId) } : {}) })) }));
   if (!caughtUp) return; // Drain all cancellations before considering any provider mutation.
   const jobs = syncRows<SyncAction>(await db(`sales_sync_actions?owner_id=eq.${s.owner_id}&epoch=eq.${s.epoch}&state=in.(queued,preflight,running,submitted,uncertain)&order=checked_at.asc.nullsfirst,created_at.asc&limit=1`));
+  // Alternate priority so a busy legacy queue cannot starve stock-unit sales.
+  if ((!jobs[0] || new Date().getUTCMinutes() % 2 === 0) && await tickOvokoStockSync(s, env, db, connections, "allegro")) return;
   if (!jobs[0]) return;
   const job = jobs[0];
   const target = `sales_sync_actions?id=eq.${job.id}&owner_id=eq.${s.owner_id}&epoch=eq.${s.epoch}`;

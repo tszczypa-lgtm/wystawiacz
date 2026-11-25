@@ -6,6 +6,9 @@ import { ovokoWriteDigest } from "./ovoko-write-client";
 type Kind = "withdraw" | "reserve" | "restore";
 type Target = "allegro" | "ovoko";
 type Data = Record<string, unknown>;
+type StockGroup = { id: string; owner_id: string; ovoko_account: string; seller_id: string; offer_id: string; quantity: number; mode: "separate" | "shared" };
+type StockUnit = { id: string; group_id: string; ovoko_account: string; ordinal: number; external_id: string; state: string; part_id: string; request_hash: string };
+const stockReservationError = "Rezerwacje grup wielosztukowych (osobnych i wspolnych) nie sa obslugiwane, nawet gdy pozostala jedna sztuka. Wymagaja osobnej rezerwacji jednostek.";
 type Reservation = { customer: string; price: string; deposit: string; currency: string; until: string; comment: string; groupId?: string };
 type Job = { id: string; owner_id: string; kind: Kind; request_hash: string; parent_id: string | null; target_key: string; seller_id: string; ovoko_account: string; fingerprint: string; offer_id: string | null; part_id: string | null; publication_hash: string | null; external_id: string | null; name: string; a_initial: string | null; a_stock: number | null; a_sold: number | null; o_initial: string | null; targets: Target[]; reservation: Reservation | null; closed: boolean; state: string; allegro_state: string; ovoko_state: string; diagnostic: string | null; expires_at: string; created_at: string };
 const uuid = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
@@ -39,15 +42,49 @@ export async function inventoryOperations(owner: string, env: SalesSyncEnv & { I
     if (rows.length !== 1 || rows[0].seller_id !== c.sellerId || rows[0].ovoko_account !== c.account || rows[0].fingerprint !== c.fingerprint) throw new OvokoError(409, "Operacja nie nalezy do aktualnego konta lub zmienilo sie polaczenie.");
     return rows[0];
   };
+  const stockBinding = async (offerId: string | null, partId: string | null) => {
+    const units = partId ? syncRows<StockUnit>(await db(`ovoko_stock_units?ovoko_account=eq.${c.account}&part_id=eq.${partId}&select=*&limit=2`)) : [];
+    if (units.length > 1) throw new OvokoError(409, "Niejednoznaczna jednostka Ovoko.");
+    const unit = units[0];
+    if (unit && !uuid.test(unit.group_id)) throw new OvokoError(409, "Nieprawidlowa grupa jednostki Ovoko.");
+    const groups = offerId || unit ? syncRows<StockGroup>(await db(`ovoko_stock_groups?ovoko_account=eq.${c.account}&${offerId ? `seller_id=eq.${c.sellerId}&offer_id=eq.${offerId}` : `id=eq.${unit.group_id}`}&select=*&limit=2`)) : [];
+    if (groups.length > 1 || unit && !groups.length) throw new OvokoError(409, "Niejednoznaczna grupa Ovoko.");
+    const group = groups[0];
+    if (!group) return null;
+    if (!uuid.test(group.id) || group.owner_id !== owner || group.ovoko_account !== c.account || group.seller_id !== c.sellerId || !aId(group.offer_id) || offerId && group.offer_id !== offerId || !Number.isSafeInteger(group.quantity) || group.quantity < 2 || group.quantity > 10000 || !["separate", "shared"].includes(group.mode)) throw new OvokoError(409, "Grupa nie nalezy do aktualnego wlasciciela i kont lub ma nieprawidlowy tryb.");
+    if (partId && (!unit || !uuid.test(unit.id) || unit.group_id !== group.id || unit.ovoko_account !== c.account || unit.part_id !== partId || unit.state !== "created" || !Number.isSafeInteger(unit.ordinal) || unit.ordinal < 1 || unit.ordinal > (group.mode === "shared" ? 1 : group.quantity) || unit.external_id !== `tymo:${c.sellerId}:${group.offer_id}:u:${unit.ordinal}` || !/^[a-f0-9]{64}$/.test(unit.request_hash))) throw new OvokoError(409, "Nie potwierdzono dokladnej jednostki, identyfikatora i hasha publikacji.");
+    const legacy = syncRows(await db(`ovoko_single_publications?ovoko_account=eq.${c.account}&or=(and(allegro_seller_id.eq.${c.sellerId},allegro_offer_id.eq.${group.offer_id})${partId ? `,part_id.eq.${partId}` : ""})&select=part_id&limit=1`));
+    if (legacy.length) throw new OvokoError(409, "Nakladajace sie rejestry grupy i pojedynczej czesci.");
+    return { group, unit };
+  };
+  const noPendingSales = async (binding: Awaited<ReturnType<typeof stockBinding>>) => {
+    if (!binding) return;
+    const publishing = syncRows(await db(`ovoko_stock_units?group_id=eq.${binding.group.id}&ovoko_account=eq.${c.account}&state=in.(sending,uncertain)&select=id&limit=1`));
+    if (publishing.length) throw new OvokoError(409, "Trwa wysylka egzemplarza tej grupy lub jej wynik jest niepewny. Najpierw sprawdz przeniesienie w Ovoko; nie oznaczamy calej grupy jako wycofanej.");
+    // Offer-wide guard also covers shared stock and an Allegro END affecting sibling units.
+    for (const table of ["sales_sync_actions", "sales_sync_reverse_actions"]) {
+      const pending = syncRows(await db(`${table}?owner_id=eq.${owner}&offer_id=eq.${binding.group.offer_id}&state=in.(running,submitted,uncertain)&select=id&limit=1`));
+      if (pending.length) throw new OvokoError(409, "Grupa ma nierozstrzygnieta sprzedaz w synchronizacji. Najpierw sprawdz jej wynik; nie wykonano recznej zmiany.");
+    }
+    // SQL pauses the group and classifies not-started work atomically at manual start.
+    const actions = syncRows(await db(`ovoko_stock_actions?ovoko_stock_units.group_id=eq.${binding.group.id}&state=in.(running,submitted,uncertain)&select=id,ovoko_stock_units!inner(group_id)&limit=1`));
+    if (actions.length) throw new OvokoError(409, "Grupa ma nierozstrzygnieta sprzedaz jednostek. Najpierw sprawdz synchronizacje; nie wykonano recznej zmiany.");
+  };
   const live = async (offerId: string | null, partId: string | null) => {
     let a: Data = {}, o: Data = {}, hash: string | null = null;
+    const binding = await stockBinding(offerId, partId);
     if (offerId) {
       const data = await c.allegro(`/sale/offers?offer.id=${offerId}&limit=1`);
       const rows = Array.isArray(data.offers) ? data.offers.map(obj) : [];
       if (rows.length !== 1 || rows[0].id !== offerId) throw new OvokoError(409, "Nie potwierdzono wlasnosci oferty Allegro.");
       a = rows[0];
     }
-    if (partId && offerId) {
+    if (partId && binding) {
+      const unit = binding.unit;
+      const page = ovokoPageData(await c.ovoko(`/v2/get/parts?external_ids=${encodeURIComponent(unit.external_id)}&page=1&limit=2`), { page: 1, limit: 2 }, "operations.unit.external");
+      if (page.pagination.total !== 1 || page.data.length !== 1 || String(page.data[0].id) !== partId || page.data[0].external_id !== unit.external_id) throw new OvokoError(409, "Nie potwierdzono zewnetrznego identyfikatora jednostki na aktualnym koncie Ovoko.");
+      o = page.data[0]; hash = unit.request_hash;
+    } else if (partId && offerId) {
       const external = `tymo:${c.sellerId}:${offerId}`;
       const page = ovokoPageData(await c.ovoko(`/v2/get/parts?external_ids=${encodeURIComponent(external)}&page=1&limit=2`), { page: 1, limit: 2 }, "operations.external");
       const journal = syncRows<{ state: string; part_id: string; request_hash: string }>(await db(`ovoko_single_publications?owner_id=eq.${owner}&ovoko_account=eq.${c.account}&allegro_seller_id=eq.${c.sellerId}&allegro_offer_id=eq.${offerId}&select=state,part_id,request_hash`));
@@ -61,7 +98,7 @@ export async function inventoryOperations(owner: string, env: SalesSyncEnv & { I
     }
     const statuses = partId ? parseOvokoRead("statuses", await c.ovoko("/get/part_status")).rows : [];
     const code = (names: string[]) => { const matches = statuses.filter(s => names.includes(s.name.trim().toLowerCase())); if (matches.length !== 1) throw new OvokoError(502, "Nie potwierdzono statusu Ovoko."); return matches[0].id; };
-    return { a, o, aStatus: String(obj(a.publication).status || ""), stock: typeof obj(a.stock).available === "number" ? Number(obj(a.stock).available) : null, oStatus: String(o.status ?? ""), hash,
+    return { a, o, binding, aStatus: String(obj(a.publication).status || ""), stock: typeof obj(a.stock).available === "number" ? Number(obj(a.stock).available) : null, oStatus: String(o.status ?? ""), hash,
       stockCode: partId ? code(["na stanie", "in stock"]) : "", withdrawnCode: partId ? code(["wycofany", "written off"]) : "" };
   };
   if (operation === "prepare" || operation === "prepare-restore") {
@@ -70,6 +107,7 @@ export async function inventoryOperations(owner: string, env: SalesSyncEnv & { I
     const existing = syncRows<Job>(await db(`${selector(input.requestId)}&select=*`));
     if (existing.length) { const job = await one(input.requestId); if (job.request_hash !== requestHash) throw new OvokoError(409, "Ten numer operacji byl juz uzyty do innych danych."); return publicJob(job); }
     const parent = operation === "prepare-restore" ? await one(input.reservationId) : null;
+    if (parent && await stockBinding(parent.offer_id, parent.part_id)) throw new OvokoError(409, stockReservationError);
     if (parent && (parent.kind !== "reserve" || parent.closed || parent.state !== "settled")) throw new OvokoError(409, "Rezerwacja jest zamknieta albo jej wycofanie nie zostalo zakonczone. Sprawdz najpierw wynik.");
     if (parent) {
       if (!["done", "not_requested"].includes(parent.allegro_state) || !["done", "not_requested"].includes(parent.ovoko_state)) throw new OvokoError(409, "Najpierw potwierdz wycofanie obu kanalow przyciskiem Sprawdz wynik. Nie przywracamy przy niepewnej poprzedniej operacji.");
@@ -84,6 +122,7 @@ export async function inventoryOperations(owner: string, env: SalesSyncEnv & { I
     const kind: Kind = parent ? "restore" : input.kind === "reserve" ? "reserve" : input.kind === "withdraw" ? "withdraw" : (() => { throw new OvokoError(400, "Wybierz wycofanie albo rezerwacje."); })();
     const offerId = parent ? parent.offer_id : input.offerId == null ? null : aId(input.offerId) ? String(input.offerId) : (() => { throw new OvokoError(400, "Nieprawidlowe ID Allegro."); })();
     const partId = parent ? parent.part_id : input.partId == null ? null : oId(input.partId) ? String(input.partId) : (() => { throw new OvokoError(400, "Nieprawidlowe ID Ovoko."); })();
+    if (kind !== "withdraw" && await stockBinding(offerId, partId)) throw new OvokoError(409, stockReservationError);
     const targets = parent ? parent.targets : input.targets;
     if (!Array.isArray(targets) || !targets.length || targets.length > 2 || new Set(targets).size !== targets.length || targets.some(t => !["allegro", "ovoko"].includes(t) || t === "allegro" && !offerId || t === "ovoko" && !partId)) throw new OvokoError(400, "Sprawdz wybrane kanaly operacji.");
     if (kind === "reserve" && ((offerId && !targets.includes("allegro")) || (partId && !targets.includes("ovoko")))) throw new OvokoError(400, "Rezerwacja musi wstrzymac wszystkie wskazane kanaly tej czesci.");
@@ -95,6 +134,7 @@ export async function inventoryOperations(owner: string, env: SalesSyncEnv & { I
       r = reservationInput({ ...anchor.reservation, groupId: anchor.reservation.groupId || anchor.id, price: r!.price, deposit: r!.deposit });
     }
     const target = await live(offerId, partId);
+    await noPendingSales(target.binding);
     if (offerId && !["ACTIVE", "ENDED", "INACTIVE"].includes(target.aStatus)) throw new OvokoError(409, "Allegro ma przejsciowy lub nieznany status. Ponow sam odczyt.");
     if (kind === "reserve" && offerId && obj(target.a.sellingMode).format && obj(target.a.sellingMode).format !== "BUY_NOW") throw new OvokoError(409, "Rezerwacja z przywracaniem obsluguje oferty Kup teraz, nie licytacje.");
     if (kind === "reserve" && !offerId && /^tymo:/.test(String(target.o.external_id || ""))) throw new OvokoError(409, "Czesc Ovoko ma powiazanie z Allegro. Odswiez pelna liste i zaznacz polaczona pozycje, zeby wstrzymac oba kanaly.");
@@ -106,7 +146,7 @@ export async function inventoryOperations(owner: string, env: SalesSyncEnv & { I
     if (kind !== "restore" && targets.includes("ovoko") && ![target.stockCode, target.withdrawnCode].includes(target.oStatus)) throw new OvokoError(409, "Ovoko jest sprzedane, zarezerwowane lub ma nieznany status.");
     if (parent && (target.hash !== parent.publication_hash || String(target.o.external_id || "") !== (parent.external_id || "") || offerId && (target.stock !== parent.a_stock || target.stock !== 1) || partId && ![target.withdrawnCode, parent.o_initial].includes(target.oStatus))) throw new OvokoError(409, "Czesc lub stan zmienily sie od rezerwacji. Nie przywracamy sprzedanej ani niepotwierdzonej sztuki.");
     if (parent && offerId && parent.a_sold !== null && obj(target.a.stock).sold !== parent.a_sold) throw new OvokoError(409, "Po rezerwacji zmienil sie licznik sprzedazy Allegro. Nie przywracamy oferty.");
-    const job: Job = { id: input.requestId, owner_id: owner, kind, request_hash: requestHash, parent_id: parent?.id || null, target_key: offerId ? `a:${offerId}` : `o:${partId}`, seller_id: c.sellerId, ovoko_account: c.account, fingerprint: c.fingerprint,
+    const job: Job = { id: input.requestId, owner_id: owner, kind, request_hash: requestHash, parent_id: parent?.id || null, target_key: target.binding && partId ? `a:${target.binding.group.offer_id}:o:${partId}` : offerId ? `a:${offerId}` : `o:${partId}`, seller_id: c.sellerId, ovoko_account: c.account, fingerprint: c.fingerprint,
       offer_id: offerId, part_id: partId, publication_hash: target.hash, external_id: String(target.o.external_id || ""), name: String(target.a.name || target.o.name || "Czesc").slice(0, 500), a_initial: parent?.a_initial || target.aStatus, a_stock: parent?.a_stock ?? target.stock, o_initial: parent?.o_initial || target.oStatus,
       a_sold: parent ? parent.a_sold : Number.isSafeInteger(obj(target.a.stock).sold) ? Number(obj(target.a.stock).sold) : null,
       targets: targets as Target[], reservation: r, closed: kind !== "reserve", state: "prepared", allegro_state: targets.includes("allegro") ? "pending" : "not_requested", ovoko_state: targets.includes("ovoko") ? "pending" : "not_requested", diagnostic: null,
@@ -148,6 +188,8 @@ export async function inventoryOperations(owner: string, env: SalesSyncEnv & { I
     if (["running", "submitted", "uncertain"].includes(job.ovoko_state) && target.oStatus === desiredO) job.ovoko_state = "done";
     await save(); await settleParent(); return publicJob(job);
   }
+  if (job.kind !== "withdraw" && target.binding) throw new OvokoError(409, stockReservationError);
+  await noPendingSales(target.binding);
   if (Date.parse(job.expires_at) <= Date.now()) throw new OvokoError(409, "Plan operacji wygasl. Nie wykonano zapisu.");
   if (job.kind === "restore" && job.offer_id && (target.stock !== job.a_stock || target.stock !== 1)) throw new OvokoError(409, "Brak potwierdzonej pojedynczej sztuki. Nie przywracamy oferty.");
   if (job.kind === "restore" && job.offer_id && job.a_sold !== null && obj(target.a.stock).sold !== job.a_sold) throw new OvokoError(409, "Licznik sprzedazy Allegro zmienil sie po rezerwacji. Nie przywracamy tej oferty.");
@@ -159,6 +201,8 @@ export async function inventoryOperations(owner: string, env: SalesSyncEnv & { I
     const field = channel === "allegro" ? "allegro_state" : "ovoko_state";
     try {
       target = await live(job.offer_id, job.part_id);
+      if (job.kind !== "withdraw" && target.binding) throw new OvokoError(409, stockReservationError);
+      await noPendingSales(target.binding);
       if (target.hash !== job.publication_hash || String(target.o.external_id || "") !== (job.external_id || "")) throw new Error("changed binding");
       if (job.kind === "restore" && (job.offer_id && target.stock !== 1 || job.part_id && target.oStatus !== target.withdrawnCode && target.oStatus !== desiredO)) throw new Error("availability changed");
       if (job.kind === "restore" && job.offer_id && job.a_sold !== null && obj(target.a.stock).sold !== job.a_sold) throw new Error("sale counter changed");

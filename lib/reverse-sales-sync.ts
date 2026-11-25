@@ -3,6 +3,8 @@ import { salesSyncDb, syncJson, syncRows, type SyncDb } from "./sales-sync-store
 import { OvokoError, ovokoPageData, parseOvokoRead } from "./ovoko-read";
 import { ovokoSaleOrders } from "./ovoko-sale-evidence";
 import { syncAccountLock } from "./sales-sync-ownership";
+import { ovokoStockSyncStatus } from "./ovoko-stock-status";
+import { tickOvokoStockSync } from "./ovoko-stock-sync";
 type Data = Record<string, unknown>;
 type Subscription = { owner_id: string; epoch: string; enabled: boolean; seller_id: string; ovoko_account: string; fingerprint: string; client_id: string; armed_at: string; baseline: string[]; watch: { offerId: string; partId: string; hash: string }[]; lease: string | null; lease_until: string | null; last_checked_at: string | null; last_error: string | null };
 type Action = { id: string; owner_id: string; epoch: string; order_id: string; part_id: string; offer_id: string; publication_hash: string; state: string };
@@ -37,6 +39,7 @@ export async function reverseSyncControl(owner: string, env: SalesSyncEnv, input
   const existing = syncRows<Subscription>(await db(`sales_sync_reverse?owner_id=eq.${owner}&select=*`))[0];
   if (input.operation === "disable") await db(`sales_sync_reverse?owner_id=eq.${owner}`, { method: "PATCH", body: JSON.stringify({ enabled: false }) });
   if (input.operation === "enable" && !existing?.enabled) {
+    await ovokoStockSyncStatus(db, owner, "ovoko");
     if (input.confirm !== true || env.SALES_SYNC_ENABLED !== "true") throw new OvokoError(400, "Potwierdz wlaczenie synchronizacji; wymagane SALES_SYNC_ENABLED=true i migracja 018.");
     if (existing?.lease_until && Date.parse(existing.lease_until) > Date.now()) throw new OvokoError(409, "Poprzednia kontrola jeszcze trwa.");
     await coverage(db, owner);
@@ -54,7 +57,8 @@ export async function reverseSyncControl(owner: string, env: SalesSyncEnv, input
   let count: { linked: number | null; blocked: number | null };
   try { count = await coverage(db, owner); }
   catch (e) { if (input.operation !== "disable") throw e; count = { linked: null, blocked: null }; }
-  return { configured: env.SALES_SYNC_ENABLED === "true", enabled: s?.enabled === true, lastChecked: s?.last_checked_at || null, lastError: s?.last_error || null, scope: count.linked === null ? "unverified" : "all_linked", linkedCount: count.linked, blockedCount: count.blocked, watched: count.linked ?? 0, jobs };
+  const stock = await ovokoStockSyncStatus(db, owner, "ovoko").catch(error => { if (input.operation === "disable") return null; throw error; });
+  return { configured: env.SALES_SYNC_ENABLED === "true", enabled: s?.enabled === true, lastChecked: s?.last_checked_at || null, lastError: s?.last_error || null, scope: count.linked === null ? "unverified" : "all_linked", linkedCount: count.linked === null ? null : count.linked + (stock?.units || 0), blockedCount: count.blocked, watched: (count.linked ?? 0) + (stock?.units || 0), jobs, stock };
 }
 export async function runReverseSalesSync(env: SalesSyncEnv): Promise<boolean> {
   if (env.SALES_SYNC_ENABLED !== "true" || env.OVOKO_TEST_ENABLED === "false") return false;
@@ -76,10 +80,11 @@ export async function tickReverseSalesSync(s: Subscription, env: SalesSyncEnv, d
   if (c.sellerId !== s.seller_id || c.clientId !== s.client_id || c.account !== s.ovoko_account || c.fingerprint !== s.fingerprint) throw new OvokoError(409, "Konto lub polaczenie zmienily sie. Synchronizacja Ovoko wstrzymana.");
   await coverage(db, s.owner_id);
   const orders = (await orderWindow(c, s.last_checked_at || s.armed_at)).filter(o => o.source === "ovoko" && !s.baseline.includes(o.id));
-  const rows = orders.flatMap(o => o.parts.map(p => ({ orderId: o.id, partId: p.id, status: o.status })));
+  const rows = orders.flatMap(o => o.parts.map(p => ({ orderId: o.id, partId: p.id, status: o.status, date: o.date, external: p.external })));
   if (rows.length > 5000) throw new OvokoError(502, "Przekroczony bezpieczny zakres zamowien Ovoko.");
-  await db("rpc/ingest_reverse_sales_sync", syncJson({ p_owner: s.owner_id, p_epoch: s.epoch, p_lease: s.lease, p_rows: rows }));
+  await db("rpc/ingest_reverse_sales_sync_with_stock", syncJson({ p_owner: s.owner_id, p_epoch: s.epoch, p_lease: s.lease, p_rows: rows }));
   const jobs = syncRows<Action>(await db(`sales_sync_reverse_actions?owner_id=eq.${s.owner_id}&epoch=eq.${s.epoch}&state=in.(queued,preflight,running,submitted,uncertain)&order=checked_at.asc.nullsfirst,created_at.asc&limit=1`));
+  if ((!jobs[0] || new Date().getUTCMinutes() % 2 === 0) && await tickOvokoStockSync(s, env, db, c, "ovoko")) return;
   const job = jobs[0]; if (!job) return;
   const target = `sales_sync_reverse_actions?id=eq.${job.id}&owner_id=eq.${s.owner_id}&epoch=eq.${s.epoch}`;
   let executable = false;

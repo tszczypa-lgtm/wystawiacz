@@ -13,19 +13,23 @@ import { ManualOvokoOverride } from "./manual-override";
 import { resolveManualOvokoOverride, ManualOverrideClientError } from "@/lib/ovoko-manual-client";
 
 export type BulkOffer = { id: string; name: string; price: { amount: string; currency: string } | null };
-type Job = { id: string; name: string; price: string; currency: string; state: "waiting" | "sending" | "done" | "skipped" | "error"; message: string; retryable: boolean; code?: string; repair?: OvokoRepairHint; rule: OvokoPriceAdjustment; technical: boolean };
+type StockMode = "shared" | "separate";
+type Job = { id: string; name: string; price: string; currency: string; state: "waiting" | "sending" | "done" | "skipped" | "error"; message: string; retryable: boolean; code?: string; repair?: OvokoRepairHint; rule: OvokoPriceAdjustment; technical: boolean; stockMode: StockMode; multiStock?: boolean; completedUnits?: number; totalUnits?: number };
 function vehicleKey(job: Job) {
   const vehicle = job.repair?.vehicle;
   return job.state === "error" && job.code === "vehicle_creation_locked" && vehicle?.brandId && vehicle.modelId && /^[12]\d{3}$/.test(vehicle.year) ? `${vehicle.brandId}:${vehicle.modelId}:${vehicle.year}` : "";
 }
 type Binding = { sellerId: string; fingerprint: string };
-type Outcome = { ok: boolean; partId: string; alreadyCreated: boolean; price?: string; currency?: string; prepared?: Record<string, string> };
+type Outcome = { ok: boolean; partId: string; alreadyCreated: boolean; completedUnits?: number; totalUnits?: number; initialStock?: number; moreUnits?: boolean; message?: string; price?: string; currency?: string; prepared?: Record<string, string> };
 const field = "rounded-lg border border-white/20 bg-[#0d1117] px-3 py-1.5";
 const button = "rounded-lg border border-white/20 px-3 py-1.5 text-sm font-bold disabled:opacity-40";
+function recordTransferAttempt(lastAttempt: { current: number }) {
+  lastAttempt.current = Date.now();
+}
 async function waitForTransferSlot(lastAttempt: { current: number }, stopped: { current: boolean }, interval = 6250) {
   while (Date.now() - lastAttempt.current < interval && !stopped.current) await new Promise(resolve => setTimeout(resolve, 250));
   if (stopped.current) return false;
-  lastAttempt.current = Date.now();
+  recordTransferAttempt(lastAttempt);
   return true;
 }
 async function waitForRateLimit(stopped: { current: boolean }) {
@@ -33,6 +37,7 @@ async function waitForRateLimit(stopped: { current: boolean }) {
 }
 export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; onFinished: () => void }) {
   const [mode, setMode] = useState<OvokoPriceAdjustment["mode"]>("none"), [value, setValue] = useState("0");
+  const [stockMode, setStockMode] = useState<StockMode>("shared");
   const [running, setRunning] = useState(false), [jobs, setJobs] = useState<Job[]>([]), [message, setMessage] = useState("");
   const [fallbackVehicle, setFallbackVehicle] = useState<FallbackVehicle>(), [technical, setTechnical] = useState(true);
   const [recovering, setRecovering] = useState(false);
@@ -62,34 +67,50 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
     binding.current = session.binding;
     return session.binding;
   }
-  async function transfer(offer: BulkOffer, rule: OvokoPriceAdjustment, session: Binding, useTechnical: boolean, fallback?: FallbackVehicle, overrides?: OvokoCorrections, manualVehicle = false): Promise<boolean> {
+  async function transfer(offer: BulkOffer, rule: OvokoPriceAdjustment, session: Binding, useTechnical: boolean, selectedStockMode: StockMode, fallback?: FallbackVehicle, overrides?: OvokoCorrections, manualVehicle = false): Promise<boolean> {
     // The same pace applies to the batch and explicit one-row corrections.
     if (!await waitForTransferSlot(lastAttempt, stop)) return false;
     update(offer.id, { state: "sending", message: "Sprawdzam i przenosze..." });
     try { adjustedOvokoPrice(offer.price?.amount || "", offer.price?.currency || "", rule); } catch (error) { throw new OvokoBulkClientError((error as Error).message, 400); }
     const owned = await allegroRequest<{ offer: unknown; sellerId: string }>(`/ovoko-source/${offer.id}`);
     const source = ovokoSourcePreview(owned.offer, offer.id, offerDescriptionText);
+    update(offer.id, { multiStock: source.stock !== null && source.stock > 1 });
     if (owned.sellerId !== session.sellerId) throw new OvokoBulkClientError("Konto Allegro zmienilo sie. Zatrzymano partie.", 409, "account_changed");
     if (!sameOvokoMoney(source.price, offer.price?.amount) || source.currency !== offer.price?.currency) throw new OvokoBulkClientError(`Cena Allegro zmienila sie od zaznaczenia (${offer.price?.amount} ${offer.price?.currency} -> ${source.price} ${source.currency}). Odswiez oferte.`, 400);
     if (stop.current) { update(offer.id, { state: "waiting", message: "Nie wyslano" }); return false; }
-    const item = { offerId: offer.id, binding: session, adjustment: rule, notes: source.description, expectedSource: { title: source.title, price: source.price, currency: source.currency, stock: source.stock, status: source.status, condition: source.condition, images: source.images } };
+    const item = { offerId: offer.id, binding: session, adjustment: rule, stockMode: selectedStockMode, notes: source.description, expectedSource: { title: source.title, price: source.price, currency: source.currency, stock: source.stock, status: source.status, condition: source.condition, images: source.images } };
     const preparation = await ovokoBulkRequest<Outcome & { category?: { id: string; name: string }; vehicle?: { brand: string; model: string; usedFallback: boolean; evidence?: string } }>({ ...item, operation: "prepare", allowTechnicalModel: useTechnical, ...(fallback ? { fallbackVehicle: fallback } : {}), ...(manualVehicle ? { manualVehicle: true } : {}), ...(overrides ? { overrides } : {}) });
     if (!preparation.alreadyCreated && stop.current) { update(offer.id, { state: "waiting", message: "Auto przygotowane. Czesc nie zostala wyslana." }); return false; }
     // Never cancel, repeat or unlock an uncertain write.
-    const result = preparation.alreadyCreated ? preparation : await ovokoBulkRequest<Outcome>({ ...item, operation: "item", prepared: preparation.prepared });
+    let result = preparation;
+    if (!preparation.alreadyCreated) {
+      do {
+        recordTransferAttempt(lastAttempt);
+        result = await ovokoBulkRequest<Outcome>({ ...item, operation: "item", prepared: preparation.prepared });
+        if (!result.ok || !/^[1-9]\d{0,11}$/.test(String(result.partId))) throw new Error("Niepewny wynik wysylki. Sprawdz Ovoko; nie ponawiaj.");
+        update(offer.id, { completedUnits: result.completedUnits ?? 1, totalUnits: result.totalUnits ?? 1, message: `Potwierdzono rekordy Ovoko: ${result.completedUnits ?? 1}/${result.totalUnits ?? 1}. Zapas poczatkowy: ${result.initialStock ?? source.stock}. ID: ${result.partId}.` });
+        if (result.alreadyCreated || !result.moreUnits) break;
+        if (!await waitForTransferSlot(lastAttempt, stop)) {
+          update(offer.id, { state: "waiting", message: `Zatrzymano po ${result.completedUnits}/${result.totalUnits} rekordow. Pozostale nie zostaly wyslane.` });
+          return false;
+        }
+      } while (true);
+    }
     if (!result.ok || !/^[1-9]\d{0,11}$/.test(String(result.partId))) throw new Error("Niepewny wynik wysylki. Sprawdz Ovoko; nie ponawiaj.");
     const vehicle = preparation.vehicle ? ` Auto: ${preparation.vehicle.brand} ${preparation.vehicle.model}${preparation.vehicle.usedFallback ? " (model pomocniczy)" : ""}.${preparation.vehicle.evidence ? ` Zrodlo: ${preparation.vehicle.evidence}.` : ""}` : "";
     const category = !result.alreadyCreated && preparation.category ? ` Kategoria: ${preparation.category.name} (ID ${preparation.category.id}).` : "";
-    update(offer.id, { state: result.alreadyCreated ? "skipped" : "done", retryable: false, message: `${result.alreadyCreated ? "Juz przeniesiona, pominieto" : "Przeniesiono"}. Ovoko ID: ${result.partId}.${category}${vehicle}`, ...(result.price ? { price: result.price, currency: result.currency || source.currency } : {}) });
+    update(offer.id, { state: result.alreadyCreated ? "skipped" : "done", retryable: false, completedUnits: result.completedUnits ?? 1, totalUnits: result.totalUnits ?? 1, message: `${result.alreadyCreated ? "Juz przeniesiona, pominieto" : "Przeniesiono"}. Rekordy Ovoko: ${result.completedUnits ?? 1}/${result.totalUnits ?? 1}; zapas poczatkowy: ${result.initialStock ?? source.stock}. Ovoko ID: ${result.partId}.${category}${vehicle}${result.message ? ` ${result.message}` : ""}`, ...(result.price ? { price: result.price, currency: result.currency || source.currency } : {}) });
     return true;
   }
   function failure(id: string, error: unknown) {
     const retryable = error instanceof OvokoBulkClientError && error.status === 400 && (!error.repair || error.repair.needsVehicle || error.repair.needsCategory);
-    update(id, { state: "error", retryable, code: error instanceof OvokoBulkClientError ? error.code : undefined, repair: error instanceof OvokoBulkClientError ? error.repair : undefined, message: error instanceof Error ? error.message : "Niepotwierdzony wynik." });
+    const job = jobsRef.current.find(job => job.id === id);
+    const progress = job?.completedUnits ? `Potwierdzono rekordy: ${job.completedUnits}/${job.totalUnits}. ` : "";
+    update(id, { state: "error", retryable, code: error instanceof OvokoBulkClientError ? error.code : undefined, repair: error instanceof OvokoBulkClientError ? error.repair : undefined, message: progress + (error instanceof Error ? error.message : "Niepotwierdzony wynik.") });
     // Each item has its own durable write lock. Never replay it; continue independent rows.
     return !((error instanceof OvokoBulkClientError || error instanceof AllegroClientError) && [401, 403].includes(error.status) || error instanceof OvokoBulkClientError && error.code === "account_changed");
   }
-  function finish() { lock.current = false; pendingRecovery.current = []; if (mounted.current) { setQueuedRecovery([]); replaceJobs(jobsRef.current.map(job => job.state === "waiting" ? { ...job, message: "Nie wyslano w tej partii" } : job)); setRunning(false); onFinished(); } }
+  function finish() { lock.current = false; pendingRecovery.current = []; if (mounted.current) { setQueuedRecovery([]); replaceJobs(jobsRef.current.map(job => job.state === "waiting" && !job.completedUnits ? { ...job, message: "Nie wyslano w tej partii" } : job)); setRunning(false); onFinished(); } }
   async function drainVehicleRecovery(session: Binding) {
     while (pendingRecovery.current.length && !stop.current) {
       const first = jobsRef.current.find(job => job.id === pendingRecovery.current[0]);
@@ -106,7 +127,7 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
         for (const job of group) {
           if (stop.current) break;
           const offer = offers.find(offer => offer.id === job.id); if (!offer) continue;
-          try { await transfer(offer, job.rule, session, job.technical, vehicle, job.repair?.categoryId ? { categoryId: job.repair.categoryId } : {}, true); }
+          try { await transfer(offer, job.rule, session, job.technical, job.stockMode, vehicle, job.repair?.categoryId ? { categoryId: job.repair.categoryId } : {}, true); }
           catch (error) {
             if (!failure(job.id, error)) throw error;
             if ((error instanceof OvokoBulkClientError || error instanceof AllegroClientError) && error.status === 429) await waitForRateLimit(stop);
@@ -141,13 +162,13 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
     lock.current = true; stop.current = false; setRunning(true); setMessage("");
     const snapshot = offers.map(offer => ({ ...offer, price: offer.price ? { ...offer.price } : null })), rule = { ...adjustment }, fallback = fallbackVehicle ? { ...fallbackVehicle } : undefined;
     pendingRecovery.current = []; setQueuedRecovery([]);
-    replaceJobs(snapshot.map(offer => ({ id: offer.id, name: offer.name, price: price(offer, rule), currency: offer.price?.currency || "", state: "waiting", retryable: false, message: "Oczekuje", rule, technical })));
+    replaceJobs(snapshot.map(offer => ({ id: offer.id, name: offer.name, price: price(offer, rule), currency: offer.price?.currency || "", state: "waiting", retryable: false, message: "Oczekuje", rule, technical, stockMode })));
     try {
       const session = await begin(rule);
       for (const offer of snapshot) {
         await drainVehicleRecovery(session);
         if (stop.current) break;
-        try { if (!await transfer(offer, rule, session, technical, fallback)) break; }
+        try { if (!await transfer(offer, rule, session, technical, stockMode, fallback)) break; }
         catch (error) {
           if (!failure(offer.id, error)) throw error;
           if ((error instanceof OvokoBulkClientError || error instanceof AllegroClientError) && error.status === 429) {
@@ -168,7 +189,7 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
     lock.current = true; stop.current = false; setRunning(true); setMessage("");
     try {
       const session = await begin(job.rule, true);
-      await transfer(offer, job.rule, session, job.technical, fallback, overrides, !!fallback);
+      await transfer(offer, job.rule, session, job.technical, job.stockMode, fallback, overrides, !!fallback);
       await drainVehicleRecovery(session);
       if (mounted.current) setMessage("Zakonczono poprawianie pozycji.");
     } catch (error) { failure(job.id, error); if (mounted.current) setMessage("Nie przeniesiono poprawianej pozycji. Sprawdz jej wynik ponizej."); }
@@ -177,6 +198,12 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
   return <section className="space-y-2 rounded-xl border border-orange-400/30 bg-orange-500/5 p-3" aria-label="Masowe przenoszenie do Ovoko">
     <h2 className="text-base font-bold">{running ? `Trwa przenoszenie partii (${jobs.length})` : `Przenies zaznaczone do Ovoko (${offers.length})`}</h2>
     <p className="text-xs text-white/65">Kopie ze zdjeciami. Allegro bez zmian. Wysylka wedlug Ovoko. Automat sprzedazy ma osobny wlacznik na liscie czesci. Do 200 pozycji, maks. 10 na minute.</p>
+    <fieldset disabled={running || recovering} className="space-y-1 text-sm"><legend className="font-bold">Oferty z wieloma sztukami</legend>
+      <label className="block"><input type="radio" name="bulk-stock-mode" checked={stockMode === "shared"} onChange={() => setStockMode("shared")} /> Jedna pozycja dla calego zapasu (zalecane)</label>
+      <label className="block"><input type="radio" name="bulk-stock-mode" checked={stockMode === "separate"} onChange={() => setStockMode("separate")} /> Kazda sztuka osobno</label>
+      <p className="text-xs text-white/70">{stockMode === "shared" ? "Kupujacy Ovoko kupuje jedna sztuke naraz." : "Kazdy egzemplarz ma osobna pozycje."}</p>
+      <p className="text-xs text-white/60">Jedna oferta Allegro = jeden wspolny rekord albo N rekordow Ovoko. Identyczne wspolne zdjecia, cena za sztuke. Trybu rozpoczetego transferu nie mozna zmienic. W trybie wspolnym automat sprzedazy moze ponownie uaktywnic ten sam rekord po sprzedazy, gdy pozostaje zapas; nie tworzy nowego rekordu.</p>
+    </fieldset>
     <details className="text-xs text-white/65"><summary className="cursor-pointer">Dopasowanie i bezpieczenstwo</summary><p className="mt-1">Automat sprawdza tytul, Pasuje do i katalog po pelnym numerze. Model roboczy to tylko przypisanie techniczne do marki, nie potwierdzenie zgodnosci czesci. Blokady duplikatow i niepewnych zapisow pozostaja aktywne.</p></details>
     <OvokoFallbackVehicle disabled={running} onChange={setFallbackVehicle} />
     <div className="flex flex-wrap items-end gap-2">
@@ -194,7 +221,7 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
       <div className="flex items-start justify-between gap-3"><a href={`/panel/inventory/prepare-ovoko?offerId=${job.id}`} target="_blank" rel="noopener noreferrer" className="min-w-0 font-semibold underline">{job.name}</a><span className="shrink-0 whitespace-nowrap text-xs text-white/70">{job.state === "skipped" ? "Cena istniejacej czesci bez zmian." : `${job.state === "done" ? "Cena wyslana" : "Cena planowana"}: ${job.price} ${job.currency}`}</span></div>
       <p className={`text-xs leading-5 ${job.state === "done" || job.state === "skipped" ? "text-emerald-300" : job.state === "error" ? "text-amber-200" : "text-white/60"}`}>{job.message}</p>
       {job.retryable && <OvokoJobRepair key={`${job.id}:${JSON.stringify(job.repair)}`} id={job.id} hint={job.repair} disabled={running || recovering} onTransfer={(vehicle, corrections) => void retry(job, vehicle, corrections)} />}
-      {job.state === "error" && <>
+      {job.state === "error" && !job.multiStock && !job.code?.startsWith("stock_") && <>
         {running && <p className="text-xs text-white/60">{queuedRecovery.includes(job.id) ? "Auto w kolejce do odblokowania." : vehicleKey(job) ? "Uzyj Odblokuj auta z bledow nad lista; pozostale pozycje ida dalej." : "Reczne poprawienie dostepne po zakonczeniu lub zatrzymaniu partii."}</p>}
         {!running && <ManualOvokoOverride offerId={job.id} brandId={job.repair?.vehicle?.brandId || job.repair?.brandId || ""} modelId={job.repair?.vehicle?.modelId || ""} year={job.repair?.vehicle?.year || ""} disabled={recovering} continueTransfer onBusyChange={busy => { lock.current = busy; setRecovering(busy); }} onResolved={result => {
           if (result.kind === "part" && result.foundId) update(job.id, { state: "skipped", retryable: false, message: `Potwierdzono istniejaca czesc Ovoko ID: ${result.foundId}. Powiazanie naprawione; nie utworzono duplikatu.` });

@@ -19,6 +19,7 @@ const mf = new Miniflare({ port: 19877, modules, compatibilityDate: "2026-05-15"
   outboundService: request => {
     const url = new URL(request.url); assert.equal(url.hostname, "database.test");
     if(url.pathname==="/rest/v1/rpc/reverse_sales_sync_coverage"){assert.equal(request.method,"POST");return Response.json({scopeVersion:2,linked:40000,blocked:0});}
+    if(url.pathname==="/rest/v1/rpc/ovoko_stock_sync_status"){assert.equal(request.method,"POST");return Response.json({groups:0,units:0,pending:0,review:0,recent:[]});}
     assert.equal(request.method, "GET");
     if (url.pathname === "/auth/v1/user") return Response.json({ id: owner, email_confirmed_at: "2026-01-01T00:00:00Z" });
     if (url.pathname === "/rest/v1/customer_accounts") return Response.json([{ owner_id: owner, suspended, access_mode: active ? "free" : "standard", free_until: null }]);

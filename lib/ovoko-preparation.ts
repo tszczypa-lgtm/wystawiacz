@@ -74,7 +74,7 @@ export function initialOvokoDraft(source: OvokoSourcePreview): OvokoPreparationD
 export function ovokoPublicationBlockers(source: OvokoSourcePreview, draft: OvokoPreparationDraft, brandId: string, modelId: string): string[] {
   const issues: string[] = [];
   if (source.status !== "ACTIVE") issues.push("Oferta Allegro musi byc aktywna.");
-  if (source.stock !== 1) issues.push(`Pierwsza proba wymaga dokladnie 1 sztuki; w Allegro: ${source.stock ?? "brak danych"}.`);
+  if (!Number.isInteger(source.stock) || source.stock! < 1 || source.stock! > 10000) issues.push(`Wymagane 1-10000 sztuk; w Allegro: ${source.stock ?? "brak danych"}.`);
   if (source.bundle) issues.push("Zestawy nie sa jeszcze obslugiwane w pojedynczej probie.");
   if (!source.images.length) issues.push("Brak zdjec z Allegro do przeniesienia.");
   if (source.rejectedImages) issues.push(`Zdjecia z nieobslugiwanym adresem lub ponad limit: ${source.rejectedImages}. Powtorzenia nie blokuja wysylki.`);
@@ -91,7 +91,8 @@ export function ovokoPublicationBlockers(source: OvokoSourcePreview, draft: Ovok
 }
 export function ovokoPreparationIssues(source: OvokoSourcePreview, draft: OvokoPreparationDraft): string[] {
   const issues = ["Rekord auta Ovoko (car_id) zostanie ponownie odczytany i porownany z modelem przed wysylka. Samo dopasowanie modeli w tytule nie ustala tego rekordu.", "Pozostaje sprawdzenie wymaganych atrybutow zaleznych od kategorii oraz zasad wysylki Ovoko."];
-  if (source.bundle || source.stock !== 1) issues.push("Oferta jest zestawem lub liczba sztuk nie wynosi 1. Nie utozsamiamy jej automatycznie z jedna fizyczna czescia.");
+  if (source.bundle) issues.push("Zestawy nie sa obslugiwane.");
+  if (source.stock && source.stock > 1) issues.push("Wybierz jeden rekord dla calego zapasu albo kazda sztuke osobno. Zdjecia sa identyczne, cena dotyczy jednej sztuki. Tryb rozpoczetego transferu jest niezmienny.");
   if (!source.images.length) issues.push("Brak bezpiecznych adresow zdjec do podgladu.");
   if (source.images.some(url => !/\.(jpg|jpeg|png)$/i.test(new URL(url).pathname))) issues.push("Adresy zdjec wymagaja sprawdzenia formatu wymaganego przez Ovoko; nie zmieniamy ich automatycznie.");
   if (!draft.categoryId) issues.push("Wybierz kategorie Ovoko poziomu 3. Kategoria Allegro nie jest jej odpowiednikiem.");

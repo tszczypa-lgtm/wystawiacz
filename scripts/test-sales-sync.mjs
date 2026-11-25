@@ -39,6 +39,8 @@ globalThis.fetch = async (input, init = {}) => {
     if (url.pathname === "/auth/v1/user") return Response.json({ id: owner, email_confirmed_at: "2026-01-01T00:00:00Z" });
     const table = url.pathname.replace("/rest/v1/", "");
     if (table === "rpc/sync_account_lock") return Response.json(mode !== "ownership-conflict");
+    if (table === "rpc/ovoko_stock_sync_status") return Response.json({ groups: 0, units: 0, pending: 0, review: 0, recent: [] });
+    if (table === "rpc/claim_ovoko_stock_action") return Response.json(null);
     if (table === "account_admins") return Response.json(admin ? [{ owner_id: owner }] : []);
     if (table === "customer_accounts") return Response.json([{ suspended, access_mode: ordinaryAccess ? "free" : "standard", free_until: null }]);
     if (table === "allegro_connections") { if (method === "PATCH") { aSealed = body.sealed; return Response.json([{ sealed: aSealed }]); } return Response.json([{ sealed: aSealed }]); }
@@ -53,7 +55,7 @@ globalThis.fetch = async (input, init = {}) => {
       if (!sub?.enabled || sub.lease) return Response.json([]);
       sub.lease = crypto.randomUUID(); sub.lease_until = new Date(Date.now() + 300000).toISOString(); return Response.json([sub]);
     }
-    if (table === "rpc/ingest_sales_sync") {
+    if (table === "rpc/ingest_sales_sync_with_stock") {
       assert.equal(body.p_cursor, sub.cursor); assert.equal(body.p_lease, sub.lease); assert.doesNotMatch(JSON.stringify(body), /private|buyer|email/);
       cursorCommits.push(body);
       for (const e of body.p_evidence) {

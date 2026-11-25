@@ -1,17 +1,20 @@
 "use client";
 import { useRef, useState } from "react";
 import { inventoryOperation, operationState, type InventoryJob } from "@/lib/inventory-operations-client";
-import type { CombinedPart } from "@/lib/combined-inventory";
+import { expandInventoryWithdrawal, isStockGroup, stockReservationError, type CombinedPart } from "@/lib/combined-inventory";
 
 const button = "rounded border border-white/20 px-2 py-1 text-xs disabled:opacity-40";
-type Item = { requestId: string; row: CombinedPart; job?: InventoryJob; error?: string; attempted?: boolean };
+type Item = { requestId: string; row: CombinedPart; partId?: string | null; targets?: string[]; job?: InventoryJob; error?: string; attempted?: boolean };
 export function BulkInventoryActions({ rows, onFinished }: { rows: CombinedPart[]; onFinished: () => void }) {
   const [kind, setKind] = useState<"withdraw" | "reserve">(), [scope, setScope] = useState("both"), [items, setItems] = useState<Item[]>([]), [busy, setBusy] = useState(false), [started, setStarted] = useState(false);
   const [customer, setCustomer] = useState(""), [price, setPrice] = useState(""), [deposit, setDeposit] = useState("0"), [currency, setCurrency] = useState("PLN"), [until, setUntil] = useState(""), [comment, setComment] = useState("");
   const lock = useRef(false), stop = useRef(false);
   const groupId = useRef("");
   const [groups, setGroups] = useState<InventoryJob[]>([]), [reservationId, setReservationId] = useState(""), [groupsError, setGroupsError] = useState("");
+  const [planError, setPlanError] = useState("");
   function open(value: "withdraw" | "reserve") {
+    setPlanError("");
+    if (value === "reserve" && rows.some(isStockGroup)) { setPlanError(stockReservationError); return; }
     setKind(value); setItems(rows.map(row => ({ row, requestId: crypto.randomUUID() }))); setStarted(false); stop.current = false; groupId.current = crypto.randomUUID(); setReservationId(""); setGroups([]); setGroupsError("");
     if (value === "reserve") void inventoryOperation<{ rows: InventoryJob[] }>({ operation: "list" }).then(data => {
       const seen = new Set<string>();
@@ -21,22 +24,29 @@ export function BulkInventoryActions({ rows, onFinished }: { rows: CombinedPart[
   const update = (id: string, patch: Partial<Item>) => setItems(values => values.map(value => value.requestId === id ? { ...value, ...patch } : value));
   async function run() {
     if (lock.current || started || !kind) return;
+    let planned: Item[];
+    try {
+      if (kind === "reserve" && rows.some(isStockGroup)) throw new Error(stockReservationError);
+      planned = kind === "withdraw" ? expandInventoryWithdrawal(rows, scope).map(item => ({ ...item, requestId: crypto.randomUUID() })) : items;
+      if (planned.some(item => item.targets && !item.targets.length)) throw new Error("Brak wybranego kanalu dla jednej z pozycji. Nie uruchomiono operacji.");
+    } catch (e) { setPlanError((e as Error).message); return; }
+    setItems(planned); setPlanError("");
     lock.current = true; setBusy(true); setStarted(true);
     try {
-      for (const item of items) {
+      for (const item of planned) {
         if (stop.current) break;
         try {
           const { row } = item;
-          const targets = [...(row.allegro && (kind === "reserve" || scope !== "ovoko") ? ["allegro"] : []), ...(row.ovoko && (kind === "reserve" || scope !== "allegro") ? ["ovoko"] : [])];
+          const targets = item.targets || [...(row.allegro && (kind === "reserve" || scope !== "ovoko") ? ["allegro"] : []), ...(row.ovoko && (kind === "reserve" || scope !== "allegro") ? ["ovoko"] : [])];
           if (!targets.length) throw new Error("Brak wybranego kanalu dla tej pozycji.");
           if (kind === "reserve" && (!until || !Number.isFinite(new Date(until).getTime()))) throw new Error("Wpisz prawidlowy termin rezerwacji.");
-          const job = await inventoryOperation({ operation: "prepare", requestId: item.requestId, kind, offerId: row.allegro?.id ?? null, partId: row.ovoko?.id ?? null, targets,
+          const job = await inventoryOperation({ operation: "prepare", requestId: item.requestId, kind, offerId: row.allegro?.id ?? null, partId: item.partId === undefined ? row.ovoko?.id ?? null : item.partId, targets,
             ...(kind === "reserve" ? { ...(reservationId ? { reservationId } : {}), reservation: { customer, price: price || row.allegro?.price?.amount || "0", deposit, currency, until: new Date(until).toISOString(), comment, groupId: groupId.current } } : {}) });
           update(item.requestId, { job, attempted: true });
           const result = await inventoryOperation({ operation: "execute", jobId: job.id, confirm: true });
           update(item.requestId, { job: result });
         } catch (e) { update(item.requestId, { error: e instanceof Error ? e.message : "Nie potwierdzono wyniku." }); }
-        if (items.indexOf(item) < items.length - 1 && !stop.current) await new Promise(resolve => setTimeout(resolve, 6250));
+        if (planned.indexOf(item) < planned.length - 1 && !stop.current) await new Promise(resolve => setTimeout(resolve, 6250));
       }
     } finally { lock.current = false; setBusy(false); onFinished(); }
   }
@@ -50,8 +60,10 @@ export function BulkInventoryActions({ rows, onFinished }: { rows: CombinedPart[
   return <>
     <button className={button} disabled={!rows.length || rows.length > 200} onClick={() => open("withdraw")}>Wycofaj zaznaczone</button>
     <button className={button} disabled={!rows.length || rows.length > 200} onClick={() => open("reserve")}>Zarezerwuj zaznaczone</button>
+    {planError && <p role="alert" className="text-xs text-amber-200">{planError}</p>}
     {kind && <dialog ref={e => { if (e && !e.open) e.showModal(); }} className="w-[calc(100%_-_2rem)] max-w-4xl space-y-3 rounded border border-white/20 bg-[#11161d] p-4 text-sm text-white backdrop:bg-black/75" aria-label={kind === "reserve" ? "Rezerwacja zaznaczonych czesci" : "Zbiorcze wycofanie"} onCancel={e => { if (busy) e.preventDefault(); else setKind(undefined); }}>
       <h2 className="font-bold">{kind === "reserve" ? "Rezerwacja" : "Wycofanie"}: {items.length} czesci</h2>
+      {planError && <p role="alert" className="text-amber-200">{planError}</p>}
       <p className="text-xs text-white/65">Nie usuwamy rekordow ani zdjec. Wynik kazdego kanalu jest oddzielny. Kolejno, maks. 10 czesci/min; zostaw to okno otwarte. Niepewnych zapisow nie ponawiamy.</p>
       {!started && (kind === "withdraw" ? <label className="block text-xs">Zakres <select aria-label="Kanaly wycofania zbiorczego" className="rounded border border-white/20 bg-[#0d1117] p-1" value={scope} onChange={e => setScope(e.target.value)}><option value="both">Wszystkie wskazane kanaly</option><option value="allegro">Tylko Allegro</option><option value="ovoko">Tylko Ovoko</option></select></label> : <div className="grid gap-2 text-xs sm:grid-cols-3">
         <label className="sm:col-span-3">Rezerwacja klienta<select aria-label="Dodaj do rezerwacji" className="w-full rounded bg-[#11161d] p-2" value={reservationId} onChange={e => {
@@ -67,7 +79,7 @@ export function BulkInventoryActions({ rows, onFinished }: { rows: CombinedPart[
         <label>Komentarz<textarea disabled={!!reservationId} aria-label="Komentarz rezerwacji" className="w-full rounded bg-white/5 p-2" maxLength={2000} value={comment} onChange={e => setComment(e.target.value)} /></label>
         <p className="sm:col-span-3 text-amber-200">Wstrzymamy wszystkie wskazane kanaly. Termin powoduje czerwone oznaczenie, nie automatyczne wznowienie.</p>
       </div>)}
-      <div className="max-h-[45vh] overflow-auto">{items.map(item => <div key={item.requestId} className="border-t border-white/10 py-1 text-xs"><p className="truncate">{item.row.name}</p>{item.job ? <p>Allegro: {operationState[item.job.allegro]} / Ovoko: {operationState[item.job.ovoko]}</p> : <p className="text-white/50">Oczekuje</p>}{item.error && <p role="alert" className="text-amber-200">{item.error}</p>}{started && <button className={button} disabled={busy} onClick={() => void status(item)}>Sprawdz wynik bez ponawiania</button>}</div>)}</div>
+      <div className="max-h-[45vh] overflow-auto">{items.map(item => <div key={item.requestId} className="border-t border-white/10 py-1 text-xs"><p className="truncate">{item.row.name}{item.partId && ` / Ovoko ${item.partId}`}</p>{item.job ? <p>Allegro: {operationState[item.job.allegro]} / Ovoko: {operationState[item.job.ovoko]}</p> : <p className="text-white/50">Oczekuje</p>}{item.error && <p role="alert" className="text-amber-200">{item.error}</p>}{started && <button className={button} disabled={busy} onClick={() => void status(item)}>Sprawdz wynik bez ponawiania</button>}</div>)}</div>
       <div className="flex gap-2">{!started && <button className={`${button} bg-orange-600`} disabled={busy || kind === "reserve" && (!customer.trim() || !until)} onClick={() => void run()}>Potwierdz {kind === "reserve" ? "rezerwacje" : "wycofanie"} zaznaczonych</button>}{busy && <button className={button} onClick={() => { stop.current = true; }}>Zatrzymaj po biezacej</button>}<button className={button} disabled={busy} onClick={() => setKind(undefined)}>Zamknij</button></div>
     </dialog>}
   </>;

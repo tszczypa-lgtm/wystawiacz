@@ -4,8 +4,18 @@ import { loadOvokoConnection, ovokoConnectionKey } from "./ovoko-connection";
 import { ovokoWriteDigest } from "./ovoko-write-client";
 import type { OvokoPublishEnv } from "./ovoko-publish";
 import { OvokoError } from "./ovoko-read";
+import type { OvokoTransfer as Transfer } from "./ovoko-transfer-client";
 type Context = Awaited<ReturnType<typeof accountContext>>;
-type Transfer = { state: "not_transferred" | "transferred" | "sending" | "uncertain"; partId?: string };
+export function stockTransferStatuses(value: unknown, ids: string[]): Record<string, Transfer> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new OvokoError(502, "Nieprawidlowe podsumowanie grup Ovoko.");
+  const result: Record<string, Transfer> = {};
+  for (const [id, raw] of Object.entries(value)) {
+    const row = raw as Omit<Transfer, "partId"> & { partId?: string | null };
+    if (!ids.includes(id) || !row || !["separate", "shared"].includes(String(row.stockMode)) || !["transferred", "sending", "uncertain"].includes(row.state) || !Number.isSafeInteger(row.totalUnits) || row.totalUnits! < (row.stockMode === "shared" ? 1 : 2) || row.totalUnits! > 10000 || row.stockMode === "shared" && row.totalUnits !== 1 || !Number.isSafeInteger(row.completedUnits) || row.completedUnits! < 0 || row.completedUnits! > row.totalUnits! || !Array.isArray(row.partIds) || row.partIds.length !== row.completedUnits || row.partIds.some(part => typeof part !== "string" || !/^[1-9]\d{0,11}$/.test(part)) || new Set(row.partIds).size !== row.partIds.length || row.partId != null && row.partId !== row.partIds[0] || (row.state === "transferred") !== (row.completedUnits === row.totalUnits)) throw new OvokoError(502, "Niekompletne podsumowanie grup Ovoko.");
+    result[id] = { state: row.state, stockMode: row.stockMode, partIds: row.partIds, totalUnits: row.totalUnits, completedUnits: row.completedUnits, ...(row.partIds[0] ? { partId: row.partIds[0] } : {}) };
+  }
+  return result;
+}
 export async function ovokoTransferInventory(request: Request, env: OvokoPublishEnv, context: Context, input: Record<string, unknown>) {
   const headers = { Authorization: request.headers.get("Authorization")! };
   const allegro = async (path: string) => {
@@ -31,19 +41,24 @@ export async function ovokoTransferInventory(request: Request, env: OvokoPublish
   if (typeof sellerId !== "string" || !/^\d{1,30}$/.test(sellerId)) throw new OvokoError(502, "Niepotwierdzone konto Allegro.");
   const statuses = async (ids: string[]): Promise<Record<string, Transfer>> => {
     if (!ids.length) return {};
-    let rows;
-    try { rows = await context.db(`ovoko_single_publications?ovoko_account=eq.${account}&allegro_seller_id=eq.${sellerId}&allegro_offer_id=in.(${[...new Set(ids)].join(",")})&select=allegro_offer_id,state,part_id&limit=200`); }
+    let rows, stock;
+    try {
+      rows = await context.db(`ovoko_single_publications?owner_id=eq.${context.user.id}&ovoko_account=eq.${account}&allegro_seller_id=eq.${sellerId}&allegro_offer_id=in.(${[...new Set(ids)].join(",")})&select=allegro_offer_id,state,part_id&limit=200`);
+      stock = await context.db("rpc/ovoko_stock_transfer_status", { method: "POST", body: JSON.stringify({ p_owner: context.user.id, p_account: account, p_seller: sellerId, p_offers: [...new Set(ids)] }) });
+    }
     catch { throw new OvokoError(503, "Nie odczytano rejestru przeniesien Ovoko. Nie oznaczamy ofert jako nieprzeniesione przy bledzie bazy."); }
     if (!Array.isArray(rows) || rows.length > ids.length) throw new OvokoError(502, "Nieprawidlowy rejestr przeniesien.");
-    const output: Record<string, Transfer> = Object.fromEntries(ids.map(id => [id, { state: "not_transferred" }]));
+    const groups = stockTransferStatuses(stock, ids);
+    const output: Record<string, Transfer> = Object.fromEntries(ids.map(id => [id, { state: "not_transferred", totalUnits: 0, completedUnits: 0, partIds: [] }]));
     const seen = new Set<string>();
     for (const row of rows) {
       if (!row || !ids.includes(row.allegro_offer_id) || seen.has(row.allegro_offer_id) || !["created", "sending", "uncertain"].includes(row.state)) throw new OvokoError(502, "Niepelny rejestr przeniesien.");
       seen.add(row.allegro_offer_id);
       const confirmed = row.state === "created" && /^[1-9]\d{0,11}$/.test(String(row.part_id));
-      output[row.allegro_offer_id] = confirmed ? { state: "transferred", partId: String(row.part_id) } : { state: row.state === "sending" ? "sending" : "uncertain" };
+      if (groups[row.allegro_offer_id]) throw new OvokoError(409, "Nakladajace sie rejestry pojedynczej czesci i grupy Ovoko.");
+      output[row.allegro_offer_id] = confirmed ? { state: "transferred", partId: String(row.part_id), partIds: [String(row.part_id)], totalUnits: 1, completedUnits: 1 } : { state: row.state === "sending" ? "sending" : "uncertain", partIds: [], totalUnits: 1, completedUnits: 0 };
     }
-    return output;
+    return { ...output, ...groups };
   };
   if (input.operation === "statuses") return { ok: true, statuses: await statuses(input.offerIds as string[]) };
   const limit = Number(params!.get("limit") || "50"), offers: any[] = [];

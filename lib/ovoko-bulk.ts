@@ -11,11 +11,13 @@ import { ovokoWriteClient, ovokoWriteDigest } from "./ovoko-write-client";
 import { adjustedOvokoPrice, sameOvokoMoney, validateOvokoAdjustment } from "./ovoko-bulk-price";
 import { matchOvokoFitment, type FitmentRow } from "./ovoko-fitment";
 import { createdPublication, ovokoPublicationPresent } from "./ovoko-publication-presence";
+import { publicationStockMode, readStockPublication, checkStockPublication, stockPublicationResult } from "./ovoko-stock-publication";
 
 type Context = Awaited<ReturnType<typeof accountContext>>;
 export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, context: Context, input: Record<string, unknown>) {
   if (env.OVOKO_PUBLISH_ENABLED !== "true") throw new OvokoError(503, "Publikacja Ovoko jest wylaczona.");
-  if (!["start", "prepare", "item"].includes(String(input.operation)) || Object.keys(input).some(key => !["operation", "offerId", "adjustment", "binding", "notes", "expectedSource", "prepared", "fallbackVehicle", "overrides", "allowTechnicalModel", "manualVehicle"].includes(key))) throw new OvokoError(400, "Nieprawidlowa operacja przenoszenia.");
+  if (!["start", "prepare", "item"].includes(String(input.operation)) || Object.keys(input).some(key => !["operation", "offerId", "adjustment", "binding", "notes", "expectedSource", "prepared", "fallbackVehicle", "overrides", "allowTechnicalModel", "manualVehicle", "stockMode"].includes(key))) throw new OvokoError(400, "Nieprawidlowa operacja przenoszenia.");
+  const stockMode = publicationStockMode(input.stockMode);
   if (input.manualVehicle !== undefined && typeof input.manualVehicle !== "boolean") throw new OvokoError(400, "Nieprawidlowy wybor reczny.");
   if (input.allowTechnicalModel !== undefined && typeof input.allowTechnicalModel !== "boolean") throw new OvokoError(400, "Nieprawidlowy tryb modelu roboczego.");
   const overrides = input.overrides as Record<string, unknown> | undefined;
@@ -46,26 +48,33 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
   const source = ovokoSourcePreview(owned.offer, input.offerId as string, () => input.notes as string);
   const expected = input.expectedSource as Record<string, unknown> | null;
   if (!expected || !sameOvokoMoney(expected.price, source.price) || ["title", "currency", "stock", "status", "condition"].some(key => expected[key] !== source[key as keyof typeof source]) || JSON.stringify(expected.images) !== JSON.stringify(source.images)) throw new OvokoError(409, "Oferta Allegro zmienila sie. Sprawdz dane przed ponownym przeniesieniem.");
-  // Look up the durable source-to-target key before creating even a vehicle record.
-  let existing;
-  try { existing = await context.db(`ovoko_single_publications?ovoko_account=eq.${account}&allegro_seller_id=eq.${owned.sellerId}&allegro_offer_id=eq.${source.id}&owner_id=eq.${context.user.id}&select=state,part_id,request_hash,updated_at,owner_id`); }
-  catch { throw new OvokoError(503, "Nie potwierdzono rejestru przeniesien. Partie zatrzymano."); }
-  if (!Array.isArray(existing) || existing.length > 1) throw new OvokoError(503, "Nieprawidlowy rejestr przeniesien.");
-  if (existing.length) {
-    if (["sending", "uncertain"].includes(existing[0]?.state)) throw new OvokoError(409, "Do sprawdzenia w Ovoko: poprzednia wysylka tej oferty jest rozpoczeta lub niepewna. Nie ponawiamy tej czesci; pozostale pozycje moga isc dalej.", "publication_locked");
-    if (existing[0]?.state !== "created") throw new OvokoError(503, "Nieprawidlowy stan rejestru publikacji. Nie wyslano czesci.");
-    const row = createdPublication(existing[0], context.user.id);
-    if (await ovokoPublicationPresent(ovokoWriteClient(credentials), row.part_id, `tymo:${owned.sellerId}:${source.id}`)) return { ok: true, alreadyCreated: true, partId: row.part_id };
-    // Preparation never releases a journal entry. publishOvokoPart rechecks and atomically reserves it.
-  }
   let price: string;
   try { price = adjustedOvokoPrice(source.price, source.currency, input.adjustment); } catch (error) { throw new OvokoError(400, (error as Error).message); }
   if (input.operation === "item") {
     const prepared = input.prepared as Record<string, unknown> | null;
     const keys = ["brandId", "modelId", "donorId", "categoryId", "qualityId", "statusId", "manufacturerCode", "additionalCodes"];
     if (!prepared || Array.isArray(prepared) || Object.keys(prepared).some(key => !keys.includes(key)) || keys.some(key => typeof prepared[key] !== "string")) throw new OvokoError(400, "Brak przygotowania pozycji. Nie wyslano czesci.");
-    const result = await publishOvokoPart(request, env, context, { ...prepared, offerId: source.id, price, currency: source.currency, notes: source.description, confirmSingle: true, expectedSource: input.expectedSource }, { sellerId: owned.sellerId, fingerprint });
+    // Publication owns the item precheck; do not page a large group twice in one Worker request.
+    const result = await publishOvokoPart(request, env, context, { ...prepared, offerId: source.id, price, currency: source.currency, notes: source.description, confirmSingle: true, expectedSource: input.expectedSource, stockMode }, { sellerId: owned.sellerId, fingerprint });
     return { ...result, price, currency: source.currency };
+  }
+  // Look up the durable source-to-target key before creating even a vehicle record.
+  const stock = await readStockPublication(context, account, owned.sellerId, source.id);
+  if (stock) {
+    checkStockPublication(stock, source.stock, stockMode);
+    if (!stock.units.some(unit => unit.state === "pending")) return stockPublicationResult(stock, undefined, true);
+  }
+  let existing;
+  try { existing = await context.db(`ovoko_single_publications?ovoko_account=eq.${account}&allegro_seller_id=eq.${owned.sellerId}&allegro_offer_id=eq.${source.id}&owner_id=eq.${context.user.id}&select=state,part_id,request_hash,updated_at,owner_id`); }
+  catch { throw new OvokoError(503, "Nie potwierdzono rejestru przeniesien. Partie zatrzymano."); }
+  if (!Array.isArray(existing) || existing.length > 1) throw new OvokoError(503, "Nieprawidlowy rejestr przeniesien.");
+  if (existing.length) {
+    if (stock || source.stock! >= 2) throw new OvokoError(409, "Oferta ma juz pojedyncza publikacje. Nie mozna utworzyc grupy zapasu.", "stock_publication_locked");
+    if (["sending", "uncertain"].includes(existing[0]?.state)) throw new OvokoError(409, "Do sprawdzenia w Ovoko: poprzednia wysylka tej oferty jest rozpoczeta lub niepewna. Nie ponawiamy tej czesci; pozostale pozycje moga isc dalej.", "publication_locked");
+    if (existing[0]?.state !== "created") throw new OvokoError(503, "Nieprawidlowy stan rejestru publikacji. Nie wyslano czesci.");
+    const row = createdPublication(existing[0], context.user.id);
+    if (await ovokoPublicationPresent(ovokoWriteClient(credentials), row.part_id, `tymo:${owned.sellerId}:${source.id}`)) return { ok: true, alreadyCreated: true, partId: row.part_id };
+    // Preparation never releases a journal entry. publishOvokoPart rechecks and atomically reserves it.
   }
   const remote = ovokoWriteClient(credentials), dictionaries: Record<string, OvokoReadRow[]> = {};
   for (const [operation, path] of [["categories", "/get/categories"], ["qualities", "/get/part_quality"], ["statuses", "/get/part_status"], ["brands", "/get/car_brands"]] as const) {

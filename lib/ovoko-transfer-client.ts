@@ -1,5 +1,5 @@
 import { createSupabaseBrowserClient } from "./supabase";
-export type OvokoTransfer = { state: "not_transferred" | "transferred" | "sending" | "uncertain"; partId?: string };
+export type OvokoTransfer = { state: "not_transferred" | "transferred" | "sending" | "uncertain"; partId?: string; partIds?: string[]; totalUnits?: number; completedUnits?: number; stockMode?: "separate" | "shared" };
 export async function ovokoTransferRequest<T>(payload: unknown, signal: AbortSignal): Promise<T> {
   const { data } = await createSupabaseBrowserClient().auth.getSession();
   if (!data.session) throw new Error("Zaloguj sie ponownie.");

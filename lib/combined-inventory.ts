@@ -2,7 +2,7 @@ import type { OvokoReadRow } from "./ovoko-read";
 import type { OvokoTransfer } from "./ovoko-transfer-client";
 
 export type AllegroInventoryRow = { id: string; name: string; image: string; externalId: string; status: string; stock: number | null; sold?: number | null; shippingRateId: string | null; price: { amount: string; currency: string } | null };
-export type CombinedPart = { key: string; name: string; image: string; allegro?: AllegroInventoryRow; ovoko?: OvokoReadRow; conflict: boolean; transfer?: OvokoTransfer };
+export type CombinedPart = { key: string; name: string; image: string; allegro?: AllegroInventoryRow; ovoko?: OvokoReadRow; ovokoUnits?: OvokoReadRow[]; conflict: boolean; transfer?: OvokoTransfer };
 export type CombinedSnapshot = { allegro: AllegroInventoryRow[]; ovoko: OvokoReadRow[]; transfers: Record<string, OvokoTransfer>; sellerId: string; accountEmail?: string; ovokoVerifiedAt?: string; allegroComplete: boolean; ovokoComplete: boolean; allegroTotal: number; ovokoTotal: number; statuses: Record<string, string>; errors: string[]; admin: boolean; checkedAt: string };
 export const emptyCombinedSnapshot = (): CombinedSnapshot => ({ allegro: [], ovoko: [], transfers: {}, sellerId: "", allegroComplete: false, ovokoComplete: false, allegroTotal: 0, ovokoTotal: 0, statuses: {}, errors: [], admin: false, checkedAt: "" });
 
@@ -11,27 +11,67 @@ export function combineInventory(snapshot: CombinedSnapshot): CombinedPart[] {
   const candidates = new Map<string, string[]>(), conflicts = new Set<string>();
   const partTargets = new Map<string, string[]>();
   const journal = new Map<string, string[]>();
-  for (const [offerId, state] of Object.entries(snapshot.transfers)) if (state.state === "transferred" && state.partId && byOffer.has(offerId)) journal.set(state.partId, [...(journal.get(state.partId) || []), offerId]);
+  for (const [offerId, state] of Object.entries(snapshot.transfers)) {
+    if (!byOffer.has(offerId)) continue;
+    for (const id of state.partIds || (state.state === "transferred" && state.partId ? [state.partId] : [])) journal.set(id, [...(journal.get(id) || []), offerId]);
+  }
+  const externalParts = new Map<string, string>();
   for (const part of snapshot.ovoko) {
     const linked = new Set<string>();
     const external = part.externalId?.match(/^tymo:(\d{1,30}):(\d{1,30})$/);
     if (external && external[1] === snapshot.sellerId && byOffer.has(external[2])) linked.add(external[2]);
+    const suffix = part.externalId?.match(/^tymo:(\d{1,30}):(\d{1,30}):(.*)$/);
+    if (suffix && suffix[1] === snapshot.sellerId && byOffer.has(suffix[2])) {
+      linked.add(suffix[2]);
+      const transfer = snapshot.transfers[suffix[2]], ordinal = suffix[3].match(/^u:([1-9]\d*)$/);
+      const prior = externalParts.get(part.externalId!);
+      if (!ordinal || !transfer?.stockMode || Number(ordinal[1]) > (transfer.totalUnits || 0) || !transfer.partIds?.includes(part.id) || prior) {
+        conflicts.add(`a:${suffix[2]}`); conflicts.add(`o:${part.id}`);
+        if (prior) conflicts.add(`o:${prior}`);
+      }
+      externalParts.set(part.externalId!, part.id);
+    }
     for (const offerId of journal.get(part.id) || []) linked.add(offerId);
+    for (const offerId of linked) {
+      const transfer = snapshot.transfers[offerId];
+      if (transfer?.stockMode && (!transfer.partIds?.includes(part.id) || part.externalId && (!suffix || suffix[1] !== snapshot.sellerId || suffix[2] !== offerId || !/^u:[1-9]\d*$/.test(suffix[3])))) {
+        conflicts.add(`a:${offerId}`); conflicts.add(`o:${part.id}`);
+      }
+    }
     const ids = [...linked];
     partTargets.set(part.id, ids);
     for (const offerId of ids) candidates.set(offerId, [...(candidates.get(offerId) || []), part.id]);
   }
   for (const [partId, ids] of partTargets) if (ids.length > 1) { conflicts.add(`o:${partId}`); ids.forEach(id => conflicts.add(`a:${id}`)); }
-  for (const [offerId, ids] of candidates) if (ids.length > 1) { conflicts.add(`a:${offerId}`); ids.forEach(id => conflicts.add(`o:${id}`)); }
+  for (const [offerId, ids] of candidates) {
+    const transfer = snapshot.transfers[offerId];
+    const validGroup = !!transfer?.stockMode && ids.every(id => transfer.partIds?.includes(id));
+    if (ids.length > 1 && !validGroup || conflicts.has(`a:${offerId}`)) { conflicts.add(`a:${offerId}`); ids.forEach(id => conflicts.add(`o:${id}`)); }
+  }
   const used = new Set<string>(), byPart = new Map(snapshot.ovoko.map(row => [row.id, row]));
   const result: CombinedPart[] = snapshot.allegro.map(allegro => {
-    const ids = candidates.get(allegro.id) || [], target = ids.length === 1 ? ids[0] : undefined;
-    const ovoko = target && !conflicts.has(`a:${allegro.id}`) && !conflicts.has(`o:${target}`) ? byPart.get(target) : undefined;
-    if (ovoko) used.add(ovoko.id);
-    return { key: `a:${allegro.id}`, name: allegro.name, image: allegro.image || ovoko?.image || "", allegro, ovoko, conflict: conflicts.has(`a:${allegro.id}`), transfer: snapshot.transfers[allegro.id] };
+    const ids = candidates.get(allegro.id) || [];
+    const units = !conflicts.has(`a:${allegro.id}`) && ids.every(id => !conflicts.has(`o:${id}`)) ? ids.map(id => byPart.get(id)!) : [];
+    const ovoko = units.find(unit => ovokoInStock(unit, snapshot.statuses)) || units[0];
+    units.forEach(unit => used.add(unit.id));
+    return { key: `a:${allegro.id}`, name: allegro.name, image: allegro.image || ovoko?.image || "", allegro, ovoko, ...(snapshot.transfers[allegro.id]?.stockMode ? { ovokoUnits: units } : {}), conflict: conflicts.has(`a:${allegro.id}`), transfer: snapshot.transfers[allegro.id] };
   });
   for (const ovoko of snapshot.ovoko) if (!used.has(ovoko.id)) result.push({ key: `o:${ovoko.id}`, name: ovoko.name, image: ovoko.image || "", ovoko, conflict: conflicts.has(`o:${ovoko.id}`) });
   return result;
+}
+export const isStockGroup = (row: CombinedPart) => !!row.transfer?.stockMode || row.ovokoUnits !== undefined;
+export const stockReservationError = "Rezerwacje grup wielosztukowych (osobnych i wspolnych) nie sa obslugiwane, nawet gdy pozostala jedna sztuka. Wymagaja osobnej rezerwacji jednostek.";
+export function expandInventoryWithdrawal(rows: CombinedPart[], scope: string) {
+  return rows.flatMap(row => {
+    if (row.conflict) throw new Error("Niejednoznaczne powiazanie czesci.");
+    const group = isStockGroup(row);
+    if (group && scope !== "allegro" && (row.transfer?.state !== "transferred" || row.ovokoUnits?.length !== row.transfer.completedUnits)) throw new Error("Nie odczytano calej potwierdzonej grupy Ovoko. Odswiez liste; nie wycofano czesci grupy.");
+    const units = scope === "allegro" ? [undefined] : group ? row.ovokoUnits! : [row.ovoko];
+    return (units.length ? units : [undefined]).map((unit, index) => ({
+      row, partId: unit?.id ?? null, offerId: row.allegro?.id ?? null,
+      targets: [...(index === 0 && row.allegro && scope !== "ovoko" ? ["allegro" as const] : []), ...(unit && scope !== "allegro" ? ["ovoko" as const] : [])],
+    }));
+  });
 }
 export function ovokoInStock(row: OvokoReadRow | undefined, statuses: Record<string, string>) {
   return !!row && ["na stanie", "in stock"].includes((statuses[row.status || ""] || "").trim().toLowerCase());
@@ -83,7 +123,7 @@ export function filterCombinedInventory(rows: CombinedPart[], filter: CombinedFi
     if (filter.coverage === "both" && !(a && o)) return false;
     if (filter.coverage === "allegro" && !(a && !o && oKnown && snapshot.ovokoComplete)) return false;
     if (filter.coverage === "ovoko" && !(o && !a && aKnown && snapshot.allegroComplete)) return false;
-    const haystack = folded([row.name, row.allegro?.id, row.allegro?.externalId, row.ovoko?.id, row.ovoko?.manufacturerCode, row.ovoko?.externalId].join(" "));
+    const haystack = folded([row.name, row.allegro?.id, row.allegro?.externalId, row.ovoko?.id, row.ovoko?.manufacturerCode, row.ovoko?.externalId, ...(row.ovokoUnits || []).flatMap(unit => [unit.id, unit.externalId, unit.manufacturerCode])].join(" "));
     if (folded(filter.query).trim().split(/\s+/).filter(Boolean).some(token => !haystack.includes(token) && !haystack.replace(/[-\s]/g, "").includes(token.replace(/-/g, "")))) return false;
     // The range is always Allegro's source price; never compare an unconfirmed Ovoko currency.
     if (from !== null || to !== null) {

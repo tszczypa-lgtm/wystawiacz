@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 const compiled = ts.transpileModule(readFileSync(new URL("../lib/combined-inventory.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-const { combineInventory, filterCombinedInventory, sortCombinedInventory, emptyCombinedSnapshot } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
+const { combineInventory, filterCombinedInventory, sortCombinedInventory, emptyCombinedSnapshot, expandInventoryWithdrawal, isStockGroup } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
 const a = id => ({ id, name: "Radio ABC123456", image: "same-photo", externalId: "", status: "ACTIVE", stock: 1, price: { amount: "50.00", currency: "PLN" } });
 const o = (id, externalId) => ({ id, name: "Radio", manufacturerCode: "ABC123456", image: "same-photo", externalId, status: "0", price: "100.00" });
 const snapshot = { ...emptyCombinedSnapshot(), sellerId: "555", allegroComplete: true, ovokoComplete: true, statuses: { "0": "Na stanie", "1": "Sprzedano" }, allegro: [a("1"), a("2")], ovoko: [o("10", "tymo:555:1"), o("11", ""), { ...o("12", ""), status: "1" }], transfers: { "2": { state: "transferred", partId: "999" } } };
@@ -42,4 +42,27 @@ assert.deepEqual(filterCombinedInventory(lifecycleRows, { ...filter, lifecycle: 
 assert.deepEqual(filterCombinedInventory(lifecycleRows, { ...filter, lifecycle: "sold" }, snapshot).map(r => r.key), ["sale", "ovoko"]);
 assert.deepEqual(filterCombinedInventory(lifecycleRows, { ...filter, lifecycle: "sold", ovoko: false }, snapshot).map(r => r.key), ["sale"]);
 assert.deepEqual(filterCombinedInventory(lifecycleRows, { ...filter, lifecycle: "available" }, snapshot).map(r => r.key), ["partial"]);
-console.log("Combined inventory: exact links, union/intersection/exclusivity, stale records, OEM isolation, conflicts, partial reads and source-price ranges passed.");
+const separate = { state: "transferred", stockMode: "separate", partIds: ["10", "11"], totalUnits: 2, completedUnits: 2 };
+const multi = { ...snapshot, allegro: [a("1")], ovoko: [{ ...o("10", "tymo:555:1:u:1"), status: "1" }, o("11", "tymo:555:1:u:2")], transfers: { "1": separate } };
+let grouped = combineInventory(multi);
+assert.equal(grouped.length, 1); assert.equal(grouped[0].conflict, false); assert.equal(grouped[0].ovoko.id, "11", "Sold first unit cannot hide available sibling");
+assert.equal(grouped[0].ovokoUnits.length, 2);
+assert.equal(filterCombinedInventory(grouped, filter, multi).length, 1);
+assert.equal(filterCombinedInventory(grouped, { ...filter, query: "10" }, multi).length, 1, "All unit IDs are searchable");
+assert.deepEqual(expandInventoryWithdrawal(grouped, "both").map(j => [j.offerId, j.partId, j.targets]), [["1", "10", ["allegro", "ovoko"]], ["1", "11", ["ovoko"]]]);
+assert.deepEqual(expandInventoryWithdrawal(grouped, "allegro").map(j => j.targets), [["allegro"]]);
+assert.deepEqual(expandInventoryWithdrawal(grouped, "ovoko").map(j => j.targets), [["ovoko"], ["ovoko"]]);
+const partial = { ...multi, ovoko: [multi.ovoko[0]], transfers: { "1": { ...separate, state: "sending", completedUnits: 1, partIds: ["10"] } } };
+grouped = combineInventory(partial); assert.equal(grouped.length, 1); assert.equal(grouped[0].ovokoUnits.length, 1);
+assert.throws(() => expandInventoryWithdrawal(grouped, "both"), /calej potwierdzonej/);
+assert.throws(() => expandInventoryWithdrawal(combineInventory({ ...multi, ovoko: [multi.ovoko[0]] }), "both"), /calej potwierdzonej/);
+for (const unknown of [o("12", "tymo:555:1:u:3"), o("12", "tymo:555:1:u:2"), o("12", "tymo:555:1:u:bad"), o("12", "tymo:555:1"), o("12", "tymo:555:1:unknown")]) {
+  const conflict = combineInventory({ ...multi, ovoko: [...multi.ovoko, unknown] });
+  assert.ok(conflict[0].conflict, unknown.externalId); assert.equal(conflict[0].ovokoUnits.length, 0);
+}
+const overlap = combineInventory({ ...multi, allegro: [a("1"), a("2")], transfers: { ...multi.transfers, "2": { state: "transferred", partId: "10" } } });
+assert.ok(overlap[0].conflict); assert.ok(overlap[1].conflict);
+const shared = combineInventory({ ...multi, ovoko: [o("10", "tymo:555:1:u:1")], transfers: { "1": { ...separate, stockMode: "shared", totalUnits: 1, completedUnits: 1, partIds: ["10"] } } });
+assert.equal(shared.length, 1); assert.ok(isStockGroup(shared[0]), "Shared group remains a group with stock one and listing one");
+assert.deepEqual(expandInventoryWithdrawal(shared, "both").map(j => j.targets), [["allegro", "ovoko"]]);
+console.log("Combined inventory: legacy links, separate/shared groups, partial journals, representative availability, conflicts, bulk expansion and filters passed.");
