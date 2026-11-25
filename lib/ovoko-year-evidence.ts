@@ -3,7 +3,7 @@ import { ovokoSourcePreview, type OvokoSourcePreview } from "./ovoko-preparation
 import type { OvokoReadRow } from "./ovoko-read";
 import { automaticOvokoModel, ovokoModelHasConflict, suggestOvokoBrands, suggestPartNumbers, vehicleSuggestionText } from "./ovoko-suggestions";
 
-export type YearEvidence = { year: string; reason: string; technical: true; source: "allegro-fitment" | "allegro-offer" | "ovoko-part"; sourceUrl?: string };
+export type YearEvidence = { year: string; reason: string; technical: true; source: "allegro-fitment" | "allegro-offer" | "ovoko-part" | "web-search"; sourceUrl?: string };
 type Client = (path: string) => Promise<Record<string, unknown>>;
 type Input = { source: OvokoSourcePreview; number: string; brand: OvokoReadRow; model: OvokoReadRow; models: OvokoReadRow[]; fitmentRows?: FitmentRow[]; allegro: Client; ovoko: Client };
 const object = (value: unknown): Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};

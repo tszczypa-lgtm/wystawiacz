@@ -6,7 +6,7 @@ import ts from "typescript";
 const root=fileURLToPath(new URL("../lib/",import.meta.url)), cache=new Map();
 let number="5G0907044BF",catalog=true,manual=false,sourceTitle="",created=[],calls=[];
 const source=()=>({id:"101",name:sourceTitle,category:{id:"cat"},parameters:[{id:"11323",name:"Stan",values:["Uzywany"],valuesIds:["11323_2"]}],stock:{available:1},publication:{status:"ACTIVE"},productSet:[{quantity:{value:1},product:{parameters:[{name:"Numer katalogowy czesci",values:[number]}]}}],images:["https://a.allegroimg.com/photo.jpg"],sellingMode:{price:{amount:"50.00",currency:"PLN"}}});
-const brands=[{id:"2",name:"Volkswagen"}], models=[{id:"21",brand:"2",name:"Golf V",years:" - "},{id:"22",brand:"2",name:"Golf VII",years:" - "}];
+const brands=[{id:"2",name:"Volkswagen"}], models=[{id:"21",brand:"2",name:"Golf V",years:" - "},{id:"22",brand:"2",name:"Golf VII",years:" - "},{id:"23",brand:"2",name:"Touran III",years:" - "}];
 const remote=async p=>{
  calls.push(p);
  if(p==="/get/categories")return{list:[{id:"3",pl:"Panel sterowania klimatyzacji",level:3,parent_id:0}]};
@@ -66,4 +66,17 @@ manual=true;sourceTitle=`PANEL VOLKSWAGEN GOLF 5 ${number}`;created=[];calls=[];
 const result=await bulkOvokoPart(request,{OVOKO_PUBLISH_ENABLED:"true"},{user:{id:String(++owner)},db:async()=>[]},{operation:"prepare",offerId:"101",binding:{sellerId:"555",fingerprint:"fingerprint"},notes:"",overrides:{categoryId:"3"},adjustment:{mode:"none",value:"0"},manualVehicle:manual,fallbackVehicle:{brandId:"2",modelId:"21",year:"2005"},expectedSource:{title:sourceTitle,price:"50.00",currency:"PLN",stock:1,status:"ACTIVE",condition:"used",images:["https://a.allegroimg.com/photo.jpg"]}});
 assert.equal(result.prepared.modelId,"21");assert.equal(created[0].year,"2005");
 assert.equal(calls.some(p=>p.startsWith("/api/allegro/ovoko-fitment/")),false);
+// Last-resort web search may replace the initial Golf with a sourced Touran.
+const originalFetch=globalThis.fetch;let charged=0;
+globalThis.fetch=async(url,options)=>{
+ assert.equal(url,"https://api.openai.com/v1/responses");charged++;const request=JSON.parse(options.body);
+ assert.equal(JSON.parse(request.input).manufacturerNumber,"5G0907044CH");
+ const sourceUrl="https://ovoko.fr/les-pieces/test-5g0907044ch-touran-iii";
+ return Response.json({status:"completed",output:[{type:"web_search_call",status:"completed",action:{type:"search",sources:[{url:sourceUrl}]}},{type:"message",status:"completed",content:[{type:"output_text",annotations:[],text:JSON.stringify({number:"5G0907044CH",matches:[{number:"5G0907044CH",make:"Volkswagen",model:"Touran III",year:"2019",sourceUrl,evidence:"5G0907044CH Volkswagen Touran III 2019"}]})}]}]});
+};
+try{
+ catalog=false;number="5G0907044CH";sourceTitle=`PANEL VOLKSWAGEN GOLF 5 ${number}`;created=[];
+ const answer=await bulkOvokoPart(request,{OVOKO_PUBLISH_ENABLED:"true",OPENAI_API_KEY:"fake-key"},{user:{id:String(++owner)},db:async()=>[]},{operation:"prepare",offerId:"101",binding:{sellerId:"555",fingerprint:"fingerprint"},notes:"",overrides:{categoryId:"3"},adjustment:{mode:"none",value:"0"},expectedSource:{title:sourceTitle,price:"50.00",currency:"PLN",stock:1,status:"ACTIVE",condition:"used",images:["https://a.allegroimg.com/photo.jpg"]}});
+ assert.equal(charged,1);assert.equal(answer.prepared.modelId,"23");assert.equal(created[0].year,"2019");assert.equal(answer.vehicle.yearSource,"web-search");assert.match(answer.vehicle.sourceUrl,/^https:\/\/ovoko.fr\//);
+}finally{globalThis.fetch=originalFetch;}
 console.log("OE priority: full BF/CH code lookup despite recognized title, numeric/Roman generation, exact-catalogue model override, catalogue year range, one lookup and manual selection passed. Providers mocked; no live publication.");

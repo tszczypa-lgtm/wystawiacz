@@ -8,6 +8,7 @@ import { OvokoError, parseOvokoRead } from "./ovoko-read";
 import { ovokoAutomaticFields } from "./ovoko-suggestions";
 import { ovokoWriteClient, ovokoWriteDigest } from "./ovoko-write-client";
 import { suggestOvokoYearEvidence, type YearEvidence } from "./ovoko-year-evidence";
+import { lookupWebFitment, selectWebVehicle } from "./ovoko-web-fitment";
 
 type Data = Record<string, unknown>;
 const cache = new Map<string, { until: number; evidence: YearEvidence | null }>();
@@ -56,5 +57,9 @@ export async function ovokoYearSuggestion(request: Request, env: OvokoPublishEnv
   if (!brand || typeof brand.name !== "string" || brand.name.length > 200) throw new OvokoError(400, "Nie potwierdzono wybranej marki.");
   const fingerprint = await ovokoWriteDigest(JSON.stringify(credentials));
   const evidence = await cachedOvokoYearEvidence(`${context.user.id}:${owned.sellerId}:${fingerprint}:${source.id}:${source.categoryId}:${number}:${input.brandId}:${model.id}`, { source, number, brand: { id: String(brand.id), name: brand.name }, model, models, allegro: yearAllegroReader(request, env), ovoko: remote });
-  return { ...reply, year: "", reason: "Brak pasujacego roku w dostepnych ofertach. Podaj rok recznie.", ...evidence };
+  if (evidence) return { ...reply, ...evidence };
+  const web = await lookupWebFitment(env, context.user.id, number, brand.name);
+  const matched = await selectWebVehicle(web.matches, [{id:String(brand.id),name:brand.name}], [String(brand.id)], async()=>models, model.id);
+  if (matched) return { ...reply, year: matched.year, reason: `Internet / OpenAI: pelny numer ${number}, ${matched.make} ${matched.model}, rok techniczny ${matched.year}. Publiczna oferta, nie potwierdza rocznika dawcy ani pelnej zgodnosci.`, source: "web-search", sourceUrl: matched.sourceUrl, ...(matched.modelId !== model.id ? { vehicleSuggestion: {brandId:matched.brandId,modelId:matched.modelId,year:matched.year} } : {}) };
+  return { ...reply, year: "", reason: web.message || "Internet znalazl dane, ale modelu nie mozna jednoznacznie przypisac do slownika Ovoko. Podaj rok recznie." };
 }

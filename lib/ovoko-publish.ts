@@ -11,7 +11,7 @@ import { createdPublication, ovokoPublicationPresent, publicationCas, type Creat
 import { publicationStockMode, readStockPublication, checkStockPublication, stockPublicationResult, prepareStockPublication, publishStockUnit } from "./ovoko-stock-publication";
 
 type Context = Awaited<ReturnType<typeof accountContext>>;
-export type OvokoPublishEnv = AccountEnv & OvokoKeyEnv & Parameters<typeof handleAllegroApi>[1] & { OVOKO_PUBLISH_ENABLED?: string };
+export type OvokoPublishEnv = AccountEnv & OvokoKeyEnv & Parameters<typeof handleAllegroApi>[1] & { OVOKO_PUBLISH_ENABLED?: string; OPENAI_API_KEY?: string; OVOKO_WEB_YEAR_ENABLED?: string; OVOKO_WEB_YEAR_MODEL?: string };
 function text(input: Record<string, unknown>, key: string, pattern: RegExp, max = 255) {
   const value = input[key];
   if (typeof value !== "string" || !value || value.length > max || !pattern.test(value)) throw new OvokoError(400, `Sprawdz pole ${key}.`);

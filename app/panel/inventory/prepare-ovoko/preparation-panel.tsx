@@ -54,6 +54,7 @@ export function OvokoPreparationPanel({ popup=false }: { popup?:boolean }) {
   const currentEvidenceBinding = useRef(evidenceBinding);
   currentEvidenceBinding.current = evidenceBinding;
   const evidence = yearEvidence?.binding === evidenceBinding ? yearEvidence : null;
+  const hasYearEvidence = !!evidence?.year;
   const yearSuggestion = sourceYearSuggestion.year ? sourceYearSuggestion : evidence?.year ? evidence : sourceYearSuggestion;
   const manualYearValid = manualCarYear.current.binding === carYearBinding && manualCarYear.current.touched && /^\d{4}$/.test(carYear) && Number(carYear) >= 1886 && Number(carYear) <= new Date().getUTCFullYear() + 1;
   const yearLookupPending = !!evidence?.pending;
@@ -180,7 +181,7 @@ export function OvokoPreparationPanel({ popup=false }: { popup?:boolean }) {
   }, [carYearBinding, yearSuggestion.year]);
   useEffect(() => {
     const controller = new AbortController();
-    if (busy || !source || !brandId || !modelId || modelsBusy || !dictionaries.models?.some(row => row.id === modelId) || sourceYearSuggestion.year || carsReadBinding !== carsBinding || carsBusy || carsError || preferredOvokoCar(dictionaries.cars || [], "") || draft?.donorId || manualYearValid) {
+    if (busy || !source || !brandId || !modelId || modelsBusy || !dictionaries.models?.some(row => row.id === modelId) || sourceYearSuggestion.year || hasYearEvidence || carsReadBinding !== carsBinding || carsBusy || carsError || preferredOvokoCar(dictionaries.cars || [], "") || draft?.donorId || manualYearValid) {
       setYearEvidence(previous => previous?.binding === evidenceBinding && !previous.pending && !sourceYearSuggestion.year ? previous : null);
       return () => controller.abort();
     }
@@ -192,19 +193,29 @@ export function OvokoPreparationPanel({ popup=false }: { popup?:boolean }) {
         if (controller.signal.aborted || currentEvidenceBinding.current !== binding) return;
         if (!data.session) throw new Error("Zaloguj sie ponownie.");
         const response = await fetch("/api/ovoko/year-suggestion", { method: "POST", signal: controller.signal, cache: "no-store", headers: { Authorization: `Bearer ${data.session.access_token}`, "Content-Type": "application/json" }, body: JSON.stringify({ offerId: source.id, brandId, modelId, ...(draft?.manufacturerCode ? { number: draft.manufacturerCode } : {}) }) });
-        const result = await response.json() as { ok?: boolean; readOnly?: boolean; offerId?: string; brandId?: string; modelId?: string; number?: string; year?: string; reason?: string; technical?: boolean; sourceUrl?: string; message?: string };
+        const result = await response.json() as { ok?: boolean; readOnly?: boolean; offerId?: string; brandId?: string; modelId?: string; number?: string; year?: string; reason?: string; technical?: boolean; sourceUrl?: string; message?: string; vehicleSuggestion?: {brandId?:string;modelId?:string;year?:string} };
         if (controller.signal.aborted || currentEvidenceBinding.current !== binding) return;
         if (!response.ok) throw new Error(result.message || "Nie udalo sie wyszukac roku.");
         if (result.ok !== true || result.readOnly !== true || result.technical !== true || result.offerId !== source.id || result.brandId !== brandId || result.modelId !== modelId || typeof result.year !== "string" || typeof result.reason !== "string" || (result.year !== "" && (!/^\d{4}$/.test(result.year) || Number(result.year) < 1886 || Number(result.year) > new Date().getUTCFullYear() + 1))) throw new Error("Niepotwierdzony format podpowiedzi roku.");
         let sourceUrl: string | undefined;
         try { const url = new URL(result.sourceUrl || ""); if (url.protocol === "https:" && !url.username && !url.password) sourceUrl = url.href; } catch { /* Optional evidence link only. */ }
+        if (result.vehicleSuggestion) {
+          const selected=result.vehicleSuggestion;
+          if (selected.brandId!==brandId || !dictionaries.models?.some(row=>row.id===selected.modelId) || selected.year!==result.year) throw new Error("Niepotwierdzony model z wyszukiwania internetowego.");
+          if (touched.current.has("modelId") || manualCarYear.current.binding===carYearBinding && manualCarYear.current.touched) {
+            setYearEvidence({binding,pending:false,year:"",reason:`${result.reason} Reczny model pozostawiono bez zmian.`,technical:true,sourceUrl}); return;
+          }
+          const nextBinding=JSON.stringify([JSON.stringify([source.id,brandId,selected.modelId]),draft?.manufacturerCode||""]);
+          setModelId(selected.modelId!);
+          setYearEvidence({binding:nextBinding,pending:false,year:result.year,reason:result.reason,technical:true,sourceUrl}); return;
+        }
         setYearEvidence({ binding, pending: false, year: result.year, reason: result.reason, technical: true, sourceUrl });
       } catch (error) {
         if (!controller.signal.aborted && currentEvidenceBinding.current === binding) setYearEvidence({ binding, pending: false, year: "", reason: error instanceof Error ? error.message : "Nie udalo sie wyszukac roku.", technical: true });
       }
     })();
     return () => controller.abort();
-  }, [busy, source, brandId, modelId, modelsBusy, dictionaries.models, sourceYearSuggestion.year, carsReadBinding, carsBinding, carsBusy, carsError, dictionaries.cars, draft?.donorId, draft?.manufacturerCode, manualYearValid, evidenceBinding]);
+  }, [busy, source, brandId, modelId, modelsBusy, dictionaries.models, sourceYearSuggestion.year, hasYearEvidence, carsReadBinding, carsBinding, carsBusy, carsError, dictionaries.cars, draft?.donorId, draft?.manufacturerCode, manualYearValid, evidenceBinding, carYearBinding]);
   useEffect(() => { setReview(false); }, [brandId, modelId]);
   function change(name: keyof OvokoPreparationDraft, value: string) {
     setReview(false);
@@ -378,7 +389,7 @@ export function OvokoPreparationPanel({ popup=false }: { popup?:boolean }) {
           {dictionaryBusy && <p role="status" className="text-sm text-violet-200">Dopasowuje slowniki Ovoko...</p>}
           <div className="space-y-3 rounded-xl border border-violet-400/30 p-3"><h3 className="text-sm font-bold">Samochod - marka i model</h3>
             <label className="block text-sm">Marka auta Ovoko<select aria-label="Marka auta Ovoko" className={field} value={brandId} onChange={event => { touched.current.add("brandId"); setBrandId(event.target.value); }}><option value="">Wybierz marke</option>{(dictionaries.brands || []).map(row => <option key={row.id} value={row.id}>{row.name}{brandSuggestions.some(item => item.id === row.id) ? " - z tytulu" : ""}</option>)}</select></label>
-            <label className="block text-sm">Model auta Ovoko<select aria-label="Model auta Ovoko" className={field} value={modelId} disabled={!brandId || modelsBusy} onChange={event => setModelId(event.target.value)}><option value="">{modelsBusy ? "Dopasowuje modele..." : "Wybierz model"}</option>{modelSuggestions.length > 0 && <optgroup label="Pasujace slowa z tytulu">{modelSuggestions.map(row => <option key={row.id} value={row.id}>{row.name} {row.years}</option>)}</optgroup>}<optgroup label="Wszystkie modele marki">{(dictionaries.models || []).filter(row => !modelSuggestions.some(item => item.id === row.id)).map(row => <option key={row.id} value={row.id}>{row.name} {row.years}</option>)}</optgroup></select></label>
+            <label className="block text-sm">Model auta Ovoko<select aria-label="Model auta Ovoko" className={field} value={modelId} disabled={!brandId || modelsBusy} onChange={event => { touched.current.add("modelId"); setModelId(event.target.value); }}><option value="">{modelsBusy ? "Dopasowuje modele..." : "Wybierz model"}</option>{modelSuggestions.length > 0 && <optgroup label="Pasujace slowa z tytulu">{modelSuggestions.map(row => <option key={row.id} value={row.id}>{row.name} {row.years}</option>)}</optgroup>}<optgroup label="Wszystkie modele marki">{(dictionaries.models || []).filter(row => !modelSuggestions.some(item => item.id === row.id)).map(row => <option key={row.id} value={row.id}>{row.name} {row.years}</option>)}</optgroup></select></label>
             {!modelsBusy && modelSuggestions.length > 0 && <p role="status" className="text-xs text-violet-200">Rozpoznano pasujace warianty: {modelSuggestions.length}. {modelId ? "Wybrano najlepiej dopasowana robocza propozycje; przy remisie wybor jest staly. Sprawdz ja w podsumowaniu. Pozostale warianty sa na gorze listy." : "Brak zgodnej generacji do automatycznego wyboru. Sprawdz propozycje na gorze listy."}</p>}
             <p className="text-xs text-white/60">Podpowiedz z tytulu, nie potwierdzenie zgodnosci po numerze OE. Model to nie konkretne auto-dawca. Przy kilku generacjach wybierz wlasciwa.</p>{modelError && <p role="alert" className="text-sm text-amber-200">{modelError}</p>}
           </div>

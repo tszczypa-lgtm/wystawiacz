@@ -14,6 +14,7 @@ import { createdPublication, ovokoPublicationPresent } from "./ovoko-publication
 import { publicationStockMode, readStockPublication, checkStockPublication, stockPublicationResult } from "./ovoko-stock-publication";
 import { cachedOvokoYearEvidence, yearAllegroReader } from "./ovoko-year-suggestion";
 import type { YearEvidence } from "./ovoko-year-evidence";
+import { lookupWebFitment, selectWebVehicle } from "./ovoko-web-fitment";
 
 type Context = Awaited<ReturnType<typeof accountContext>>;
 export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, context: Context, input: Record<string, unknown>) {
@@ -166,22 +167,35 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
     const technical = [...models].sort((a, b) => a.id.localeCompare(b.id, "en", { numeric: true })).find(row => !ovokoModelHasConflict(vehicleText, row) && ovokoCarYear(source, row).year);
     if (technical) { modelId = technical.id; fitmentOrigin = "technical"; }
   }
-  const model = models.find(row => row.id === modelId);
+  let model = models.find(row => row.id === modelId);
   const yearSource = exactVehicleText ? { ...source, title: exactVehicleText, description: "", parameters: [] } : source;
   let year = input.manualVehicle === true && fallback?.year ? fallback.year : ovokoCarYear(yearSource, model).year;
   let savedCar: OvokoReadRow | undefined;
   if (model && !year) savedCar = parseOvokoRead("cars", await remote(`/v2/get/cars?model_ids=${modelId}&page=1&limit=20`), modelId).rows[0];
   let yearEvidence: YearEvidence | null = null;
   const lookupNumber = draft.manufacturerCode.replace(/-/g, "");
-  const brand = dictionaries.brands.find(row => row.id === brandId);
+  let brand = dictionaries.brands.find(row => row.id === brandId);
   if (model && brand && !year && !savedCar && lookupNumber) {
     try {
       yearEvidence = await cachedOvokoYearEvidence(`${context.user.id}:${owned.sellerId}:${fingerprint}:${source.id}:${source.categoryId}:${lookupNumber}:${brandId}:${modelId}`, { source: yearSource, number: lookupNumber, brand, model, models, fitmentRows, allegro: yearAllegroReader(request, env), ovoko: remote });
       year = yearEvidence?.year || "";
     } catch { /* Missing optional evidence never invents a year or stops unrelated batch rows. */ }
   }
+  let webMessage = "";
+  const readyForVehicleLookup = ovokoPublicationBlockers(source, draft, brandId || "1", modelId || "1").length === 0;
+  if (input.manualVehicle !== true && lookupNumber && readyForVehicleLookup && (!model || !year && !savedCar || fitmentOrigin === "technical")) {
+    const web = await lookupWebFitment(env, context.user.id, lookupNumber, brand?.name);
+    const matched = await selectWebVehicle(web.matches, dictionaries.brands, allowedBrands.map(row => row.id), loadModels, modelId);
+    if (matched) {
+      brandId = matched.brandId; modelId = matched.modelId; models = await loadModels(brandId);
+      model = models.find(row => row.id === modelId); brand = dictionaries.brands.find(row => row.id === brandId);
+      year = matched.year; savedCar = undefined; usedFallback = false; fitmentOrigin = "web";
+      exactVehicleText = "";
+      yearEvidence = { year, technical: true, source: "web-search", sourceUrl: matched.sourceUrl, reason: `Internet / OpenAI: pelny numer ${lookupNumber}, ${matched.make} ${matched.model}, rok techniczny ${year}. Publiczna oferta, nie potwierdza rocznika dawcy ani pelnej zgodnosci.` };
+    } else webMessage = web.message || "Internet znalazl dane, ale nie udalo sie jednoznacznie przypisac modelu do slownika Ovoko.";
+  }
   const blockers = ovokoPublicationBlockers(source, draft, brandId, modelId);
-  if (!model || !year && !savedCar) blockers.push(model ? "Wybrano model, ale slownik nie podaje roku i nie ma zapisanego auta. Podaj rok w uzupelnieniu tej pozycji." : "Nie rozpoznano modelu. Wybierz model ponizej; kategoria i cena zostaja bez zmian.");
+  if (!model || !year && !savedCar) blockers.push((model ? "Wybrano model, ale nie znaleziono roku dla pelnego numeru czesci. Podaj rok w uzupelnieniu tej pozycji." : "Nie rozpoznano modelu. Wybierz model ponizej; kategoria i cena zostaja bez zmian.") + (webMessage ? ` ${webMessage}` : ""));
   const category = dictionaries.categories.find(row => row.id === draft.categoryId);
   const categoryNames: string[] = []; let current = category;
   for (let i = 0; current && i < 4; i++) { categoryNames.push(current.name); current = dictionaries.categories.find(row => row.id === current!.parentId); }
@@ -191,6 +205,6 @@ export async function bulkOvokoPart(request: Request, env: OvokoPublishEnv, cont
   try { car = savedCar ? { carId: savedCar.id } : await createOvokoCar(request, env, context, { brandId, modelId, year, confirmCreate: true }, fingerprint); }
   catch (e) { if (e instanceof OvokoError && e.code === "vehicle_creation_locked") e.repair = { needsVehicle: false, needsCategory: false, brandId, categoryId: draft.categoryId, vehicle: { brandId, modelId, year } }; throw e; }
   // Separate preparation (including car reuse/create) from part publication to bound Worker subrequests.
-  const modelEvidence = exactVehicleText ? `Katalog Allegro - pelny MPN ${lookupNumber}; dopasowanie: ${exactVehicleText}` : fitmentOrigin === "manual" ? "Wybor reczny" : fitmentOrigin === "technical" ? "Model roboczy marki - zgodnosc niepotwierdzona" : fitmentOrigin ? fitmentOrigin.startsWith("catalog") ? "Katalog Allegro - pelny MPN" : "Pasuje do Allegro" : "Dane oferty";
-  return { ok: true, category: { id: draft.categoryId, name: categoryNames.slice().reverse().join(" / ") }, vehicle: { brand: brand?.name || brandId, model: model!.name, usedFallback, evidence: `${modelEvidence}${yearEvidence ? `. ${yearEvidence.reason}` : ""}`, ...(yearEvidence ? { year, yearSource: yearEvidence.source } : {}) }, prepared: { brandId, modelId, donorId: car.carId, categoryId: draft.categoryId, qualityId: draft.qualityId, statusId: draft.statusId, manufacturerCode: draft.manufacturerCode, additionalCodes: draft.additionalCodes || "" }, price, currency: source.currency };
+  const modelEvidence = exactVehicleText ? `Katalog Allegro - pelny MPN ${lookupNumber}; dopasowanie: ${exactVehicleText}` : fitmentOrigin === "web" ? "Wyszukiwanie internetowe pelnego numeru" : fitmentOrigin === "manual" ? "Wybor reczny" : fitmentOrigin === "technical" ? "Model roboczy marki - zgodnosc niepotwierdzona" : fitmentOrigin ? fitmentOrigin.startsWith("catalog") ? "Katalog Allegro - pelny MPN" : "Pasuje do Allegro" : "Dane oferty";
+  return { ok: true, category: { id: draft.categoryId, name: categoryNames.slice().reverse().join(" / ") }, vehicle: { brand: brand?.name || brandId, model: model!.name, usedFallback, evidence: `${modelEvidence}${yearEvidence ? `. ${yearEvidence.reason}` : ""}`, ...(yearEvidence ? { year, yearSource: yearEvidence.source, sourceUrl: yearEvidence.sourceUrl } : {}) }, prepared: { brandId, modelId, donorId: car.carId, categoryId: draft.categoryId, qualityId: draft.qualityId, statusId: draft.statusId, manufacturerCode: draft.manufacturerCode, additionalCodes: draft.additionalCodes || "" }, price, currency: source.currency };
 }

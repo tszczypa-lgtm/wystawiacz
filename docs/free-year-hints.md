@@ -1,5 +1,43 @@
 # Free technical year hints
 
+## Optional OpenAI Internet Fallback
+
+With the owner's cost approval, a missing model/year now falls back to OpenAI
+Responses API web search. This path is paid, unlike the account/catalogue reads
+below. It uses the server-side `OPENAI_API_KEY`; no key is sent to the browser.
+It is enabled when that key exists unless `OVOKO_WEB_YEAR_ENABLED=false` is set.
+`BETA_AI_ENABLED` does not govern this inventory feature.
+
+Default model: `gpt-5.4-mini`, configurable via `OVOKO_WEB_YEAR_MODEL`. The provider
+request forces web search and a structured response, uses at most two tool calls,
+and has a 55-second timeout. Only the complete public part number and a make hint
+are transmitted, not user identities, photos, prices, stock or offer descriptions.
+
+A match needs the exact code including its suffix, model, year, and an HTTPS URL
+present among the actual search sources/citations. Unsupported models and years
+outside Ovoko's dictionary range are rejected. A public seller example is marked
+as a technical year, never a verified donor year or universal compatibility claim.
+Web evidence can replace the initially guessed model; manual choices are retained.
+Both single-offer and bulk screens display a clickable source.
+
+Identical in-flight requests coalesce. Positive results are cached for seven days
+in the Worker Cache API and local memory, scoped to owner, number, provider key
+and model. Empty results cache for 30 minutes; errors for five minutes. No automatic
+provider retry is performed. The 200-new-lookups/hour limit is an isolate-local
+abuse guard, NOT a global financial spending cap. Cache eviction, another Cloudflare
+location or simultaneous isolates can cause another paid call. Set the OpenAI
+project budget/alerts separately and use the feature flag as a kill switch.
+
+Deployment needs no SQL or new Cloudflare binding. Confirm `OPENAI_API_KEY` exists
+on the deployed Worker and that its OpenAI project has Responses/web-search access
+and funded API billing. The local tests mock OpenAI; they are not a live provider
+or billing verification. Relevant provider documentation:
+
+- https://developers.openai.com/api/docs/guides/tools-web-search
+- https://developers.openai.com/api/docs/models/gpt-5.4-mini
+
+## Account-Scoped Free Hints
+
 No database migration or paid catalogue key is required.
 
 Bulk preparation checks the full manufacturer code even when a title already

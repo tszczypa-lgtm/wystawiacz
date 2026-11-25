@@ -14,7 +14,7 @@ import { resolveManualOvokoOverride, ManualOverrideClientError } from "@/lib/ovo
 
 export type BulkOffer = { id: string; name: string; price: { amount: string; currency: string } | null };
 type StockMode = "shared" | "separate";
-type Job = { id: string; name: string; price: string; currency: string; state: "waiting" | "sending" | "done" | "skipped" | "error"; message: string; retryable: boolean; code?: string; repair?: OvokoRepairHint; rule: OvokoPriceAdjustment; technical: boolean; stockMode: StockMode; multiStock?: boolean; completedUnits?: number; totalUnits?: number };
+type Job = { id: string; name: string; price: string; currency: string; state: "waiting" | "sending" | "done" | "skipped" | "error"; message: string; retryable: boolean; code?: string; repair?: OvokoRepairHint; rule: OvokoPriceAdjustment; technical: boolean; stockMode: StockMode; multiStock?: boolean; completedUnits?: number; totalUnits?: number; sourceUrl?: string };
 function vehicleKey(job: Job) {
   const vehicle = job.repair?.vehicle;
   return job.state === "error" && job.code === "vehicle_creation_locked" && vehicle?.brandId && vehicle.modelId && /^[12]\d{3}$/.test(vehicle.year) ? `${vehicle.brandId}:${vehicle.modelId}:${vehicle.year}` : "";
@@ -70,7 +70,7 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
   async function transfer(offer: BulkOffer, rule: OvokoPriceAdjustment, session: Binding, useTechnical: boolean, selectedStockMode: StockMode, fallback?: FallbackVehicle, overrides?: OvokoCorrections, manualVehicle = false): Promise<boolean> {
     // The same pace applies to the batch and explicit one-row corrections.
     if (!await waitForTransferSlot(lastAttempt, stop)) return false;
-    update(offer.id, { state: "sending", message: "Sprawdzam i przenosze..." });
+    update(offer.id, { state: "sending", message: "Sprawdzam model i rok. Gdy brakuje danych, wyszukiwanie internetowe moze potrwac do minuty...", sourceUrl: undefined });
     try { adjustedOvokoPrice(offer.price?.amount || "", offer.price?.currency || "", rule); } catch (error) { throw new OvokoBulkClientError((error as Error).message, 400); }
     const owned = await allegroRequest<{ offer: unknown; sellerId: string }>(`/ovoko-source/${offer.id}`);
     const source = ovokoSourcePreview(owned.offer, offer.id, offerDescriptionText);
@@ -79,7 +79,8 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
     if (!sameOvokoMoney(source.price, offer.price?.amount) || source.currency !== offer.price?.currency) throw new OvokoBulkClientError(`Cena Allegro zmienila sie od zaznaczenia (${offer.price?.amount} ${offer.price?.currency} -> ${source.price} ${source.currency}). Odswiez oferte.`, 400);
     if (stop.current) { update(offer.id, { state: "waiting", message: "Nie wyslano" }); return false; }
     const item = { offerId: offer.id, binding: session, adjustment: rule, stockMode: selectedStockMode, notes: source.description, expectedSource: { title: source.title, price: source.price, currency: source.currency, stock: source.stock, status: source.status, condition: source.condition, images: source.images } };
-    const preparation = await ovokoBulkRequest<Outcome & { category?: { id: string; name: string }; vehicle?: { brand: string; model: string; usedFallback: boolean; evidence?: string } }>({ ...item, operation: "prepare", allowTechnicalModel: useTechnical, ...(fallback ? { fallbackVehicle: fallback } : {}), ...(manualVehicle ? { manualVehicle: true } : {}), ...(overrides ? { overrides } : {}) });
+    const preparation = await ovokoBulkRequest<Outcome & { category?: { id: string; name: string }; vehicle?: { brand: string; model: string; usedFallback: boolean; evidence?: string; sourceUrl?: string } }>({ ...item, operation: "prepare", allowTechnicalModel: useTechnical, ...(fallback ? { fallbackVehicle: fallback } : {}), ...(manualVehicle ? { manualVehicle: true } : {}), ...(overrides ? { overrides } : {}) });
+    try { const sourceUrl = new URL(preparation.vehicle?.sourceUrl || ""); if (sourceUrl.protocol === "https:" && !sourceUrl.username && !sourceUrl.password) update(offer.id, {sourceUrl:sourceUrl.href}); } catch { /* Optional citation only. */ }
     if (!preparation.alreadyCreated && stop.current) { update(offer.id, { state: "waiting", message: "Auto przygotowane. Czesc nie zostala wyslana." }); return false; }
     // Never cancel, repeat or unlock an uncertain write.
     let result = preparation;
@@ -220,6 +221,7 @@ export function OvokoBulkPanel({ offers, onFinished }: { offers: BulkOffer[]; on
     {!!jobs.length && <div className="max-h-[calc(100vh-330px)] min-h-48 divide-y divide-white/10 overflow-auto rounded border border-white/10 text-sm" aria-live="polite">{jobs.map(job => <div key={job.id} className="px-2 py-1.5" data-offer-id={job.id}>
       <div className="flex items-start justify-between gap-3"><a href={`/panel/inventory/prepare-ovoko?offerId=${job.id}`} target="_blank" rel="noopener noreferrer" className="min-w-0 font-semibold underline">{job.name}</a><span className="shrink-0 whitespace-nowrap text-xs text-white/70">{job.state === "skipped" ? "Cena istniejacej czesci bez zmian." : `${job.state === "done" ? "Cena wyslana" : "Cena planowana"}: ${job.price} ${job.currency}`}</span></div>
       <p className={`text-xs leading-5 ${job.state === "done" || job.state === "skipped" ? "text-emerald-300" : job.state === "error" ? "text-amber-200" : "text-white/60"}`}>{job.message}</p>
+      {job.sourceUrl && <a href={job.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-emerald-200 underline">Zrodlo modelu i roku</a>}
       {job.retryable && <OvokoJobRepair key={`${job.id}:${JSON.stringify(job.repair)}`} id={job.id} hint={job.repair} disabled={running || recovering} onTransfer={(vehicle, corrections) => void retry(job, vehicle, corrections)} />}
       {job.state === "error" && !job.multiStock && !job.code?.startsWith("stock_") && <>
         {running && <p className="text-xs text-white/60">{queuedRecovery.includes(job.id) ? "Auto w kolejce do odblokowania." : vehicleKey(job) ? "Uzyj Odblokuj auta z bledow nad lista; pozostale pozycje ida dalej." : "Reczne poprawienie dostepne po zakonczeniu lub zatrzymaniu partii."}</p>}
